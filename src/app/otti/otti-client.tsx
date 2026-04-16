@@ -90,26 +90,31 @@ interface UserListItem {
   sessions: number;
 }
 
+interface WeeklyTrend {
+  week: string;
+  sessions: number;
+}
+
 interface UserMetrics {
   user_id: string;
   display_name: string;
+  title: string;
   total_sessions: number;
   first_seen: string;
   last_seen: string;
-  intents: BreakdownItem[];
-  models: BreakdownItem[];
-  agent_types: BreakdownItem[];
-  median_speed_s: number;
-  p90_speed_s: number;
-  avg_events: number;
+  days_since_last: number;
+  active_days: number;
+  total_days: number;
+  consistency_pct: number;
+  sessions_per_active_day: number;
+  trend: 'growing' | 'stable' | 'declining' | 'new' | 'churned';
+  trend_pct: number;
+  weekly_trend: WeeklyTrend[];
   daily_volume: DailyVolume[];
-  recent_sessions: {
-    ts_start: string;
-    intent: string;
-    model: string;
-    duration_s: number;
-    num_events: number;
-  }[];
+  day_of_week: number[];
+  top_intent: string;
+  top_intent_pct: number;
+  intents: BreakdownItem[];
 }
 
 function formatDuration(seconds: number): string {
@@ -389,10 +394,10 @@ export function OttiClient() {
         </div>
       </div>
 
-      {/* ── Section: User Metrics ── */}
+      {/* ── Section: User Adoption ── */}
       <div className="mb-8">
         <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-4 pb-2 border-b border-black/[0.07] flex items-center justify-between">
-          <span>User Metrics</span>
+          <span>User Adoption</span>
           <select
             value={selectedUser}
             onChange={(e) => setSelectedUser(e.target.value)}
@@ -409,7 +414,7 @@ export function OttiClient() {
 
         {!selectedUser && (
           <div className="text-[0.8rem] text-g5 py-6 text-center">
-            Select a user above to view their individual metrics.
+            Select a user above to view their adoption pattern.
           </div>
         )}
 
@@ -417,69 +422,141 @@ export function OttiClient() {
           <div className="text-[0.8rem] text-g5 py-6 text-center">Loading...</div>
         )}
 
-        {userMetrics && !userLoading && (
+        {userMetrics && !userLoading && (() => {
+          const um = userMetrics;
+          const trendColor = um.trend === 'growing' ? 'text-accent-green' :
+            um.trend === 'declining' || um.trend === 'churned' ? 'text-accent-red' : 'text-g3';
+          const trendBg = um.trend === 'growing' ? 'bg-accent-green' :
+            um.trend === 'declining' || um.trend === 'churned' ? 'bg-accent-red' :
+            um.trend === 'new' ? 'bg-black' : 'bg-g5';
+          const trendLabel = um.trend.charAt(0).toUpperCase() + um.trend.slice(1);
+          const dowLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+          const maxDow = Math.max(...um.day_of_week, 1);
+          const maxWeekly = Math.max(...um.weekly_trend.map(w => w.sessions), 1);
+
+          return (
           <div className="grid grid-cols-12 gap-[10px]">
-            {/* User KPIs */}
-            <div className="col-span-3">
-              <StatCard label="Sessions" value={String(userMetrics.total_sessions)} delta={`${userMetrics.first_seen} → ${userMetrics.last_seen}`} />
-            </div>
-            <div className="col-span-3">
-              <StatCard label="Median Speed" value={formatDuration(userMetrics.median_speed_s)} delta={`P90: ${formatDuration(userMetrics.p90_speed_s)}`} />
-            </div>
-            <div className="col-span-3">
-              <StatCard label="Avg Complexity" value={String(userMetrics.avg_events)} delta="events per session" />
-            </div>
-            <div className="col-span-3">
-              <StatCard
-                label="Top Intent"
-                value={userMetrics.intents[0]?.name || '—'}
-                delta={userMetrics.intents[0] ? `${userMetrics.intents[0].pct}% of sessions` : ''}
-              />
-            </div>
-
-            {/* User activity chart */}
-            <div className="col-span-6">
-              <VolumeChart data={userMetrics.daily_volume} />
-            </div>
-
-            {/* User breakdowns */}
-            <div className="col-span-3">
-              <BreakdownBar title="Intent Mix" items={userMetrics.intents} />
-            </div>
-            <div className="col-span-3">
-              <BreakdownBar title="Model Usage" items={userMetrics.models} />
-            </div>
-
-            {/* Recent sessions */}
-            <div className="col-span-12 bg-surface border border-black/[0.07] rounded-card p-[22px]">
-              <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">
-                Recent Sessions
-              </div>
-              <div className="space-y-0">
-                <div className="grid grid-cols-[1fr_100px_70px_70px_60px] gap-3 pb-2 border-b border-black/[0.07]">
-                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Time</div>
-                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Intent</div>
-                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Model</div>
-                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5 text-right">Duration</div>
-                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5 text-right">Events</div>
+            {/* User header card */}
+            <div className="col-span-12 bg-surface border border-black/[0.07] rounded-card p-[22px] flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-[42px] h-[42px] rounded-full bg-black grid place-items-center text-white text-[0.9rem] font-semibold">
+                  {um.display_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
                 </div>
-                {userMetrics.recent_sessions.map((s, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_100px_70px_70px_60px] gap-3 py-[9px] border-b border-black/[0.07] last:border-b-0">
-                    <div className="text-[0.74rem] text-g3 tabular-nums">
-                      {s.ts_start.slice(0, 16).replace('T', ' ')}
+                <div>
+                  <div className="text-[1rem] font-semibold text-black">{um.display_name}</div>
+                  {um.title && <div className="text-[0.74rem] text-g5">{um.title}</div>}
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="text-center">
+                  <div className="text-[1.3rem] font-bold text-black tabular-nums">{um.total_sessions}</div>
+                  <div className="text-[0.62rem] text-g5 uppercase tracking-wider">Sessions</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[1.3rem] font-bold text-black tabular-nums">{um.active_days}</div>
+                  <div className="text-[0.62rem] text-g5 uppercase tracking-wider">Active Days</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[1.3rem] font-bold text-black tabular-nums">{um.consistency_pct}%</div>
+                  <div className="text-[0.62rem] text-g5 uppercase tracking-wider">Consistency</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[1.3rem] font-bold text-black tabular-nums">{um.sessions_per_active_day}</div>
+                  <div className="text-[0.62rem] text-g5 uppercase tracking-wider">Sess / Day</div>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <span className={`px-[10px] py-[3px] rounded-full text-[0.68rem] font-semibold text-white ${trendBg}`}>
+                    {trendLabel}
+                  </span>
+                  {um.trend !== 'new' && um.trend !== 'churned' && (
+                    <span className={`text-[0.65rem] font-medium tabular-nums ${trendColor}`}>
+                      {um.trend_pct > 0 ? '+' : ''}{um.trend_pct}%
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Weekly trend chart */}
+            <div className="col-span-7 bg-surface border border-black/[0.07] rounded-card p-[22px]">
+              <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">
+                Weekly Trend
+              </div>
+              {um.weekly_trend.length === 0 ? (
+                <div className="text-[0.8rem] text-g5 py-4">No weekly data.</div>
+              ) : (
+                <div className="flex items-end gap-[4px]" style={{ height: 120 }}>
+                  {um.weekly_trend.map((w, i) => {
+                    const h = Math.max(Math.round((w.sessions / maxWeekly) * 100), w.sessions > 0 ? 6 : 2);
+                    const isLast = i === um.weekly_trend.length - 1;
+                    return (
+                      <div key={w.week} className="flex-1 flex flex-col items-center justify-end gap-1" style={{ height: 110 }}>
+                        <div className="text-[0.58rem] font-semibold tabular-nums text-g4">{w.sessions}</div>
+                        <div
+                          className={`w-full rounded-t-[3px] ${isLast ? 'bg-black' : 'bg-g6'}`}
+                          style={{ height: h }}
+                        />
+                        <span className="text-[0.55rem] text-g5 tabular-nums">W{w.week}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex items-center gap-2 mt-3 text-[0.65rem] text-g5">
+                <span>First seen: {um.first_seen}</span>
+                <span className="text-g7">|</span>
+                <span>Last active: {um.last_seen}</span>
+                {um.days_since_last > 0 && (
+                  <>
+                    <span className="text-g7">|</span>
+                    <span className={um.days_since_last > 7 ? 'text-accent-red' : ''}>
+                      {um.days_since_last}d ago
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Day of week pattern */}
+            <div className="col-span-5 bg-surface border border-black/[0.07] rounded-card p-[22px]">
+              <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">
+                Day-of-Week Pattern
+              </div>
+              <div className="space-y-[6px]">
+                {dowLabels.map((day, i) => (
+                  <div key={day} className="flex items-center gap-2">
+                    <div className="w-[28px] text-[0.7rem] text-g4 font-medium">{day}</div>
+                    <div className="flex-1 h-[16px] bg-g9 rounded-[3px] overflow-hidden">
+                      <div
+                        className={`h-full rounded-[3px] ${um.day_of_week[i] > 0 ? 'bg-black' : ''}`}
+                        style={{ width: `${Math.round((um.day_of_week[i] / maxDow) * 100)}%` }}
+                      />
                     </div>
-                    <div className="text-[0.72rem] text-g4">{s.intent}</div>
-                    <div className="text-[0.68rem] px-[6px] py-[1px] rounded-md bg-g9 text-g3 w-fit">{s.model}</div>
-                    <div className="text-[0.74rem] font-semibold tabular-nums text-g3 text-right">
-                      {formatDuration(Math.round(s.duration_s))}
+                    <div className="w-[24px] text-[0.7rem] font-semibold text-g3 tabular-nums text-right">
+                      {um.day_of_week[i] || ''}
                     </div>
-                    <div className="text-[0.74rem] tabular-nums text-g4 text-right">{s.num_events}</div>
                   </div>
                 ))}
               </div>
+              <div className="mt-4 text-[0.68rem] text-g5">
+                Most active: <span className="font-medium text-g3">
+                  {dowLabels[um.day_of_week.indexOf(Math.max(...um.day_of_week))]}
+                </span>
+              </div>
+            </div>
+
+            {/* Daily activity */}
+            <div className="col-span-7">
+              <VolumeChart data={um.daily_volume} />
+            </div>
+
+            {/* Intent usage */}
+            <div className="col-span-5">
+              <BreakdownBar title="What They Ask About" items={um.intents} />
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

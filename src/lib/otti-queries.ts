@@ -346,26 +346,31 @@ export function getOttiMetrics(period: string, compare: boolean, splitDate: stri
   };
 }
 
+export interface WeeklyTrend {
+  week: string;      // e.g. "04-07"
+  sessions: number;
+}
+
 export interface UserMetrics {
   user_id: string;
   display_name: string;
+  title: string;
   total_sessions: number;
   first_seen: string;
   last_seen: string;
-  intents: BreakdownItem[];
-  models: BreakdownItem[];
-  agent_types: BreakdownItem[];
-  median_speed_s: number;
-  p90_speed_s: number;
-  avg_events: number;
+  days_since_last: number;
+  active_days: number;
+  total_days: number;
+  consistency_pct: number;        // active_days / total_days * 100
+  sessions_per_active_day: number;
+  trend: 'growing' | 'stable' | 'declining' | 'new' | 'churned';
+  trend_pct: number;              // % change recent vs earlier half
+  weekly_trend: WeeklyTrend[];
   daily_volume: DailyVolume[];
-  recent_sessions: {
-    ts_start: string;
-    intent: string;
-    model: string;
-    duration_s: number;
-    num_events: number;
-  }[];
+  day_of_week: number[];          // [Mon, Tue, Wed, Thu, Fri, Sat, Sun] counts
+  top_intent: string;
+  top_intent_pct: number;
+  intents: BreakdownItem[];
 }
 
 export function getUserMetrics(userId: string, period: string): UserMetrics {
@@ -374,84 +379,124 @@ export function getUserMetrics(userId: string, period: string): UserMetrics {
   const endTs = end + 'T23:59:59';
 
   const userRow = db.prepare(
-    'SELECT display_name FROM otti_users WHERE user_id = ?'
-  ).get(userId) as { display_name: string } | undefined;
+    'SELECT display_name, title FROM otti_users WHERE user_id = ?'
+  ).get(userId) as { display_name: string; title: string } | undefined;
 
   const total = (db.prepare(
     'SELECT COUNT(*) as c FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ?'
   ).get(userId, start, endTs) as { c: number }).c;
 
   const firstLast = db.prepare(
-    'SELECT MIN(ts_start) as first_seen, MAX(ts_start) as last_seen FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ?'
-  ).get(userId, start, endTs) as { first_seen: string; last_seen: string };
+    'SELECT MIN(ts_start) as first_seen, MAX(ts_start) as last_seen FROM otti_sessions WHERE user_id = ?'
+  ).get(userId) as { first_seen: string; last_seen: string };
 
-  const userIntents = db.prepare(`
-    SELECT intent as name, COUNT(*) as count FROM otti_sessions
+  // Active days in period
+  const activeDayRows = db.prepare(`
+    SELECT DISTINCT DATE(ts_start) as d FROM otti_sessions
     WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
-    GROUP BY intent ORDER BY count DESC
-  `).all(userId, start, endTs) as { name: string; count: number }[];
-  const intentTotal = userIntents.reduce((s, r) => s + r.count, 0);
-  const userIntentItems: BreakdownItem[] = userIntents.map(r => ({
-    name: r.name, count: r.count,
-    pct: intentTotal > 0 ? Math.round(r.count / intentTotal * 1000) / 10 : 0,
+  `).all(userId, start, endTs) as { d: string }[];
+  const activeDays = activeDayRows.length;
+
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const totalDays = Math.max(Math.round((endDate.getTime() - startDate.getTime()) / 86400000), 1);
+  const consistencyPct = Math.round(activeDays / totalDays * 1000) / 10;
+  const sessPerActiveDay = activeDays > 0 ? Math.round(total / activeDays * 10) / 10 : 0;
+
+  // Days since last session
+  const lastDate = firstLast.last_seen ? new Date(firstLast.last_seen) : new Date();
+  const daysSinceLast = Math.round((new Date().getTime() - lastDate.getTime()) / 86400000);
+
+  // Weekly trend
+  const weeklyRows = db.prepare(`
+    SELECT strftime('%Y-%W', ts_start) as week, COUNT(*) as sessions
+    FROM otti_sessions
+    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
+    GROUP BY week ORDER BY week ASC
+  `).all(userId, start, endTs) as { week: string; sessions: number }[];
+
+  const weeklyTrend: WeeklyTrend[] = weeklyRows.map(r => ({
+    week: r.week.slice(5),  // just "WW"
+    sessions: r.sessions,
   }));
 
-  const userModels = db.prepare(`
-    SELECT model as name, COUNT(*) as count FROM otti_sessions
-    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
-    GROUP BY model ORDER BY count DESC
-  `).all(userId, start, endTs) as { name: string; count: number }[];
-  const modelTotal = userModels.reduce((s, r) => s + r.count, 0);
-  const userModelItems: BreakdownItem[] = userModels.map(r => ({
-    name: r.name, count: r.count,
-    pct: modelTotal > 0 ? Math.round(r.count / modelTotal * 1000) / 10 : 0,
-  }));
+  // Trend calculation: compare second half to first half of the period
+  let trend: 'growing' | 'stable' | 'declining' | 'new' | 'churned' = 'stable';
+  let trendPct = 0;
 
-  const userAgents = db.prepare(`
-    SELECT agent_type as name, COUNT(*) as count FROM otti_sessions
-    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
-    GROUP BY agent_type ORDER BY count DESC
-  `).all(userId, start, endTs) as { name: string; count: number }[];
-  const agentTotal = userAgents.reduce((s, r) => s + r.count, 0);
-  const userAgentItems: BreakdownItem[] = userAgents.map(r => ({
-    name: r.name, count: r.count,
-    pct: agentTotal > 0 ? Math.round(r.count / agentTotal * 1000) / 10 : 0,
-  }));
+  if (weeklyTrend.length <= 1) {
+    trend = total > 0 ? 'new' : 'churned';
+  } else {
+    const mid = Math.floor(weeklyTrend.length / 2);
+    const firstHalf = weeklyTrend.slice(0, mid).reduce((s, w) => s + w.sessions, 0);
+    const secondHalf = weeklyTrend.slice(mid).reduce((s, w) => s + w.sessions, 0);
+    if (firstHalf === 0) {
+      trend = secondHalf > 0 ? 'growing' : 'churned';
+      trendPct = 100;
+    } else {
+      trendPct = Math.round(((secondHalf - firstHalf) / firstHalf) * 100);
+      if (trendPct >= 20) trend = 'growing';
+      else if (trendPct <= -20) trend = 'declining';
+      else trend = 'stable';
+    }
+  }
 
-  const durations = (db.prepare(
-    'SELECT duration_s FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ? AND duration_s > 0'
-  ).all(userId, start, endTs) as { duration_s: number }[]).map(r => r.duration_s);
+  if (daysSinceLast > 14 && total > 0) trend = 'churned';
 
-  const avgEvents = (db.prepare(
-    'SELECT AVG(num_events) as avg FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ?'
-  ).get(userId, start, endTs) as { avg: number }).avg || 0;
-
+  // Daily volume
   const dailyRows = db.prepare(`
     SELECT DATE(ts_start) as date, COUNT(*) as count FROM otti_sessions
     WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
     GROUP BY DATE(ts_start) ORDER BY date ASC
   `).all(userId, start, endTs) as DailyVolume[];
 
-  const recentSessions = db.prepare(`
-    SELECT ts_start, intent, model, duration_s, num_events FROM otti_sessions
+  // Day of week distribution (0=Sun...6=Sat → remap to Mon-Sun)
+  const dowRows = db.prepare(`
+    SELECT CAST(strftime('%w', ts_start) AS INTEGER) as dow, COUNT(*) as c
+    FROM otti_sessions
     WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
-    ORDER BY ts_start DESC LIMIT 10
-  `).all(userId, start, endTs) as { ts_start: string; intent: string; model: string; duration_s: number; num_events: number }[];
+    GROUP BY dow
+  `).all(userId, start, endTs) as { dow: number; c: number }[];
+
+  const dayOfWeek = new Array(7).fill(0); // [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+  for (const r of dowRows) {
+    // SQLite %w: 0=Sunday. Remap to Mon=0..Sun=6
+    const idx = r.dow === 0 ? 6 : r.dow - 1;
+    dayOfWeek[idx] = r.c;
+  }
+
+  // Top intent
+  const userIntents = db.prepare(`
+    SELECT intent as name, COUNT(*) as count FROM otti_sessions
+    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
+    GROUP BY intent ORDER BY count DESC
+  `).all(userId, start, endTs) as { name: string; count: number }[];
+  const intentTotal = userIntents.reduce((s, r) => s + r.count, 0);
+  const intentItems: BreakdownItem[] = userIntents.map(r => ({
+    name: r.name, count: r.count,
+    pct: intentTotal > 0 ? Math.round(r.count / intentTotal * 1000) / 10 : 0,
+  }));
 
   return {
     user_id: userId,
     display_name: userRow?.display_name || userId,
+    title: userRow?.title || '',
     total_sessions: total,
     first_seen: firstLast.first_seen?.slice(0, 10) || '',
     last_seen: firstLast.last_seen?.slice(0, 10) || '',
-    intents: userIntentItems,
-    models: userModelItems,
-    agent_types: userAgentItems,
-    median_speed_s: Math.round(percentile(durations, 50)),
-    p90_speed_s: Math.round(percentile(durations, 90)),
-    avg_events: Math.round(avgEvents),
+    days_since_last: daysSinceLast,
+    active_days: activeDays,
+    total_days: totalDays,
+    consistency_pct: consistencyPct,
+    sessions_per_active_day: sessPerActiveDay,
+    trend,
+    trend_pct: trendPct,
+    weekly_trend: weeklyTrend,
     daily_volume: dailyRows,
-    recent_sessions: recentSessions,
+    day_of_week: dayOfWeek,
+    top_intent: intentItems[0]?.name || '—',
+    top_intent_pct: intentItems[0]?.pct || 0,
+    intents: intentItems,
   };
 }
 
