@@ -62,30 +62,30 @@ export async function getOrGenerateSummary(projectKey: string, projectName: stri
     const client = new Anthropic();
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 200,
+      max_tokens: 500,
       messages: [{
         role: 'user',
-        content: `You are writing a rich-text project health summary for an engineering dashboard.
+        content: `You are writing a detailed project health summary for an engineering leadership dashboard. The audience is a VP of Engineering who wants to understand what's happening in this project at a glance.
 
 Project: ${projectName} (${projectKey})
 
 Recent completed tickets and their linked PRs:
 ${ticketSummaries}
 
-Write a concise summary using this exact structure:
+Write a rich, descriptive summary using this structure:
 
-**What shipped:** 1-2 sentences describing the key features and improvements delivered. Be specific — name the actual features, not just counts.
+**What shipped:** 3-5 sentences describing the key features and improvements delivered. Group related work into themes (e.g., "infrastructure", "user-facing features", "bug fixes"). Name specific features, APIs, integrations, or systems that were built or improved. Explain *what* each feature does, not just its name.
 
-**What's in flight:** 1 sentence about active work if evident from the ticket titles.
+**What's in progress:** 1-2 sentences about active work if evident from ticket titles — what's being built next and why it matters.
 
-**Watch:** 1 sentence flagging any risks, stale areas, or blockers if apparent.
+**Risks & attention areas:** 1-2 sentences flagging any concerning patterns — stale tickets, areas with repeated bug fixes (indicating instability), missing test coverage, or dependency bottlenecks.
 
 Rules:
-- Use markdown bold (**text**) for emphasis
-- Do NOT include a title or heading — jump straight into the content
-- Do NOT repeat the project name, ticket counts, completion percentages, or velocity numbers — those are shown separately in the dashboard
-- Keep total output under 150 words
-- Be direct and factual`,
+- Use markdown: **bold** for feature names and emphasis, bullet points where helpful for readability
+- Do NOT include a title or heading — jump straight into "**What shipped:**"
+- Do NOT repeat the project name, raw ticket counts, completion percentages, or velocity numbers — those are shown separately in the dashboard signals
+- Write 150-250 words total
+- Be specific and descriptive — a reader should understand what was actually built without looking at the ticket list`,
       }],
     });
 
