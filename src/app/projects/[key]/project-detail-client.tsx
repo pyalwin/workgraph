@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { StatCard } from '@/components/stat-card';
 import { PeriodSelector } from '@/components/otti/period-selector';
 import { HealthSnapshot } from '@/components/projects/health-snapshot';
 import { TicketList } from '@/components/projects/ticket-list';
@@ -80,27 +79,11 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
         />
       </div>
 
-      {/* Delivery Health */}
+      {/* Velocity + Code Activity */}
       <div className="mb-8">
-        <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-4 pb-2 border-b border-black/[0.07]">
-          Delivery Health
-        </div>
         <div className="grid grid-cols-12 gap-[10px]">
-          <div className="col-span-3">
-            <StatCard label="Completion" value={`${s.completion_pct}%`} delta={`${s.completion_done} of ${s.completion_total}`} trend={s.completion_pct >= 50 ? 'up' : 'down'} />
-          </div>
-          <div className="col-span-3">
-            <StatCard label="Velocity" value={String(s.velocity)} delta={`${s.velocity_delta_pct > 0 ? '+' : ''}${s.velocity_delta_pct}% vs prior`} trend={s.velocity_delta_pct >= 0 ? 'up' : 'down'} />
-          </div>
-          <div className="col-span-3">
-            <StatCard label="Avg Cycle Time" value={`${s.cycle_time_days}d`} delta={s.cycle_time_delta_pct !== 0 ? `${s.cycle_time_delta_pct > 0 ? '+' : ''}${s.cycle_time_delta_pct}%` : 'stable'} trend={s.cycle_time_delta_pct <= 0 ? 'up' : 'down'} />
-          </div>
-          <div className="col-span-3">
-            <StatCard label="Stale Tickets" value={String(s.stale_count)} delta={s.stale_count > 0 ? `${s.stale_pct}% of open` : 'none'} trend={s.stale_count === 0 ? 'up' : 'down'} />
-          </div>
-
           {/* Velocity chart */}
-          <div className="col-span-12 bg-surface border border-black/[0.07] rounded-card p-[22px]">
+          <div className="col-span-6 bg-surface border border-black/[0.07] rounded-card p-[22px]">
             <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">Tickets Closed / Week</div>
             {d.velocity_weekly.length === 0 ? (
               <div className="text-[0.8rem] text-g5 py-4">No velocity data for this period.</div>
@@ -123,26 +106,28 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
               </div>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* Code Activity */}
-      <div className="mb-8">
-        <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-4 pb-2 border-b border-black/[0.07]">
-          Code Activity
-        </div>
-        <div className="grid grid-cols-12 gap-[10px]">
-          <div className="col-span-3">
-            <StatCard label="Linked PRs" value={String(d.code_activity.total_prs)} delta={`${d.code_activity.merged_prs} merged, ${d.code_activity.open_prs} open`} />
-          </div>
-          <div className="col-span-3">
-            <StatCard label="Contributors" value={String(d.code_activity.contributor_count)} delta={d.code_activity.contributors.slice(0, 3).join(', ')} />
-          </div>
-          <div className="col-span-3">
-            <StatCard label="Merge Cadence" value={String(d.code_activity.merge_cadence_per_week)} delta="PRs merged / week" />
-          </div>
-          <div className="col-span-3">
-            <StatCard label="Repos" value={String(d.code_activity.repo_count)} delta={d.code_activity.repos.map(r => r.split('/').pop()).join(', ')} />
+          {/* Code Activity - right side */}
+          <div className="col-span-6 bg-surface border border-black/[0.07] rounded-card p-[22px]">
+            <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">Code Activity</div>
+            <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+              <div>
+                <div className="text-[1.5rem] font-bold text-black tabular-nums leading-none">{d.code_activity.total_prs}</div>
+                <div className="text-[0.68rem] text-g5 mt-1">linked PRs ({d.code_activity.merged_prs} merged, {d.code_activity.open_prs} open)</div>
+              </div>
+              <div>
+                <div className="text-[1.5rem] font-bold text-black tabular-nums leading-none">{d.code_activity.contributor_count}</div>
+                <div className="text-[0.68rem] text-g5 mt-1 truncate">contributors</div>
+              </div>
+              <div>
+                <div className="text-[1.5rem] font-bold text-black tabular-nums leading-none">{d.code_activity.merge_cadence_per_week}</div>
+                <div className="text-[0.68rem] text-g5 mt-1">PRs merged / week</div>
+              </div>
+              <div>
+                <div className="text-[1.5rem] font-bold text-black tabular-nums leading-none">{d.code_activity.repo_count}</div>
+                <div className="text-[0.68rem] text-g5 mt-1 truncate">{d.code_activity.repos.map(r => r.split('/').pop()).join(', ')}</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
