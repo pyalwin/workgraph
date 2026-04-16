@@ -334,6 +334,14 @@ export function seedOttiUsers() {
   }
 }
 
+export function migrateProjectSummaries() {
+  const db = getDb();
+  const cols = db.prepare("PRAGMA table_info(project_summaries)").all() as { name: string }[];
+  if (!cols.find(c => c.name === 'summary_generated_at')) {
+    db.exec("ALTER TABLE project_summaries ADD COLUMN summary_generated_at TEXT");
+  }
+}
+
 export function seedOttiDeployments() {
   const db = getDb();
   const existing = db.prepare('SELECT COUNT(*) as c FROM otti_deployments').get() as { c: number };
