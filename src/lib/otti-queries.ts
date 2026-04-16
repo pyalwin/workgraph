@@ -346,6 +346,126 @@ export function getOttiMetrics(period: string, compare: boolean, splitDate: stri
   };
 }
 
+export interface UserMetrics {
+  user_id: string;
+  display_name: string;
+  total_sessions: number;
+  first_seen: string;
+  last_seen: string;
+  intents: BreakdownItem[];
+  models: BreakdownItem[];
+  agent_types: BreakdownItem[];
+  median_speed_s: number;
+  p90_speed_s: number;
+  avg_events: number;
+  daily_volume: DailyVolume[];
+  recent_sessions: {
+    ts_start: string;
+    intent: string;
+    model: string;
+    duration_s: number;
+    num_events: number;
+  }[];
+}
+
+export function getUserMetrics(userId: string, period: string): UserMetrics {
+  const db = getDb();
+  const { start, end } = dateRange(period);
+  const endTs = end + 'T23:59:59';
+
+  const userRow = db.prepare(
+    'SELECT display_name FROM otti_users WHERE user_id = ?'
+  ).get(userId) as { display_name: string } | undefined;
+
+  const total = (db.prepare(
+    'SELECT COUNT(*) as c FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ?'
+  ).get(userId, start, endTs) as { c: number }).c;
+
+  const firstLast = db.prepare(
+    'SELECT MIN(ts_start) as first_seen, MAX(ts_start) as last_seen FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ?'
+  ).get(userId, start, endTs) as { first_seen: string; last_seen: string };
+
+  const userIntents = db.prepare(`
+    SELECT intent as name, COUNT(*) as count FROM otti_sessions
+    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
+    GROUP BY intent ORDER BY count DESC
+  `).all(userId, start, endTs) as { name: string; count: number }[];
+  const intentTotal = userIntents.reduce((s, r) => s + r.count, 0);
+  const userIntentItems: BreakdownItem[] = userIntents.map(r => ({
+    name: r.name, count: r.count,
+    pct: intentTotal > 0 ? Math.round(r.count / intentTotal * 1000) / 10 : 0,
+  }));
+
+  const userModels = db.prepare(`
+    SELECT model as name, COUNT(*) as count FROM otti_sessions
+    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
+    GROUP BY model ORDER BY count DESC
+  `).all(userId, start, endTs) as { name: string; count: number }[];
+  const modelTotal = userModels.reduce((s, r) => s + r.count, 0);
+  const userModelItems: BreakdownItem[] = userModels.map(r => ({
+    name: r.name, count: r.count,
+    pct: modelTotal > 0 ? Math.round(r.count / modelTotal * 1000) / 10 : 0,
+  }));
+
+  const userAgents = db.prepare(`
+    SELECT agent_type as name, COUNT(*) as count FROM otti_sessions
+    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
+    GROUP BY agent_type ORDER BY count DESC
+  `).all(userId, start, endTs) as { name: string; count: number }[];
+  const agentTotal = userAgents.reduce((s, r) => s + r.count, 0);
+  const userAgentItems: BreakdownItem[] = userAgents.map(r => ({
+    name: r.name, count: r.count,
+    pct: agentTotal > 0 ? Math.round(r.count / agentTotal * 1000) / 10 : 0,
+  }));
+
+  const durations = (db.prepare(
+    'SELECT duration_s FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ? AND duration_s > 0'
+  ).all(userId, start, endTs) as { duration_s: number }[]).map(r => r.duration_s);
+
+  const avgEvents = (db.prepare(
+    'SELECT AVG(num_events) as avg FROM otti_sessions WHERE user_id = ? AND ts_start >= ? AND ts_start < ?'
+  ).get(userId, start, endTs) as { avg: number }).avg || 0;
+
+  const dailyRows = db.prepare(`
+    SELECT DATE(ts_start) as date, COUNT(*) as count FROM otti_sessions
+    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
+    GROUP BY DATE(ts_start) ORDER BY date ASC
+  `).all(userId, start, endTs) as DailyVolume[];
+
+  const recentSessions = db.prepare(`
+    SELECT ts_start, intent, model, duration_s, num_events FROM otti_sessions
+    WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
+    ORDER BY ts_start DESC LIMIT 10
+  `).all(userId, start, endTs) as { ts_start: string; intent: string; model: string; duration_s: number; num_events: number }[];
+
+  return {
+    user_id: userId,
+    display_name: userRow?.display_name || userId,
+    total_sessions: total,
+    first_seen: firstLast.first_seen?.slice(0, 10) || '',
+    last_seen: firstLast.last_seen?.slice(0, 10) || '',
+    intents: userIntentItems,
+    models: userModelItems,
+    agent_types: userAgentItems,
+    median_speed_s: Math.round(percentile(durations, 50)),
+    p90_speed_s: Math.round(percentile(durations, 90)),
+    avg_events: Math.round(avgEvents),
+    daily_volume: dailyRows,
+    recent_sessions: recentSessions,
+  };
+}
+
+export function getOttiUserList() {
+  const db = getDb();
+  return db.prepare(`
+    SELECT u.user_id, u.display_name, COUNT(s.id) as sessions
+    FROM otti_users u
+    JOIN otti_sessions s ON u.user_id = s.user_id
+    GROUP BY u.user_id
+    ORDER BY sessions DESC
+  `).all() as { user_id: string; display_name: string; sessions: number }[];
+}
+
 export function getOttiDeployments() {
   const db = getDb();
   return db.prepare('SELECT * FROM otti_deployments ORDER BY deploy_date DESC').all();

@@ -84,6 +84,34 @@ interface Deployment {
   deploy_date: string;
 }
 
+interface UserListItem {
+  user_id: string;
+  display_name: string;
+  sessions: number;
+}
+
+interface UserMetrics {
+  user_id: string;
+  display_name: string;
+  total_sessions: number;
+  first_seen: string;
+  last_seen: string;
+  intents: BreakdownItem[];
+  models: BreakdownItem[];
+  agent_types: BreakdownItem[];
+  median_speed_s: number;
+  p90_speed_s: number;
+  avg_events: number;
+  daily_volume: DailyVolume[];
+  recent_sessions: {
+    ts_start: string;
+    intent: string;
+    model: string;
+    duration_s: number;
+    num_events: number;
+  }[];
+}
+
 function formatDuration(seconds: number): string {
   if (seconds === 0) return '0s';
   if (seconds < 60) return `${seconds}s`;
@@ -99,6 +127,10 @@ export function OttiClient() {
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [data, setData] = useState<OttiMetrics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userList, setUserList] = useState<UserListItem[]>([]);
+  const [selectedUser, setSelectedUser] = useState('');
+  const [userMetrics, setUserMetrics] = useState<UserMetrics | null>(null);
+  const [userLoading, setUserLoading] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -115,7 +147,16 @@ export function OttiClient() {
 
   useEffect(() => {
     fetch('/api/otti/deployments').then(r => r.json()).then(setDeployments);
+    fetch('/api/otti/users').then(r => r.json()).then(setUserList);
   }, []);
+
+  useEffect(() => {
+    if (!selectedUser) { setUserMetrics(null); return; }
+    setUserLoading(true);
+    fetch(`/api/otti/users/${selectedUser}?period=${period}`)
+      .then(r => r.json())
+      .then(m => { setUserMetrics(m); setUserLoading(false); });
+  }, [selectedUser, period]);
 
   useEffect(() => {
     fetchData();
@@ -346,6 +387,99 @@ export function OttiClient() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ── Section: User Metrics ── */}
+      <div className="mb-8">
+        <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-4 pb-2 border-b border-black/[0.07] flex items-center justify-between">
+          <span>User Metrics</span>
+          <select
+            value={selectedUser}
+            onChange={(e) => setSelectedUser(e.target.value)}
+            className="h-[28px] px-2 rounded-lg border border-black/[0.07] text-[0.74rem] text-g3 bg-white cursor-pointer font-normal normal-case tracking-normal"
+          >
+            <option value="">Select a user...</option>
+            {userList.map((u) => (
+              <option key={u.user_id} value={u.user_id}>
+                {u.display_name} ({u.sessions})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {!selectedUser && (
+          <div className="text-[0.8rem] text-g5 py-6 text-center">
+            Select a user above to view their individual metrics.
+          </div>
+        )}
+
+        {userLoading && (
+          <div className="text-[0.8rem] text-g5 py-6 text-center">Loading...</div>
+        )}
+
+        {userMetrics && !userLoading && (
+          <div className="grid grid-cols-12 gap-[10px]">
+            {/* User KPIs */}
+            <div className="col-span-3">
+              <StatCard label="Sessions" value={String(userMetrics.total_sessions)} delta={`${userMetrics.first_seen} → ${userMetrics.last_seen}`} />
+            </div>
+            <div className="col-span-3">
+              <StatCard label="Median Speed" value={formatDuration(userMetrics.median_speed_s)} delta={`P90: ${formatDuration(userMetrics.p90_speed_s)}`} />
+            </div>
+            <div className="col-span-3">
+              <StatCard label="Avg Complexity" value={String(userMetrics.avg_events)} delta="events per session" />
+            </div>
+            <div className="col-span-3">
+              <StatCard
+                label="Top Intent"
+                value={userMetrics.intents[0]?.name || '—'}
+                delta={userMetrics.intents[0] ? `${userMetrics.intents[0].pct}% of sessions` : ''}
+              />
+            </div>
+
+            {/* User activity chart */}
+            <div className="col-span-6">
+              <VolumeChart data={userMetrics.daily_volume} />
+            </div>
+
+            {/* User breakdowns */}
+            <div className="col-span-3">
+              <BreakdownBar title="Intent Mix" items={userMetrics.intents} />
+            </div>
+            <div className="col-span-3">
+              <BreakdownBar title="Model Usage" items={userMetrics.models} />
+            </div>
+
+            {/* Recent sessions */}
+            <div className="col-span-12 bg-surface border border-black/[0.07] rounded-card p-[22px]">
+              <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">
+                Recent Sessions
+              </div>
+              <div className="space-y-0">
+                <div className="grid grid-cols-[1fr_100px_70px_70px_60px] gap-3 pb-2 border-b border-black/[0.07]">
+                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Time</div>
+                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Intent</div>
+                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Model</div>
+                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5 text-right">Duration</div>
+                  <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5 text-right">Events</div>
+                </div>
+                {userMetrics.recent_sessions.map((s, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_100px_70px_70px_60px] gap-3 py-[9px] border-b border-black/[0.07] last:border-b-0">
+                    <div className="text-[0.74rem] text-g3 tabular-nums">
+                      {s.ts_start.slice(0, 16).replace('T', ' ')}
+                    </div>
+                    <div className="text-[0.72rem] text-g4">{s.intent}</div>
+                    <div className="text-[0.68rem] px-[6px] py-[1px] rounded-md bg-g9 text-g3 w-fit">{s.model}</div>
+                    <div className="text-[0.74rem] font-semibold tabular-nums text-g3 text-right">
+                      {formatDuration(Math.round(s.duration_s))}
+                    </div>
+                    <div className="text-[0.74rem] tabular-nums text-g4 text-right">{s.num_events}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
