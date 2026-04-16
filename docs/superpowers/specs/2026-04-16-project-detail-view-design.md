@@ -183,26 +183,48 @@ Be specific — name the features, not just counts.
   - Tickets with no PRs: "No linked PRs yet" in muted text
 - Expandable rows (reuse existing ItemDetailPanel pattern from projects-client.tsx)
 
-## Navigation Changes
+## Projects Index Redesign (`/projects`)
 
-Modify existing `/projects` page:
-- Each project card becomes a clickable link to `/projects/[key]`
-- No other changes to the index page
+Replace the current flat ticket-list layout with compact summary cards that link to detail pages.
+
+**Files:**
+- Rewrite: `src/app/projects/page.tsx` — server component fetching summary data per project
+- Rewrite: `src/app/projects/projects-client.tsx` — card grid layout
+
+### Index Card Layout
+
+Each project card shows:
+- **Header row**: project name, key badge, health dot + status label
+- **AI summary snippet**: first sentence of the recap (truncated, links to detail)
+- **Signal row**: 4 inline metrics — completion %, velocity (period), open tickets, stale count
+- **Completion bar**: thin progress bar matching existing style
+- **Click anywhere** → `/projects/[key]`
+
+Cards are ordered: configured projects first (OA, PEX, INT), then GitHub repos by PR count.
+
+GitHub repo "projects" (plateiq/server, plateiq/datadash) also get cards with their own metrics (PR counts, contributors, merge cadence) but no JIRA ticket data — just code activity.
+
+### Header
+
+- Title: "Projects"
+- Subtitle: total project count + total tickets + total PRs
+- Period selector: 30d (default), 90d, All — controls all cards on the page
 
 ## Components
 
 ### Reuse
-- `StatCard` — all KPI cards
+- `StatCard` — all KPI cards on detail page
 - `Card` / `CardContent` / `CardTitle` — containers
 - `Badge` — status and source badges
-- `VolumeChart` — reuse for weekly velocity (or adapt)
+- `VolumeChart` — reuse for weekly velocity chart
 - `PeriodSelector` — reuse from otti components
 - Design tokens: g1-g9, accent-green, accent-red, rounded-card
 
 ### New
-- `src/components/projects/health-snapshot.tsx` — narrative + signal strip banner
-- `src/components/projects/ticket-list.tsx` — filterable ticket rows with nested linked PRs
-- `src/lib/project-queries.ts` — all SQL queries for project metrics, health scoring, ticket-PR linking
+- `src/components/projects/health-snapshot.tsx` — narrative + signal strip banner (detail page)
+- `src/components/projects/project-card.tsx` — compact summary card (index page)
+- `src/components/projects/ticket-list.tsx` — filterable ticket rows with nested linked PRs (detail page)
+- `src/lib/project-queries.ts` — all SQL queries for project metrics, health scoring, ticket-PR linking, index summaries
 - `src/lib/project-summary.ts` — Claude Haiku summary generation + cache check + storage
 
 ## Schema Changes
