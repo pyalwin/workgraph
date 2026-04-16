@@ -65,14 +65,27 @@ export async function getOrGenerateSummary(projectKey: string, projectName: stri
       max_tokens: 200,
       messages: [{
         role: 'user',
-        content: `You are summarizing an engineering project's recent activity for a dashboard.
+        content: `You are writing a rich-text project health summary for an engineering dashboard.
 
 Project: ${projectName} (${projectKey})
 
 Recent completed tickets and their linked PRs:
 ${ticketSummaries}
 
-Write a 2-3 sentence summary of what was shipped. Focus on features built and problems solved. Be specific — name the features, not just counts. Keep it concise.`,
+Write a concise summary using this exact structure:
+
+**What shipped:** 1-2 sentences describing the key features and improvements delivered. Be specific — name the actual features, not just counts.
+
+**What's in flight:** 1 sentence about active work if evident from the ticket titles.
+
+**Watch:** 1 sentence flagging any risks, stale areas, or blockers if apparent.
+
+Rules:
+- Use markdown bold (**text**) for emphasis
+- Do NOT include a title or heading — jump straight into the content
+- Do NOT repeat the project name, ticket counts, completion percentages, or velocity numbers — those are shown separately in the dashboard
+- Keep total output under 150 words
+- Be direct and factual`,
       }],
     });
 

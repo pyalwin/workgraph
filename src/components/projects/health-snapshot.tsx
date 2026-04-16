@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import ReactMarkdown from 'react-markdown';
 
 interface ProjectSignals {
   completion_pct: number;
@@ -50,7 +51,9 @@ export function HealthSnapshot({ status, summary, signals, onRefresh, refreshing
           </button>
         </div>
         {summary && (
-          <p className="text-[0.78rem] text-g3 leading-[1.55]">{summary}</p>
+          <div className="text-[0.78rem] text-g3 leading-[1.65] [&_strong]:font-semibold [&_strong]:text-g2 [&_p]:mb-[6px] [&_p:last-child]:mb-0">
+            <ReactMarkdown>{summary}</ReactMarkdown>
+          </div>
         )}
       </div>
       {/* Signal strip */}
