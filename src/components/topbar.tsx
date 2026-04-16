@@ -7,10 +7,10 @@ import { cn } from '@/lib/utils';
 
 const navItems = [
   { label: 'Overview', href: '/' },
-  { label: 'Goals', href: '/goals' },
   { label: 'Projects', href: '/projects' },
   { label: 'Knowledge', href: '/knowledge' },
   { label: 'Metrics', href: '/metrics' },
+  { label: 'Otti Assistant', href: '/otti' },
   { label: 'Settings', href: '/settings' },
 ];
 
