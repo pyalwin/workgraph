@@ -94,6 +94,14 @@ export function initSchema() {
       error TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS work_item_versions (
+      id TEXT PRIMARY KEY,
+      item_id TEXT NOT NULL REFERENCES work_items(id),
+      changed_fields TEXT NOT NULL,
+      snapshot TEXT NOT NULL,
+      changed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_items_source ON work_items(source);
     CREATE INDEX IF NOT EXISTS idx_items_status ON work_items(status);
     CREATE INDEX IF NOT EXISTS idx_items_created ON work_items(created_at);
@@ -103,6 +111,8 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_item_id);
     CREATE INDEX IF NOT EXISTS idx_metrics_goal_date ON metrics_snapshots(goal_id, snapshot_date);
     CREATE INDEX IF NOT EXISTS idx_sync_source ON sync_log(source, completed_at);
+    CREATE INDEX IF NOT EXISTS idx_versions_item ON work_item_versions(item_id);
+    CREATE INDEX IF NOT EXISTS idx_versions_changed ON work_item_versions(changed_at);
   `);
 }
 
