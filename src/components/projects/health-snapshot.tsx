@@ -51,7 +51,16 @@ export function HealthSnapshot({ status, summary, signals, onRefresh, refreshing
           </button>
         </div>
         {summary && (
-          <div className="text-[0.78rem] text-g3 leading-[1.65] [&_strong]:font-semibold [&_strong]:text-g2 [&_p]:mb-[6px] [&_p:last-child]:mb-0">
+          <div className={cn(
+            "text-[0.78rem] text-g3 leading-[1.6]",
+            // Paragraph spacing
+            "[&_p]:mb-[14px] [&_p:last-child]:mb-0",
+            // Bold section headers get distinct styling
+            "[&_strong]:font-semibold [&_strong]:text-[0.72rem] [&_strong]:text-g2 [&_strong]:uppercase [&_strong]:tracking-[0.03em]",
+            // Lists
+            "[&_ul]:mt-[4px] [&_ul]:mb-[14px] [&_ul]:pl-[16px] [&_ul]:list-disc",
+            "[&_li]:mb-[3px] [&_li]:text-[0.76rem] [&_li]:text-g3",
+          )}>
             <ReactMarkdown>{summary}</ReactMarkdown>
           </div>
         )}

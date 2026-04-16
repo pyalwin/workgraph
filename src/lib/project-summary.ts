@@ -72,20 +72,31 @@ Project: ${projectName} (${projectKey})
 Recent completed tickets and their linked PRs:
 ${ticketSummaries}
 
-Write a rich, descriptive summary using this structure:
+Write a rich, descriptive summary using EXACTLY this structure. Each section MUST be its own paragraph separated by a blank line:
 
-**What shipped:** 3-5 sentences describing the key features and improvements delivered. Group related work into themes (e.g., "infrastructure", "user-facing features", "bug fixes"). Name specific features, APIs, integrations, or systems that were built or improved. Explain *what* each feature does, not just its name.
+**What shipped:** Use bullet points to list 3-5 key deliverables. Each bullet should name the feature and briefly explain what it does or why it matters. Group related items.
 
-**What's in progress:** 1-2 sentences about active work if evident from ticket titles — what's being built next and why it matters.
+**In progress:** 1-2 sentences about active work — what's being built next.
 
-**Risks & attention areas:** 1-2 sentences flagging any concerning patterns — stale tickets, areas with repeated bug fixes (indicating instability), missing test coverage, or dependency bottlenecks.
+**Watch:** 1-2 sentences flagging risks — repeated bug fixes (instability), stale areas, or bottlenecks.
+
+Example format:
+**What shipped:**
+- **Feature name** — what it does and why it matters
+- **Another feature** — brief explanation
+- **Bug fix area** — what was fixed and the impact
+
+**In progress:** Description of active work.
+
+**Watch:** Any risks or areas needing attention.
 
 Rules:
-- Use markdown: **bold** for feature names and emphasis, bullet points where helpful for readability
-- Do NOT include a title or heading — jump straight into "**What shipped:**"
-- Do NOT repeat the project name, raw ticket counts, completion percentages, or velocity numbers — those are shown separately in the dashboard signals
-- Write 150-250 words total
-- Be specific and descriptive — a reader should understand what was actually built without looking at the ticket list`,
+- Each section header (**What shipped:**, **In progress:**, **Watch:**) must start on its own line with a blank line before it
+- Use bullet points (- ) for the shipped section, not prose paragraphs
+- Bold the feature/item name in each bullet with **name**
+- Do NOT include a title or heading before the first section
+- Do NOT repeat project name, ticket counts, completion %, or velocity — shown separately in dashboard
+- 150-250 words total`,
       }],
     });
 
