@@ -1,0 +1,2191 @@
+[
+  {
+    "id": "8ec0667b-eeb3-42e8-ac84-9ca23483d214",
+    "title": "Q1 All-Hands",
+    "date": "Apr 15, 2026 11:00 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "68f6918b-f016-49b9-a6ab-46fc12019619",
+    "title": "Incident Practical: Anchal for APIs",
+    "date": "Apr 15, 2026 8:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Anchal Gupta",
+      "Arturo Inzunza",
+      "Chirag Shah",
+      "Christina Dedrick",
+      "Kevin Leduc",
+      "Manigandan Ganesan",
+      "Pampapati Shetty",
+      "Neha Bagdia"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "bcd53e9f-857c-4f2b-b12c-81607602f535",
+    "title": "Onboarding Project Standup",
+    "date": "Apr 14, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Arturo Inzunza",
+      "Qian Chen",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "28377f71-74a6-43c9-909a-f52cbdb7c931",
+    "title": "Jerry / Arun",
+    "date": "Apr 14, 2026 8:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "4a2a072a-7e54-407b-af5c-44599e4b3006",
+    "title": "INT Team Tue Standup",
+    "date": "Apr 14, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Lara Moulton",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1b1d9e21-f9bb-4b07-b227-b942271d4800",
+    "title": "Krishna / Arun - 1 on 1",
+    "date": "Apr 13, 2026 9:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Krishna Janakiraman"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1c821d4c-1656-4d53-b7bc-9b0ac16e67be",
+    "title": "Catalog Entry Model Changes",
+    "date": "Apr 13, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ben Spiegel",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Chandresh"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "bea1948b-7043-4400-a235-136ca7af8edf",
+    "title": "Invoices async API",
+    "date": "Apr 13, 2026 1:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Chirag Shah"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "0e3fa870-7eb0-4fc4-93b1-90c6fd176995",
+    "title": "Copilot SDK authentication and MCP server integration walkthrough",
+    "date": "Apr 13, 2026 7:14 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "7826756c-3fdf-4a88-b2b8-a493647bea33",
+    "title": "Monthly Engineering All Hands!",
+    "date": "Apr 9, 2026 11:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Christina Dedrick",
+      "Engineering",
+      "Swapnil Patil",
+      "Kara Dion",
+      "Inc",
+      "Felicia Rella",
+      "Sam Suppipat"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "f8f4fc7c-3a16-40cd-885f-ae7400d4717b",
+    "title": "Arun/Luke",
+    "date": "Apr 9, 2026 10:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Luke Detering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "f7a30495-7423-4c9f-a1cc-6274fcdb474c",
+    "title": "INT Team Wed Standup",
+    "date": "Apr 8, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "98f47af3-7dbf-4637-8def-268fa44b200b",
+    "title": "Incident Training (Session 3 of 3 choices)",
+    "date": "Apr 8, 2026 8:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manjula Peiris",
+      "Christina Dedrick",
+      "Engineering",
+      "Ben Spiegel",
+      "Gustavo Fernandes",
+      "Bhakti Bhikne",
+      "Don Dittmar"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "558c8cbc-df36-4598-b697-eca310d910e0",
+    "title": "PEX Recurring Sync",
+    "date": "Apr 8, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "9d0cd239-4134-4e85-bc6f-55bae7693d85",
+    "title": "Demo Discussion Copilot<>Intaact<>Claude",
+    "date": "Apr 7, 2026 11:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eashan Bajaj",
+      "Luke Detering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "d62ac351-2958-40ed-913a-a36828f2e73d",
+    "title": "Onboarding Project Standup",
+    "date": "Apr 7, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Arturo Inzunza",
+      "Qian Chen",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "7cb6ff9f-d35b-4a20-9edc-7cea11ad3c7c",
+    "title": "Onboarding Project Standup",
+    "date": "Apr 7, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Arturo Inzunza",
+      "Qian Chen",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "27808aba-1824-4cb9-b530-db2834dc27a8",
+    "title": "Arun / Jerry- DataDash ",
+    "date": "Apr 6, 2026 12:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "390f3a88-e287-41eb-8aa3-fc49a0f1e6f7",
+    "title": "Discussion on Idempotency for APIs",
+    "date": "Apr 6, 2026 9:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Arturo Inzunza",
+      "Abhishek Goyal",
+      "Chirag Shah",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "516b9e46-eb90-47fb-bb39-1c12f15143b9",
+    "title": "Arun / Ivan",
+    "date": "Apr 6, 2026 10:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ivan Zlatev"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "fc9b1179-7df5-4934-b189-4024e5b793e3",
+    "title": "Arun / Joseph 1:1",
+    "date": "Apr 6, 2026 8:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Joseph Lombardi"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "06da128d-ff6d-4d59-b40a-6b70895007b0",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Apr 6, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Aniket Singh",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Chirag Shah",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "07af7ce6-082d-480c-9262-c030e7934d67",
+    "title": "Arun / Abhishek - Invoice status",
+    "date": "Apr 6, 2026 5:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "687b3ea1-aa4a-46ce-bfe3-8dd20f4250e7",
+    "title": "INT Team Standup",
+    "date": "Apr 3, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "567ba017-10b9-435f-a4f6-c100fc181efe",
+    "title": "INT Team Standup",
+    "date": "Apr 2, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "92be040a-4d10-4377-a9a6-ae7431307771",
+    "title": "Arun/Luke/Claude",
+    "date": "Apr 2, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Luke Detering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "8fec6eb5-2106-46a4-9134-0d7eec96e420",
+    "title": "PEX Check-In",
+    "date": "Apr 2, 2026 8:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Abhishek Goyal",
+      "Arturo Inzunza",
+      "Pampapati Shetty",
+      "Radhika Gupta",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "b83e7d4d-d838-459b-b8e1-9779fbba972b",
+    "title": "PaaS/Onboarding Sprint Planning",
+    "date": "Apr 1, 2026 6:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Abhishek Goyal",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "043eee36-1e66-412f-8802-26b016573f19",
+    "title": "PEX Recurring Sync",
+    "date": "Apr 1, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "aeafc79d-5bfa-4090-b259-d1e32a62c7a6",
+    "title": "PEX Recurring Sync",
+    "date": "Apr 1, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1bdef73f-b58e-4555-8cff-a4377bfd3d15",
+    "title": "PEX - Retro",
+    "date": "Apr 1, 2026 5:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Radhika Gupta",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "9dcbcaac-0c2a-4c30-b7ba-8308527e39e5",
+    "title": "Arun / Michael - Sync",
+    "date": "Mar 31, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "01756a50-7f9b-4c6e-ac84-925368f6425a",
+    "title": "New note",
+    "date": "Mar 31, 2026 8:15 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "f57683eb-d84f-4923-b93d-34f519d4cf9e",
+    "title": "Krishna / Arun - 1 on 1",
+    "date": "Mar 30, 2026 9:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Krishna Janakiraman"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "89171ddf-0f96-432b-a30f-e73b40614f36",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Mar 30, 2026 9:00 AM",
+    "participants": [
+      "Ivan Zlatev",
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Aniket Singh",
+      "Rswaroop",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "7660b05e-fcfb-46c3-8af0-e5218069b2a2",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Mar 30, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Aniket Singh",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "177ca460-e000-4c8a-8f28-6a8644dab33a",
+    "title": "PEX Recurring Sync",
+    "date": "Mar 30, 2026 7:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Bhakti Bhikne",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "85bcced4-902e-4fd6-a0d0-d200730d4b23",
+    "title": "Arun / Radhika",
+    "date": "Mar 30, 2026 5:15 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "351df86c-fb7b-47bc-9fd9-4fcf74e333a8",
+    "title": "Nishant / Arun",
+    "date": "Mar 27, 2026 12:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Nishant Agarwal"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "e15f600d-a215-4ede-8c0c-295d8f84a182",
+    "title": "PEX Check-In",
+    "date": "Mar 26, 2026 8:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Abhishek Goyal",
+      "Arturo Inzunza",
+      "Pampapati Shetty",
+      "Radhika Gupta",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "e8ab57d9-8f9e-4d4d-adc7-17b6659686c3",
+    "title": "Arun / Abhishek",
+    "date": "Mar 26, 2026 4:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "2fc055ee-8421-4ead-b3a8-2a87b5e0b835",
+    "title": "APIs with Mani and Arun",
+    "date": "Mar 25, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Kevin Leduc",
+      "Manigandan Ganesan",
+      "Christina Dedrick",
+      "Arturo Inzunza",
+      "Jon Kirkpatrick",
+      "Krishna Janakiraman",
+      "Chris Simmons"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "25f13e6e-03a9-467b-8cb1-3d07a16fe95e",
+    "title": "PEX Recurring Sync",
+    "date": "Mar 25, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "967d664f-6db8-4bb9-8bd9-02ea228cff28",
+    "title": "New note",
+    "date": "Mar 25, 2026 11:46 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "7f3ca757-630a-4962-9ab1-3db6c2eb7c17",
+    "title": "Apoorva / Arun",
+    "date": "Mar 25, 2026 12:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Apoorva Rashmi"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "db7d1026-dca9-48d0-9477-f785bda49812",
+    "title": "Onboarding Project Standup",
+    "date": "Mar 24, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Arturo Inzunza",
+      "Qian Chen",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "e3218d2e-7954-4a03-907e-1760e626a444",
+    "title": "Krishna / Arun",
+    "date": "Mar 24, 2026 8:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Krishna Janakiraman"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "4bd11645-2dbb-4dff-94b3-a3705437f5a4",
+    "title": "Arun / Michael / Ben - Sync",
+    "date": "Mar 24, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ben Spiegel",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1b59e857-48ac-4d4e-b0fd-d40d51115f78",
+    "title": "Radhika / Arun - Understanding Designs",
+    "date": "Mar 24, 2026 4:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "935dab5d-cc17-47fe-9163-e350c02bb6a5",
+    "title": "Arun / Abhishek",
+    "date": "Mar 24, 2026 5:32 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "d51f7720-bbe3-4df9-b96b-bfbafa0329d8",
+    "title": "Arun / Kevin",
+    "date": "Mar 23, 2026 11:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Kevin Leduc"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "022882b7-b69e-42ba-a9a5-f5b3fee57faf",
+    "title": "Arun / Ivan",
+    "date": "Mar 23, 2026 10:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ivan Zlatev"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "051f5c84-7452-40fc-a18c-45ba4e9efc88",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Mar 23, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "c8bc9f13-6bce-4924-8292-922cf663c245",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Mar 23, 2026 9:00 AM",
+    "participants": [
+      "Ivan Zlatev",
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Rswaroop",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "9ea0cbc7-3e55-4751-9def-209f96074964",
+    "title": "PEX Recurring Sync",
+    "date": "Mar 23, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "f6280961-0676-4b86-b4c9-59a161b6b1fa",
+    "title": "INT Team Standup",
+    "date": "Mar 19, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "771213e0-a499-40cc-8475-3b1609c4225c",
+    "title": "PEX Check-In",
+    "date": "Mar 19, 2026 8:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Abhishek Goyal",
+      "Arturo Inzunza",
+      "Chirag Shah",
+      "Pampapati Shetty",
+      "Radhika Gupta",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "9c2ab51d-0674-49b0-a215-11523f650b14",
+    "title": "New note",
+    "date": "Mar 19, 2026 11:31 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "0fc8493c-d210-4ead-8c2e-6cb04394f257",
+    "title": "INT Roadmap Review",
+    "date": "Mar 18, 2026 11:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Luke Detering",
+      "Ivan Zlatev",
+      "Julie Harper",
+      "Mel Faubert",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "375dbd13-8670-419a-add8-1b47f2e90360",
+    "title": "PaaS/Onboarding Sprint Planning",
+    "date": "Mar 18, 2026 6:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Chirag Shah",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "67361a71-8923-4523-a1cd-da9ff5a3648e",
+    "title": "PEX Recurring Sync",
+    "date": "Mar 18, 2026 6:00 PM",
+    "participants": [
+      "Unknown"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "744fedc2-2ae8-4616-9eb2-7726b6ab0ea9",
+    "title": "Jesus / Abhishek - Quick Weekly Sync",
+    "date": "Mar 17, 2026 8:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Joropeza"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "f6888f7d-2c5a-4dec-ae8b-1a0117f760f5",
+    "title": "Arun / Michael - Sync",
+    "date": "Mar 17, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "dc866fe6-e43c-48c7-aaac-1bba739e6361",
+    "title": "Arun / Michael - Sync",
+    "date": "Mar 17, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "aba78bcc-09ff-452e-8fd2-3a53d2463ab9",
+    "title": "Fern Docs Quality Updates",
+    "date": "Mar 17, 2026 7:45 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Josh Rupert",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Chirag Shah"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "e3695de3-3341-403c-965d-8a1f248ef670",
+    "title": "New note",
+    "date": "Mar 16, 2026 6:31 PM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "de33d915-ec3c-4c53-8254-160f0064ec5b",
+    "title": "Arun / Sathya",
+    "date": "Mar 16, 2026 8:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Sathya Viswanathan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "3656d740-e7f2-4b9c-be7f-a3e0b1294511",
+    "title": "New note",
+    "date": "Mar 16, 2026 5:50 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "6ee4fc4c-d0bb-4b25-8690-66fddaaecec4",
+    "title": "INT Team Standup",
+    "date": "Mar 13, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes",
+      "Jerry Love"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "82adc17a-caf0-4622-ae31-4c66de101f1e",
+    "title": "Demo Jam",
+    "date": "Mar 13, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ben Spiegel",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "cc5b63ed-51f3-4eee-a94c-f2d4fc8aa9c8",
+    "title": "Pampa / Arun - Generic Build",
+    "date": "Mar 13, 2026 4:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Pampapati Shetty"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "35b8226d-53f2-4598-895c-959f81280b52",
+    "title": "GL mapping and vendor data sync testing for Ottimate",
+    "date": "Mar 12, 2026 5:33 PM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "19d6b39f-7953-4cbb-b058-5692012bd181",
+    "title": "Monthly Engineering All Hands!",
+    "date": "Mar 12, 2026 11:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Christina Dedrick",
+      "Engineering",
+      "Jason Boyles",
+      "Sathya Viswanathan",
+      "Abhishek Goyal",
+      "Swapnil Patil",
+      "Gabriel Belkind",
+      "Sanjanaa Rs",
+      "Radhika Gupta",
+      "Siddique Shaik",
+      "Eashan Bajaj",
+      "Sembiyan Anbarasu",
+      "Bhakti Bhikne",
+      "Ben Spiegel"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "8356fa65-9e54-4f4b-8fb4-62db8a71d20e",
+    "title": "API Team Thursday Check-In",
+    "date": "Mar 12, 2026 9:45 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Amit Singh",
+      "Arturo Inzunza",
+      "Chirag Shah",
+      "Pampapati Shetty",
+      "Radhika Gupta",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "2c04f742-26e0-4c45-a664-27e7a730abfd",
+    "title": "Reporting Endpoints - Design Review",
+    "date": "Mar 12, 2026 8:45 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Josh Rupert",
+      "Luke Detering",
+      "Manigandan Ganesan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "d79f6aa6-d3f0-48b4-9532-18673f72859e",
+    "title": "Dimension types and ERP standardization workflow",
+    "date": "Mar 12, 2026 4:23 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "6840f3f3-b736-482b-a06b-81e2238e5eea",
+    "title": "Arun / Michael - PM Workflow",
+    "date": "Mar 11, 2026 12:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "061734ae-e23d-428c-88fe-bf8e5b5fb89d",
+    "title": "INT Roadmap Review",
+    "date": "Mar 11, 2026 11:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Luke Detering",
+      "Ivan Zlatev",
+      "Julie Harper",
+      "Mel Faubert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "ffff5a1f-3060-4228-9e8a-cc21f39a88b4",
+    "title": "INT Team Wed Standup",
+    "date": "Mar 11, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "984fa452-993f-41fb-a296-d367f3c5f359",
+    "title": "Onboarding Recurring Sync",
+    "date": "Mar 11, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "d2238ea4-3e94-4de3-a519-b3c281987f0b",
+    "title": "Open Hours ( DevEx with AI tools )",
+    "date": "Mar 11, 2026 3:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Engineering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "301fb5bc-9228-4828-8d84-7f786384f05e",
+    "title": "INT Sprint Planning",
+    "date": "Mar 10, 2026 9:15 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ivan Zlatev",
+      "Rswaroop",
+      "Kartikeya",
+      "Aniket",
+      "Kevin Leduc",
+      "Manigandan Ganesan",
+      "Luke Detering",
+      "Eduardo Leon",
+      "Puru Tiwari",
+      "Lara Moulton",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Ryan Ahmed",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "3d9f45ca-4017-4601-ade9-6b7b1467841c",
+    "title": "Luke / Josh / Arun - PO Endopoints",
+    "date": "Mar 10, 2026 8:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Luke Detering",
+      "Josh Rupert",
+      "Manigandan Ganesan",
+      "Abhishek Goyal"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "953c1d23-ce3e-4210-a02a-08397e35fff0",
+    "title": "Manjula/Ivan/Luke/Skp",
+    "date": "Mar 9, 2026 1:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Luke Detering",
+      "Manjula Peiris",
+      "Swapnil Patil",
+      "Ivan Zlatev"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "43320dfb-1515-47d6-96a9-f3054c263773",
+    "title": "Arun / Ivan",
+    "date": "Mar 9, 2026 10:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ivan Zlatev"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "9a7f85a3-9943-46dc-8497-94e156c831e8",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Mar 9, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Chirag Shah",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "a0d7c46b-3ec6-47b1-a925-c7e5c1c94209",
+    "title": "Josh / Arun Connect",
+    "date": "Mar 9, 2026 9:15 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "5b2688a5-2d4e-4636-9386-06687f2e83cd",
+    "title": "INT Team Standup",
+    "date": "Mar 6, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "20f4d38d-e64f-4a80-b601-9da9dea1981c",
+    "title": "Arun / Rajaram",
+    "date": "Mar 6, 2026 7:14 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "80fd10e9-3ac8-4855-956c-ff464b9d3fdf",
+    "title": "INT Team Standup",
+    "date": "Mar 5, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "0c9ad974-db32-449c-9b08-dd255efe7fd6",
+    "title": "API Team Thursday Check-In",
+    "date": "Mar 5, 2026 9:45 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Arturo Inzunza",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "03e4b6f8-43a1-49b9-870a-f1db7a70ccd9",
+    "title": "Arun / Peter",
+    "date": "Mar 5, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Peter Niu"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "4fd0995c-b7cf-428a-98af-469c2b4e27af",
+    "title": "Product Manager Coding Session",
+    "date": "Mar 3, 2026 10:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ben Spiegel",
+      "Luke Detering",
+      "Swapnil Patil",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1d4fc309-3a06-4a86-a082-b4ceff9d1c9a",
+    "title": "Arun / Michael - Sync",
+    "date": "Mar 3, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Michael Mac"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "d50e9321-efbc-4721-8e37-9916277fa56f",
+    "title": "GitHub app configuration for Ottimate integration",
+    "date": "Mar 2, 2026 4:20 PM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "7bdb7222-80dc-4edd-9bbc-cbcd6f6eccbf",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Mar 2, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Lara Moulton",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Chirag Shah",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Ryan Ahmed",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "a45b9262-83b9-4443-a044-ce03f339a73b",
+    "title": "Discuss: Otti Assistant",
+    "date": "Mar 2, 2026 6:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Kartikeya Sharma"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "99f8f1f0-d3c8-4550-b92c-3ec186a24857",
+    "title": "Generic Build Team Sync ",
+    "date": "Mar 2, 2026 3:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "e9b9cbec-b7a0-4a54-a343-65c9e02e0252",
+    "title": "All Hands - India Team",
+    "date": "Mar 2, 2026 2:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Hima Madan",
+      "Bhumil",
+      "India Team",
+      "Apoorva Rashmi",
+      "Kanhaya Yadav",
+      "Puru Tiwari",
+      "Harshil Khant",
+      "Ushank Radadiya",
+      "Sanjanaa Rs",
+      "Paarth Bhatnagar"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "fdd6d21e-5d35-43bc-b528-b4dbb4861883",
+    "title": "New note",
+    "date": "Mar 2, 2026 7:21 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "77bd3e7a-26c8-4157-b95c-efc2e501782a",
+    "title": "Company All Hands",
+    "date": "Feb 26, 2026 11:00 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "61d2ce2a-00a9-4338-a763-ec7e3a7aaed6",
+    "title": "INT Team Standup",
+    "date": "Feb 26, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1c9aa495-1b0c-4c5a-90fc-e5dcfa79b709",
+    "title": "API Team Thursday Check-In",
+    "date": "Feb 26, 2026 9:45 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Arturo Inzunza",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "e54bd81c-d4ec-4751-9d40-5855c54eb352",
+    "title": "CSV Build",
+    "date": "Feb 26, 2026 7:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Jesus Oropeza",
+      "Raghavendra Swaroop",
+      "Radhika Gupta",
+      "Pampapati"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "33adfba6-74ff-4f01-99b4-29466f48390c",
+    "title": "Arun / Raghvendra",
+    "date": "Feb 26, 2026 4:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Raghavendra Swaroop"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "82729181-564c-4c61-9883-6e452d650449",
+    "title": "Onboarding Recurring Sync",
+    "date": "Feb 25, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Bhakti Bhikne",
+      "Pampapati",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "c9780738-044e-4cce-8522-c29cd79afe23",
+    "title": "Open Hours ( DevEx with AI tools )",
+    "date": "Feb 25, 2026 3:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Engineering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "159cdf9c-af28-4a60-bd2c-a1ffe9c28cbb",
+    "title": "Jesus / Abhishek - Quick Weekly Sync",
+    "date": "Feb 24, 2026 8:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Joropeza",
+      "Radhika Gupta",
+      "Pampapati",
+      "Josh Rupert"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "a4ec99dc-5d73-4bc3-b65c-5ebd3f7cfcc0",
+    "title": "Renewal by Andersen | BC Department Dimension ",
+    "date": "Feb 24, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Mohammed Raeef",
+      "Kartikeya Sharma",
+      "Erica Yonkman",
+      "Mitul Rawat",
+      "Fpesce",
+      "Rjackson",
+      "Dbishop",
+      "Lkunce"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "b59566c5-1cd3-4eef-b3e2-74ffad77f951",
+    "title": "Arun / Abhishek",
+    "date": "Feb 24, 2026 3:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "75e1e7fb-e0e8-4f7f-a8ab-2fd3d81ee7d6",
+    "title": "Arun / Ivan",
+    "date": "Feb 23, 2026 10:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ivan Zlatev"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "c34b70ce-422c-435c-8f45-1341de8ae18f",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Feb 23, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Lara Moulton",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Chirag Shah",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Ryan Ahmed",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "613d15ad-8419-4681-9a6c-727ac91fc384",
+    "title": "Onboarding Recurring Sync",
+    "date": "Feb 23, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Bhakti Bhikne",
+      "Pampapati",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "7f30c105-531d-4ffe-b78e-eceb8f176cb9",
+    "title": "Historical Invoice Mapping sync",
+    "date": "Feb 19, 2026 11:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Ivan Zlatev",
+      "Luke Detering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "6b3d3b46-f279-4906-bc44-6a580c4ff8ea",
+    "title": "PaaS/Onboarding Sprint Planning",
+    "date": "Feb 18, 2026 6:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Chirag Shah"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "275180c8-1413-47c9-bd5c-f452b984fd20",
+    "title": "Onboarding Recurring Sync",
+    "date": "Feb 18, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Bhakti Bhikne",
+      "Pampapati",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "a42ff577-47e8-4506-8367-254f7f3779a0",
+    "title": "Open Hours ( DevEx with AI tools )",
+    "date": "Feb 18, 2026 3:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Engineering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "ee89381a-a35b-46cf-9303-ca60d489b1da",
+    "title": "Onboarding Huddle",
+    "date": "Feb 17, 2026 6:03 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "ce691b5f-e386-4752-a19b-593e1c3adc5f",
+    "title": "Onboarding Recurring Sync",
+    "date": "Feb 16, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Bhakti Bhikne",
+      "Pampapati",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1841813c-0b66-402a-aaaa-3bdb7a8dc10e",
+    "title": "Arun / Kartikeya - BC",
+    "date": "Feb 13, 2026 12:23 PM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "02672b0d-5566-4f76-b0f0-a41f99639f03",
+    "title": "Arun / Rupesh",
+    "date": "Feb 13, 2026 3:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Rupesh Mishra"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "224555b4-48c4-47c8-bc9c-5109e4ab3e00",
+    "title": "INT Team Standup",
+    "date": "Feb 12, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Lara Moulton",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Ryan Ahmed",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "19091449-d980-44c0-8ab6-02d344850a8e",
+    "title": "API Team Thursday Check-In",
+    "date": "Feb 12, 2026 9:45 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Arturo Inzunza",
+      "Abhishek Goyal",
+      "Pampapati Shetty",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "0166c556-09dc-4d55-9f2e-0c7ad54da40d",
+    "title": "INT Team Wed Standup",
+    "date": "Feb 11, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Luke Detering",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Lara Moulton",
+      "Peter Niu",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Mel Faubert",
+      "Ryan Ahmed",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "56ba8355-c275-4f6e-9ba3-e7989d448ede",
+    "title": "Architecture Review: Integrations",
+    "date": "Feb 11, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Nicolas Battisti",
+      "Gustavo Fernandes",
+      "Manigandan Ganesan",
+      "Christina Dedrick",
+      "Kartikeya Sharma",
+      "Mitul Rawat",
+      "Steven Padilla",
+      "Don Dittmar",
+      "Ivan Zlatev",
+      "Engineering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "ac9f21e4-4007-4394-80bc-a9d0a71fb025",
+    "title": "Onboarding Recurring Sync",
+    "date": "Feb 11, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Bhakti Bhikne",
+      "Pampapati",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "a2a91bc4-f9e4-468e-b5c2-b9ce31a098c4",
+    "title": "Open Hours ( DevEx with AI tools )",
+    "date": "Feb 11, 2026 3:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Engineering"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "9cfcda4d-8dab-4e8e-8022-b020824916dc",
+    "title": "Arun / Mani",
+    "date": "Feb 11, 2026 6:23 AM",
+    "participants": [
+      "Arun Venkataramanan"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "bb1ba7a7-4a5d-4c4a-b193-aa4dc5e838e6",
+    "title": "Onboarding Project Standup",
+    "date": "Feb 10, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Arturo Inzunza",
+      "Qian Chen",
+      "Abhishek Goyal",
+      "Pampapati",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Kinman Covey"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "1cb46d59-2bd5-4233-86b9-e775dacc66d2",
+    "title": "Architecture Review: AI",
+    "date": "Feb 10, 2026 8:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Christina Dedrick",
+      "Swapnil Patil",
+      "Sai Sumanprayaga",
+      "Don Dittmar",
+      "Engineering",
+      "Paarth Bhatnagar"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "5f190f13-5ec7-4a8f-a1eb-e235a89b856a",
+    "title": "DevX",
+    "date": "Feb 10, 2026 4:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Amit Singh"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "75f2ddf6-ce52-42c3-8a71-c7bed9b10b27",
+    "title": "Arun / Ivan",
+    "date": "Feb 9, 2026 10:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Ivan Zlatev"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "f9889d66-19be-40ae-862a-5e4ad7df17e2",
+    "title": "Team TDD, PR Reviews & Mon Standup",
+    "date": "Feb 9, 2026 9:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya Sharma",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Luke Detering",
+      "Puru Tiwari",
+      "Lara Moulton",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Julie Harper",
+      "Chirag Shah",
+      "Mel Faubert",
+      "Nicolas Battisti",
+      "Ryan Ahmed",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "0520796c-4226-4662-977a-0795ba511a57",
+    "title": "PaaS - Reports",
+    "date": "Feb 9, 2026 7:30 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Manigandan Ganesan",
+      "Peter Niu",
+      "Amit Singh",
+      "Oliver Smith",
+      "Chirag Shah"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "11429f85-ec28-4fed-ab90-d4dae8d9f480",
+    "title": "Onboarding Recurring Sync",
+    "date": "Feb 9, 2026 6:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal",
+      "Bhakti Bhikne",
+      "Pampapati",
+      "Peter Niu",
+      "Manigandan Ganesan",
+      "Amit Singh",
+      "Chirag Shah",
+      "Josh Rupert",
+      "Radhika Gupta"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "5a0640fb-9a66-460e-946a-7c3036f46a1e",
+    "title": "Arun / Kartikeya",
+    "date": "Feb 9, 2026 5:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Kartikeya Sharma"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "56a3fc94-d1c0-4408-aefd-4681a3f57e60",
+    "title": "Arun / Abhishek",
+    "date": "Feb 9, 2026 1:00 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Abhishek Goyal"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "a2d4844e-73a9-44c5-ada2-025476836148",
+    "title": "INT Team Standup",
+    "date": "Feb 6, 2026 9:30 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Puru Tiwari",
+      "Eduardo Leon",
+      "Manigandan Ganesan",
+      "Kartikeya",
+      "Aniket",
+      "Rswaroop",
+      "Ivan Zlatev",
+      "Lara Moulton",
+      "Juan Herrera",
+      "Steven Padilla",
+      "Nishant Agarwal",
+      "Mel Faubert",
+      "Ryan Ahmed",
+      "Nicolas Battisti",
+      "Mitul Rawat",
+      "Gustavo Fernandes"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "6b878a7c-4bdf-42a0-a7fd-1ffeb3eb0d52",
+    "title": "Catalog Ingestion API Sync",
+    "date": "Feb 5, 2026 5:07 PM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Peter Niu"
+    ],
+    "summary": "",
+    "url": null
+  },
+  {
+    "id": "7551bdff-efac-4fc4-8bb9-1a7b87e79c6d",
+    "title": "Ottimate - Ravyx Kickoff",
+    "date": "Feb 5, 2026 11:00 AM",
+    "participants": [
+      "Arun Venkataramanan",
+      "Peter Niu",
+      "Cristian Maiorescu",
+      "Francis Grenier",
+      "Julie Vincent Beauchamp"
+    ],
+    "summary": "",
+    "url": null
+  }
+]
