@@ -43,3 +43,11 @@ export function createLinksForItem(itemId: string) {
     }
   }
 }
+
+export function createLinksForAll() {
+  const db = getDb();
+  const items = db.prepare('SELECT id FROM work_items').all() as { id: string }[];
+  for (const item of items) {
+    createLinksForItem(item.id);
+  }
+}
