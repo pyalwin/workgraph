@@ -72,31 +72,23 @@ Project: ${projectName} (${projectKey})
 Recent completed tickets and their linked PRs:
 ${ticketSummaries}
 
-Write a rich, descriptive summary using EXACTLY this structure. Each section MUST be its own paragraph separated by a blank line:
+Write a concise project summary as a flat bullet list. Each bullet is one line — a bold label followed by a short description. No section headers, no paragraphs, no nesting.
 
-**What shipped:** Use bullet points to list 3-5 key deliverables. Each bullet should name the feature and briefly explain what it does or why it matters. Group related items.
-
-**In progress:** 1-2 sentences about active work — what's being built next.
-
-**Watch:** 1-2 sentences flagging risks — repeated bug fixes (instability), stale areas, or bottlenecks.
-
-Example format:
-**What shipped:**
-- **Feature name** — what it does and why it matters
-- **Another feature** — brief explanation
-- **Bug fix area** — what was fixed and the impact
-
-**In progress:** Description of active work.
-
-**Watch:** Any risks or areas needing attention.
+Format — follow this EXACTLY:
+- **Label** — one sentence description
+- **Label** — one sentence description
+- **Label** — one sentence description
 
 Rules:
-- Each section header (**What shipped:**, **In progress:**, **Watch:**) must start on its own line with a blank line before it
-- Use bullet points (- ) for the shipped section, not prose paragraphs
-- Bold the feature/item name in each bullet with **name**
-- Do NOT include a title or heading before the first section
-- Do NOT repeat project name, ticket counts, completion %, or velocity — shown separately in dashboard
-- 150-250 words total`,
+- 5-8 bullets total covering: key features shipped, active work, and any risks
+- Each bullet is ONE line: **Bold name** — short explanation (under 20 words)
+- Mix shipped features, in-progress work, and risks naturally — do NOT group them under headers
+- Prefix risk items with a risk indicator like "Stale:" or "Repeated fix:"
+- Do NOT use section headers like "What shipped" or "In progress"
+- Do NOT write prose paragraphs
+- Do NOT repeat project name, ticket counts, percentages, or velocity numbers
+- Be specific — name actual features, APIs, and systems
+- Total output: 80-120 words`,
       }],
     });
 
