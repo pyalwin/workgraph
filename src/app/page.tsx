@@ -77,76 +77,49 @@ export default function OverviewPage() {
   const data = getOverviewData();
 
   // Map DB goals to display format
-  const goals = data.goalsData.length > 0
-    ? data.goalsData.map((g: any) => {
-        const total = g.total || 1;
-        const donePct = Math.round((g.done / total) * 100);
-        const wipPct = Math.round((g.active / total) * 100);
-        const trend = g.done > g.active ? 'up' as const : g.stale > g.active ? 'down' as const : 'up' as const;
-        return {
-          name: g.name.replace(' Leadership', '').replace('Operational ', 'Ops '),
-          detail: `${g.item_count} items · ${g.done} done · ${g.active} active`,
-          pct: donePct,
-          done: donePct,
-          wip: wipPct,
-          trend,
-        };
-      })
-    : [
-        { name: 'AI / Copilot', detail: '17 epics · 19 shipped · 8 active', pct: 42, done: 42, wip: 18, trend: 'up' as const },
-        { name: 'Platform', detail: '6 epics · 27 shipped', pct: 58, done: 58, wip: 12, trend: 'up' as const },
-        { name: 'Revenue & Retention', detail: '10 epics · 89%→95% GR target', pct: 31, done: 31, wip: 10, trend: 'down' as const },
-        { name: 'Integrations', detail: '10 epics · Data Dash rollout', pct: 47, done: 47, wip: 15, trend: 'up' as const },
-        { name: 'Ops Excellence', detail: 'R2: 72/110 on track', pct: 38, done: 38, wip: 20, trend: 'down' as const },
-        { name: 'Fast Onboarding', detail: '3.4mo→2wk · Login shipped', pct: 55, done: 55, wip: 8, trend: 'up' as const },
-      ];
+  const goals = data.goalsData.map((g: any) => {
+    const total = g.total || 1;
+    const donePct = Math.round((g.done / total) * 100);
+    const wipPct = Math.round((g.active / total) * 100);
+    const trend = g.done > g.active ? 'up' as const : g.stale > g.active ? 'down' as const : 'up' as const;
+    return {
+      name: g.name.replace(' Leadership', '').replace('Operational ', 'Ops '),
+      detail: `${g.item_count} items · ${g.done} done · ${g.active} active`,
+      pct: donePct,
+      done: donePct,
+      wip: wipPct,
+      trend,
+    };
+  });
 
-  const totalItems = data.totalItems || 285;
+  const totalItems = data.totalItems;
 
-  const staleItems = data.staleItems.length > 0
-    ? data.staleItems.map(s => ({ title: s.title, days: s.days, goal: s.goal_name }))
-    : [
-        { title: 'Bulk vendor ACH upload — awaiting API spec', days: 28, goal: 'Revenue' },
-        { title: 'VendorPay activation campaign — unassigned', days: 21, goal: 'Revenue' },
-        { title: 'Acumatica auth update — blocked on vendor', days: 16, goal: 'Integrations' },
-        { title: 'Generic build onboarding — design not started', days: 14, goal: 'Onboarding' },
-      ];
+  const staleItems = data.staleItems.map(s => ({ title: s.title, days: s.days, goal: s.goal_name }));
 
-  const decisions = data.recent.length > 0
-    ? data.recent.map(r => {
-        const d = new Date(r.created_at);
-        const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-        return {
-          month: months[d.getMonth()] || 'Apr',
-          day: String(d.getDate()),
-          text: r.title.length > 160 ? r.title.slice(0, 157) + '…' : r.title,
-          source: r.source === 'granola' ? 'Meeting' : r.source.charAt(0).toUpperCase() + r.source.slice(1),
-          goal: r.goal_name,
-        };
-      })
-    : [
-        { month: 'Apr', day: '10', text: 'Login revamp go-live confirmed — passkeys + TOTP authenticator replacing password/SMS', source: 'Slack', goal: 'Onboarding' },
-        { month: 'Apr', day: '8', text: 'R2 scope locked at 110 commitments — QA deadline May 29', source: 'Jira', goal: 'Ops Excellence' },
-        { month: 'Apr', day: '2', text: 'Stabilization marathon May 28 – Jul 20. Feature freeze. 1,000+ bug burndown', source: 'Meeting', goal: 'Ops Excellence' },
-        { month: 'Mar', day: '15', text: 'Data Dash enforced as new ERP standard — legacy serializer sunset Q3', source: 'Slack', goal: 'Integration Excellence' },
-      ];
+  // Top 2 stale items over 21 days become alert cards
+  const alertItems = staleItems.filter(s => s.days >= 21).slice(0, 2);
+
+  const decisions = data.recent.map(r => {
+    const d = new Date(r.created_at);
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return {
+      month: months[d.getMonth()] || 'Apr',
+      day: String(d.getDate()),
+      text: r.title.length > 160 ? r.title.slice(0, 157) + '…' : r.title,
+      source: r.source === 'granola' ? 'Meeting' : r.source.charAt(0).toUpperCase() + r.source.slice(1),
+      goal: r.goal_name,
+    };
+  });
 
   const sourceColorMap: Record<string, string> = { jira: 'bg-[#111]', slack: 'bg-[#555]', granola: 'bg-[#999]', notion: 'bg-[#bbb]', gmail: 'bg-[#ddd]' };
   const sourceNameMap: Record<string, string> = { jira: 'Jira', slack: 'Slack', granola: 'Meetings', notion: 'Notion', gmail: 'Gmail' };
-  const sources = data.sources.length > 0
-    ? data.sources.map(s => ({ name: sourceNameMap[s.source] || s.source, count: s.c, color: sourceColorMap[s.source] || 'bg-[#ddd]' }))
-    : [
-        { name: 'Jira', count: 100, color: 'bg-[#111]' },
-        { name: 'Meetings', count: 140, color: 'bg-[#999]' },
-        { name: 'Slack', count: 20, color: 'bg-[#555]' },
-        { name: 'Notion', count: 25, color: 'bg-[#bbb]' },
-      ];
+  const sources = data.sources.map(s => ({ name: sourceNameMap[s.source] || s.source, count: s.c, color: sourceColorMap[s.source] || 'bg-[#ddd]' }));
 
   return (
     <div className="max-w-[1180px] mx-auto px-10 pt-8 pb-20">
       <div className="mb-8">
         <h1 className="text-[1.5rem] font-bold tracking-tight text-black mb-[2px]">Good afternoon, Arun</h1>
-        <p className="text-[0.82rem] text-[#999]">Jan 1 – Apr 16, 2026 · {totalItems} items across 5 sources</p>
+        <p className="text-[0.82rem] text-[#999]">{totalItems > 0 ? `${totalItems} items across ${sources.length} source${sources.length !== 1 ? 's' : ''}` : 'No data yet. Run a sync from Settings.'}</p>
       </div>
 
       <div className="grid grid-cols-12 gap-[10px] mb-11">
@@ -155,7 +128,7 @@ export default function OverviewPage() {
           <CardContent className="pt-[22px]">
             <CardTitle className="mb-[18px]">Strategic Pillars</CardTitle>
             <div className="flex flex-col">
-              {goals.map((g, i) => (
+              {goals.length > 0 ? goals.map((g, i) => (
                 <div key={i} className="grid grid-cols-[175px_1fr_80px_36px] items-center gap-5 py-[13px] px-[6px] border-b border-black/[0.07] last:border-b-0 cursor-pointer hover:bg-[#f5f5f5] hover:rounded-lg transition-all">
                   <div>
                     <div className="text-[0.87rem] font-medium text-black tracking-tight">{g.name}</div>
@@ -167,49 +140,52 @@ export default function OverviewPage() {
                     {g.pct}%
                   </div>
                 </div>
-              ))}
+              )) : (
+                <div className="py-10 text-center text-[0.82rem] text-[#999]">No goals with data yet. Run a sync from Settings.</div>
+              )}
             </div>
           </CardContent>
         </Card>
 
-        {/* Alert Cards */}
-        <div className="col-span-4">
-          <AlertCard
-            title="Vendor pay activation frozen 3 weeks"
-            body="600+ customers without activation. No Jira movement since Mar 24. Last Slack mention Mar 26."
-            tag="→ PAY-298 unassigned"
-          />
-        </div>
-        <div className="col-span-4">
-          <AlertCard
-            title="38 R2 items uncommitted"
-            body='QA deadline May 29. Current velocity needs <strong>+40%</strong> to clear. Stabilization marathon starts May 28.'
-            tag="→ 6 weeks remaining"
-          />
-        </div>
+        {/* Alert Cards — top 2 stale items over 21 days */}
+        {alertItems.map((item, i) => (
+          <div key={i} className="col-span-4">
+            <AlertCard
+              title={`${item.title} — stale ${item.days} days`}
+              body={`No movement in ${item.days} days. Goal: ${item.goal}.`}
+              tag={`→ ${item.days}d stale`}
+            />
+          </div>
+        ))}
 
         {/* Stats */}
-        <StatCard label="Work Items" value={String(totalItems)} delta={`across ${sources.length} sources`} trend="up" />
-        <StatCard label="Decisions" value={String(data.totalDecisions || 160)} delta="meetings + messages" trend="up" />
-        <StatCard label="Cross-References" value={String(data.totalLinks || 1)} delta="auto-linked across sources" />
+        <StatCard label="Work Items" value={String(totalItems)} delta={sources.length > 0 ? `across ${sources.length} source${sources.length !== 1 ? 's' : ''}` : 'no sources'} trend="up" />
+        <StatCard label="Decisions" value={String(data.totalDecisions)} delta="meetings + messages" trend="up" />
+        <StatCard label="Cross-References" value={String(data.totalLinks)} delta="auto-linked across sources" />
 
         {/* Source Distribution */}
         <Card className="col-span-6">
           <CardContent className="pt-[22px]">
             <CardTitle className="mb-[18px]">Knowledge Base · {totalItems} items</CardTitle>
-            <div className="flex gap-[2px] h-[6px] rounded-[3px] overflow-hidden mb-[14px]">
-              {sources.map((s) => (
-                <div key={s.name} className={cn("rounded-[3px]", s.color)} style={{ width: `${Math.round((s.count / totalItems) * 100)}%` }} />
-              ))}
-            </div>
-            <div className="flex gap-[14px] flex-wrap">
-              {sources.map((s) => (
-                <div key={s.name} className="flex items-center gap-[5px] text-[0.7rem] text-[#999]">
-                  <div className={cn("w-[6px] h-[6px] rounded-[2px]", s.color)} />
-                  {s.name} <span className="font-semibold text-[#333] tabular-nums">{s.count}</span>
+            {sources.length > 0 ? (
+              <>
+                <div className="flex gap-[2px] h-[6px] rounded-[3px] overflow-hidden mb-[14px]">
+                  {sources.map((s) => (
+                    <div key={s.name} className={cn("rounded-[3px]", s.color)} style={{ width: `${Math.round((s.count / Math.max(totalItems, 1)) * 100)}%` }} />
+                  ))}
                 </div>
-              ))}
-            </div>
+                <div className="flex gap-[14px] flex-wrap">
+                  {sources.map((s) => (
+                    <div key={s.name} className="flex items-center gap-[5px] text-[0.7rem] text-[#999]">
+                      <div className={cn("w-[6px] h-[6px] rounded-[2px]", s.color)} />
+                      {s.name} <span className="font-semibold text-[#333] tabular-nums">{s.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="py-6 text-center text-[0.82rem] text-[#999]">No sources synced yet.</div>
+            )}
           </CardContent>
         </Card>
 
@@ -217,7 +193,7 @@ export default function OverviewPage() {
         <Card className="col-span-6">
           <CardContent className="pt-[22px]">
             <CardTitle className="mb-[18px]">Stale · No movement 14+ days</CardTitle>
-            {staleItems.map((item, i) => (
+            {staleItems.length > 0 ? staleItems.map((item, i) => (
               <div key={i} className={cn("flex items-center gap-3 py-[9px]", i > 0 && "border-t border-black/[0.07]")}>
                 <Badge variant={item.days >= 21 ? "destructive" : "secondary"} className={cn(
                   "text-[0.68rem] font-bold tabular-nums min-w-[30px] justify-center py-[2px]",
@@ -228,7 +204,9 @@ export default function OverviewPage() {
                 <div className="flex-1 text-[0.78rem] text-[#777]">{item.title}</div>
                 <Badge variant="secondary" className="text-[0.63rem]">{item.goal}</Badge>
               </div>
-            ))}
+            )) : (
+              <div className="py-6 text-center text-[0.82rem] text-[#999]">No stale items. Everything is moving.</div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -248,7 +226,7 @@ export default function OverviewPage() {
         </div>
       </div>
       <div className="flex flex-col">
-        {decisions.map((d, i) => (
+        {decisions.length > 0 ? decisions.map((d, i) => (
           <div key={i} className="grid grid-cols-[40px_1fr_auto] gap-[14px] items-start py-[13px] border-t border-black/[0.07] cursor-pointer hover:bg-[#f5f5f5] hover:-mx-2 hover:px-2 hover:rounded-lg transition-all">
             <div className="text-[0.68rem] text-[#999] pt-[2px]">
               {d.month}<span className="block text-[0.82rem] font-semibold text-[#333]">{d.day}</span>
@@ -265,7 +243,9 @@ export default function OverviewPage() {
               <div className="w-[5px] h-[5px] rounded-full bg-[#ddd]" />
             </div>
           </div>
-        ))}
+        )) : (
+          <div className="py-10 text-center text-[0.82rem] text-[#999]">No decisions recorded yet. Sync meetings or messages to populate.</div>
+        )}
       </div>
     </div>
   );
