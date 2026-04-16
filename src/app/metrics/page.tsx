@@ -1,37 +1,191 @@
 import { StatCard } from '@/components/stat-card';
+import { getDb } from '@/lib/db';
+import { initSchema, seedGoals } from '@/lib/schema';
 
-const goalHealth = [
-  { name: 'AI / Copilot', pct: 42, trend: '+6%', trendDir: 'up', risk: false },
-  { name: 'Platform', pct: 58, trend: '+4%', trendDir: 'up', risk: false },
-  { name: 'Revenue', pct: 31, trend: '-3%', trendDir: 'down', risk: true },
-  { name: 'Integrations', pct: 47, trend: '+8%', trendDir: 'up', risk: false },
-  { name: 'Ops Excellence', pct: 38, trend: '-5%', trendDir: 'down', risk: true },
-  { name: 'Onboarding', pct: 55, trend: '+11%', trendDir: 'up', risk: false },
-];
+export const dynamic = 'force-dynamic';
 
-const anomalies = [
-  { severity: 'high', text: '<strong>Vendor pay activation</strong> — zero Jira movement for 21 days. Historically averages 3 updates/week.', when: 'Detected Apr 14 · Revenue & Retention' },
-  { severity: 'high', text: '<strong>R2 velocity drop</strong> — 38 uncommitted items with 6 weeks to QA deadline. Need +40% throughput.', when: 'Detected Apr 10 · Ops Excellence' },
-  { severity: 'med', text: '<strong>Copilot p95 latency</strong> jumped 3× (1.2s → 3.8s) after agent pipeline deploy on Apr 6.', when: 'Detected Apr 8 · AI/Copilot' },
-  { severity: 'low', text: '<strong>Slack discussion spike</strong> — #integrations volume 4× above baseline. Possible blocker surfacing.', when: 'Detected Apr 12 · Integration Excellence' },
-];
+interface GoalRow {
+  id: string;
+  name: string;
+  total: number;
+  done: number;
+  active: number;
+}
 
-const throughput = [
-  { src: 'Jira', label: 'JRA', color: 'bg-g1', count: 342, pct: 100, delta: '+18%', up: true },
-  { src: 'Slack', label: 'SLK', color: 'bg-g3', count: 248, pct: 72, delta: '+9%', up: true },
-  { src: 'Meetings', label: 'MTG', color: 'bg-g5', count: 140, pct: 41, delta: '+22%', up: true },
-  { src: 'Notion', label: 'NOT', color: 'bg-g6', count: 82, pct: 24, delta: '-4%', up: false },
-  { src: 'Gmail', label: 'GML', color: 'bg-g7 !text-g3', count: 35, pct: 10, delta: '+3%', up: true },
-];
+interface SourceRow {
+  source: string;
+  count: number;
+}
 
-const weekBars = [45,52,38,61,55,48,70,65,42,58,72,80,68];
+interface CountRow {
+  c: number;
+}
+
+interface WeekRow {
+  week_start: string;
+  count: number;
+}
+
+interface AnomalyItem {
+  severity: 'high' | 'med' | 'low';
+  text: string;
+  when: string;
+}
+
+const SOURCE_BADGES: Record<string, { label: string; color: string }> = {
+  jira: { label: 'JRA', color: 'bg-g1' },
+  slack: { label: 'SLK', color: 'bg-g3' },
+  meetings: { label: 'MTG', color: 'bg-g5' },
+  notion: { label: 'NOT', color: 'bg-g6' },
+  gmail: { label: 'GML', color: 'bg-g7 !text-g3' },
+  github: { label: 'GIT', color: 'bg-g2' },
+};
+
+function getSourceBadge(source: string) {
+  const key = source.toLowerCase();
+  return SOURCE_BADGES[key] ?? { label: source.slice(0, 3).toUpperCase(), color: 'bg-g4' };
+}
 
 export default function MetricsPage() {
+  const db = getDb();
+  initSchema();
+  seedGoals();
+
+  // --- Goal Health ---
+  const goalHealth = db.prepare(`
+    SELECT g.name, g.id,
+      COUNT(it.item_id) as total,
+      SUM(CASE WHEN wi.status IN ('done', 'closed', 'resolved') THEN 1 ELSE 0 END) as done,
+      SUM(CASE WHEN wi.status IN ('open', 'in_progress', 'to_do') THEN 1 ELSE 0 END) as active
+    FROM goals g
+    LEFT JOIN item_tags it ON it.tag_id = g.id
+    LEFT JOIN work_items wi ON wi.id = it.item_id
+    WHERE g.status = 'active'
+    GROUP BY g.id
+    ORDER BY g.sort_order
+  `).all() as GoalRow[];
+
+  // --- Source Throughput ---
+  const sources = db.prepare(
+    "SELECT source, COUNT(*) as count FROM work_items GROUP BY source ORDER BY count DESC"
+  ).all() as SourceRow[];
+
+  const maxSourceCount = sources.length > 0 ? sources[0].count : 1;
+
+  // --- Totals ---
+  const totalItems = (db.prepare('SELECT COUNT(*) as c FROM work_items').get() as CountRow).c;
+  const totalLinks = (db.prepare('SELECT COUNT(*) as c FROM links').get() as CountRow).c;
+  const staleCount = (db.prepare(
+    "SELECT COUNT(*) as c FROM work_items WHERE status NOT IN ('done','closed','resolved') AND julianday('now') - julianday(COALESCE(updated_at, created_at)) >= 14"
+  ).get() as CountRow).c;
+
+  // --- Velocity: items updated in last 7 days ---
+  const velocity7d = (db.prepare(
+    "SELECT COUNT(*) as c FROM work_items WHERE updated_at >= datetime('now', '-7 days')"
+  ).get() as CountRow).c;
+
+  // --- Computed KPIs ---
+  const activeItems = totalItems > 0
+    ? (db.prepare("SELECT COUNT(*) as c FROM work_items WHERE status NOT IN ('done','closed','resolved')").get() as CountRow).c
+    : 0;
+
+  const staleRate = activeItems > 0 ? ((staleCount / activeItems) * 100).toFixed(1) : '0.0';
+  const linkDensity = totalItems > 0 ? ((totalLinks / totalItems)).toFixed(1) : '0.0';
+
+  // --- Weekly Throughput (last 13 weeks) ---
+  const weeklyData = db.prepare(`
+    SELECT strftime('%Y-%W', created_at) as week_start, COUNT(*) as count
+    FROM work_items
+    WHERE created_at >= datetime('now', '-91 days')
+    GROUP BY week_start
+    ORDER BY week_start ASC
+  `).all() as WeekRow[];
+
+  // Pad to 13 weeks — fill gaps with 0
+  const weekBars: number[] = [];
+  const weekLabels: string[] = [];
+  if (weeklyData.length > 0) {
+    for (let i = 0; i < Math.min(weeklyData.length, 13); i++) {
+      weekBars.push(weeklyData[i].count);
+      weekLabels.push(`W${i + 1}`);
+    }
+  }
+  // If fewer than 13 weeks, pad
+  while (weekBars.length < 13) {
+    weekBars.push(0);
+    weekLabels.push(`W${weekBars.length}`);
+  }
+
+  const maxWeekCount = Math.max(...weekBars, 1);
+  const peakWeek = Math.max(...weekBars);
+  const minWeek = Math.min(...weekBars.filter(b => b > 0), peakWeek);
+
+  // --- Anomaly Detection ---
+  const anomalies: AnomalyItem[] = [];
+
+  // Items stale > 21 days
+  const veryStaleCount = (db.prepare(
+    "SELECT COUNT(*) as c FROM work_items WHERE status NOT IN ('done','closed','resolved') AND julianday('now') - julianday(COALESCE(updated_at, created_at)) >= 21"
+  ).get() as CountRow).c;
+  if (veryStaleCount > 0) {
+    anomalies.push({
+      severity: 'high',
+      text: `<strong>${veryStaleCount} work item${veryStaleCount > 1 ? 's' : ''}</strong> stale for 21+ days with no updates.`,
+      when: `Detected now`,
+    });
+  }
+
+  // Goals with 0% completion (but have items)
+  const zeroGoals = goalHealth.filter(g => g.total > 0 && g.done === 0);
+  for (const g of zeroGoals) {
+    anomalies.push({
+      severity: 'high',
+      text: `<strong>${g.name}</strong> — 0% completion across ${g.total} tagged item${g.total > 1 ? 's' : ''}.`,
+      when: `Detected now`,
+    });
+  }
+
+  // Goals with no items at all
+  const emptyGoals = goalHealth.filter(g => g.total === 0);
+  for (const g of emptyGoals) {
+    anomalies.push({
+      severity: 'med',
+      text: `<strong>${g.name}</strong> has no tagged work items. Goal may be unlinked from active work.`,
+      when: `Detected now`,
+    });
+  }
+
+  // Low velocity warning
+  if (velocity7d === 0 && totalItems > 0) {
+    anomalies.push({
+      severity: 'med',
+      text: `<strong>Zero velocity</strong> — no items updated in the last 7 days.`,
+      when: `Detected now`,
+    });
+  }
+
+  // Link density warning
+  if (totalItems > 5 && totalLinks === 0) {
+    anomalies.push({
+      severity: 'low',
+      text: `<strong>No cross-references</strong> detected. Work items may be siloed across sources.`,
+      when: `Detected now`,
+    });
+  }
+
+  if (anomalies.length === 0) {
+    anomalies.push({
+      severity: 'low',
+      text: `No anomalies detected. All systems nominal.`,
+      when: `Checked now`,
+    });
+  }
+
   return (
     <div className="max-w-[1180px] mx-auto px-10 pt-8 pb-20">
       <div className="mb-7">
         <h1 className="text-[1.5rem] font-bold tracking-tight text-black mb-[2px]">Metrics</h1>
-        <p className="text-[0.82rem] text-g5">Performance analytics across all 6 strategic pillars</p>
+        <p className="text-[0.82rem] text-g5">Performance analytics across all tracked goals</p>
       </div>
 
       {/* Period */}
@@ -45,24 +199,40 @@ export default function MetricsPage() {
 
       <div className="grid grid-cols-12 gap-[10px]">
         {/* KPIs */}
-        <div className="col-span-3"><StatCard label="Velocity" value="38" delta="↑ 12% vs prior 90d" trend="up" /></div>
-        <div className="col-span-3"><StatCard label="Cycle Time" value="4.2d" delta="↓ 0.8d improvement" trend="up" /></div>
-        <div className="col-span-3"><StatCard label="Stale Rate" value="6.8%" delta="↑ 2.1% vs prior" trend="down" /></div>
-        <div className="col-span-3"><StatCard label="Link Density" value="2.8×" delta="↑ avg cross-refs per item" trend="up" /></div>
+        <div className="col-span-3">
+          <StatCard label="Velocity (7d)" value={String(velocity7d)} delta={`${totalItems} total items tracked`} trend="up" />
+        </div>
+        <div className="col-span-3">
+          <StatCard label="Active Items" value={String(activeItems)} delta={`${totalItems} total across all sources`} trend="up" />
+        </div>
+        <div className="col-span-3">
+          <StatCard label="Stale Rate" value={`${staleRate}%`} delta={`${staleCount} item${staleCount !== 1 ? 's' : ''} idle 14+ days`} trend={Number(staleRate) > 15 ? 'down' : 'up'} />
+        </div>
+        <div className="col-span-3">
+          <StatCard label="Link Density" value={`${linkDensity}x`} delta={`${totalLinks} cross-references`} trend={Number(linkDensity) >= 1 ? 'up' : 'down'} />
+        </div>
 
         {/* Velocity chart */}
         <div className="col-span-6 bg-surface border border-black/[0.07] rounded-card p-[22px]">
           <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">Weekly Throughput</div>
           <div className="flex items-end gap-[3px] h-[140px] pt-[10px]">
-            {weekBars.map((h, i) => (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                <div
-                  className={`w-full rounded-t-[3px] ${h === 80 ? 'bg-accent-green' : h === 42 ? 'bg-g5' : 'bg-black'}`}
-                  style={{ height: `${h}%` }}
-                />
-                <span className="text-[0.58rem] text-g5 tabular-nums">W{i+1}</span>
-              </div>
-            ))}
+            {weekBars.map((count, i) => {
+              const heightPct = maxWeekCount > 0 ? Math.max((count / maxWeekCount) * 100, count > 0 ? 4 : 0) : 0;
+              const barColor = count === peakWeek && count > 0
+                ? 'bg-accent-green'
+                : count === minWeek && count > 0 && count !== peakWeek
+                ? 'bg-g5'
+                : 'bg-black';
+              return (
+                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                  <div
+                    className={`w-full rounded-t-[3px] ${count === 0 ? 'bg-g8' : barColor}`}
+                    style={{ height: `${count === 0 ? 2 : heightPct}%` }}
+                  />
+                  <span className="text-[0.58rem] text-g5 tabular-nums">{weekLabels[i]}</span>
+                </div>
+              );
+            })}
           </div>
           <div className="flex gap-4 mt-3">
             <div className="flex items-center gap-[5px] text-[0.68rem] text-g5"><span className="w-2 h-2 rounded-sm bg-black" /> Normal</div>
@@ -74,17 +244,26 @@ export default function MetricsPage() {
         {/* Goal health */}
         <div className="col-span-6 bg-surface border border-black/[0.07] rounded-card p-[22px]">
           <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">Goal Health</div>
-          {goalHealth.map((g, i) => (
-            <div key={i} className="grid grid-cols-[130px_1fr_50px_50px] items-center gap-[14px] py-[10px] border-b border-black/[0.07] last:border-b-0">
-              <div className="text-[0.78rem] font-medium text-g2">{g.name}</div>
-              <div className="flex h-[6px] rounded-[3px] overflow-hidden gap-[2px] bg-g8">
-                <div className="bg-black rounded-[3px]" style={{ width: `${g.pct}%` }} />
-                <div className="bg-g5 rounded-[3px]" style={{ width: '12%' }} />
-              </div>
-              <div className={`text-[0.74rem] font-semibold tabular-nums text-right ${g.risk ? 'text-accent-red' : g.pct >= 50 ? 'text-accent-green' : 'text-g3'}`}>{g.pct}%</div>
-              <div className={`text-right text-[0.68rem] font-medium ${g.trendDir === 'up' ? 'text-accent-green' : 'text-accent-red'}`}>{g.trend}</div>
-            </div>
-          ))}
+          {goalHealth.length === 0 ? (
+            <div className="text-[0.8rem] text-g5 py-4">No active goals found.</div>
+          ) : (
+            goalHealth.map((g, i) => {
+              const pct = g.total > 0 ? Math.round((g.done / g.total) * 100) : 0;
+              const activePct = g.total > 0 ? Math.round((g.active / g.total) * 100) : 0;
+              const risk = pct < 25 && g.total > 0;
+              return (
+                <div key={g.id} className="grid grid-cols-[130px_1fr_50px_50px] items-center gap-[14px] py-[10px] border-b border-black/[0.07] last:border-b-0">
+                  <div className="text-[0.78rem] font-medium text-g2">{g.name}</div>
+                  <div className="flex h-[6px] rounded-[3px] overflow-hidden gap-[2px] bg-g8">
+                    <div className="bg-black rounded-[3px]" style={{ width: `${pct}%` }} />
+                    <div className="bg-g5 rounded-[3px]" style={{ width: `${activePct}%` }} />
+                  </div>
+                  <div className={`text-[0.74rem] font-semibold tabular-nums text-right ${risk ? 'text-accent-red' : pct >= 50 ? 'text-accent-green' : 'text-g3'}`}>{pct}%</div>
+                  <div className="text-right text-[0.68rem] font-medium text-g5">{g.total}</div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* Anomalies */}
@@ -103,20 +282,27 @@ export default function MetricsPage() {
 
         {/* Source throughput */}
         <div className="col-span-6 bg-surface border border-black/[0.07] rounded-card p-[22px]">
-          <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">Source Throughput · Last 90 Days</div>
-          {throughput.map((t, i) => (
-            <div key={i} className={`flex items-center gap-3 py-[9px] ${i > 0 ? 'border-t border-black/[0.07]' : ''}`}>
-              <div className={`w-6 h-6 rounded-[5px] grid place-items-center text-[0.52rem] font-bold uppercase text-white ${t.color}`}>{t.label}</div>
-              <div className="flex-1 text-[0.78rem] text-g4">{t.src}</div>
-              <div className="text-[0.78rem] font-semibold tabular-nums text-g2 min-w-[36px] text-right">{t.count}</div>
-              <div className="w-[120px]">
-                <div className="h-1 rounded-sm bg-g8 overflow-hidden">
-                  <div className="h-full rounded-sm bg-black" style={{ width: `${t.pct}%` }} />
+          <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">Source Throughput</div>
+          {sources.length === 0 ? (
+            <div className="text-[0.8rem] text-g5 py-4">No work items synced yet.</div>
+          ) : (
+            sources.map((t, i) => {
+              const badge = getSourceBadge(t.source);
+              const pct = Math.round((t.count / maxSourceCount) * 100);
+              return (
+                <div key={i} className={`flex items-center gap-3 py-[9px] ${i > 0 ? 'border-t border-black/[0.07]' : ''}`}>
+                  <div className={`w-6 h-6 rounded-[5px] grid place-items-center text-[0.52rem] font-bold uppercase text-white ${badge.color}`}>{badge.label}</div>
+                  <div className="flex-1 text-[0.78rem] text-g4">{t.source}</div>
+                  <div className="text-[0.78rem] font-semibold tabular-nums text-g2 min-w-[36px] text-right">{t.count}</div>
+                  <div className="w-[120px]">
+                    <div className="h-1 rounded-sm bg-g8 overflow-hidden">
+                      <div className="h-full rounded-sm bg-black" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className={`text-[0.67rem] font-medium min-w-[48px] text-right ${t.up ? 'text-accent-green' : 'text-accent-red'}`}>{t.delta}</div>
-            </div>
-          ))}
+              );
+            })
+          )}
         </div>
       </div>
     </div>
