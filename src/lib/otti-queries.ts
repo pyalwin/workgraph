@@ -443,12 +443,25 @@ export function getUserMetrics(userId: string, period: string): UserMetrics {
 
   if (daysSinceLast > 14 && total > 0) trend = 'churned';
 
-  // Daily volume
-  const dailyRows = db.prepare(`
+  // Daily volume — fill every day in range, 0 for inactive days
+  const dailyMap = new Map<string, number>();
+  const cursor = new Date(start);
+  const endD = new Date(end);
+  while (cursor <= endD) {
+    dailyMap.set(cursor.toISOString().slice(0, 10), 0);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  const rawDaily = db.prepare(`
     SELECT DATE(ts_start) as date, COUNT(*) as count FROM otti_sessions
     WHERE user_id = ? AND ts_start >= ? AND ts_start < ?
-    GROUP BY DATE(ts_start) ORDER BY date ASC
+    GROUP BY DATE(ts_start)
   `).all(userId, start, endTs) as DailyVolume[];
+  for (const r of rawDaily) {
+    dailyMap.set(r.date, r.count);
+  }
+  const dailyRows: DailyVolume[] = Array.from(dailyMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }));
 
   // Day of week distribution (0=Sun...6=Sat → remap to Mon-Sun)
   const dowRows = db.prepare(`
