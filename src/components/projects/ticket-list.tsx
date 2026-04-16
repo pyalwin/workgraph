@@ -118,22 +118,33 @@ export function TicketList({ tickets }: TicketListProps) {
 
               {/* Linked PRs */}
               {t.linked_prs.length > 0 ? (
-                <div className="flex flex-wrap gap-[6px] mt-[6px] ml-[2px]">
-                  {t.linked_prs.map(pr => (
-                    <div key={pr.source_id} className="flex items-center gap-[5px] text-[0.68rem] text-g5 bg-[#fafafa] border border-black/[0.05] px-[8px] py-[2px] rounded">
-                      <span className="font-medium text-g3">GH</span>
-                      {pr.url ? (
-                        <a href={pr.url} target="_blank" rel="noopener noreferrer" className="text-g5 hover:text-g3 no-underline hover:underline">
-                          {pr.source_id.split('/').pop()}
-                        </a>
-                      ) : (
-                        <span>{pr.source_id.split('/').pop()}</span>
-                      )}
-                      <span className="text-g6">
-                        {pr.updated_at ? formatDate(pr.updated_at) : ''}
-                      </span>
-                    </div>
-                  ))}
+                <div className="flex flex-wrap gap-[6px] mt-[8px] ml-[2px]">
+                  {t.linked_prs.map(pr => {
+                    const prNum = pr.source_id.split('/').pop() || pr.source_id;
+                    const repo = pr.repo?.split('/').pop() || '';
+                    const isMerged = pr.status === 'done' || pr.status === 'merged';
+                    return (
+                      <a
+                        key={pr.source_id}
+                        href={pr.url || '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-[6px] text-[0.7rem] no-underline bg-[#111] text-white px-[10px] py-[4px] rounded-[6px] hover:bg-[#333] transition-colors"
+                      >
+                        <svg className="w-[14px] h-[14px] shrink-0" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M7.177 3.073L9.573.677A.25.25 0 0110 .854v4.792a.25.25 0 01-.427.177L7.177 3.427a.25.25 0 010-.354zM3.75 2.5a.75.75 0 100 1.5.75.75 0 000-1.5zm-2.25.75a2.25 2.25 0 113 2.122v5.256a2.251 2.251 0 11-1.5 0V5.372A2.25 2.25 0 011.5 3.25zM11 2.5h-1V4h1a1 1 0 011 1v5.628a2.251 2.251 0 101.5 0V5A2.5 2.5 0 0011 2.5zm1 10.25a.75.75 0 111.5 0 .75.75 0 01-1.5 0zM3.75 12a.75.75 0 100 1.5.75.75 0 000-1.5z"/>
+                        </svg>
+                        <span className="font-medium">{prNum}</span>
+                        {repo && <span className="text-[0.62rem] text-white/60">{repo}</span>}
+                        {isMerged && (
+                          <span className="text-[0.58rem] bg-white/20 px-[5px] py-[0.5px] rounded">merged</span>
+                        )}
+                        {pr.updated_at && (
+                          <span className="text-[0.6rem] text-white/50">{formatDate(pr.updated_at)}</span>
+                        )}
+                      </a>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-[0.66rem] text-g6 mt-[4px] ml-[2px] italic">No linked PRs</div>
