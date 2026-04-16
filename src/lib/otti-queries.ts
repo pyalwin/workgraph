@@ -21,6 +21,7 @@ interface SpeedByDimension {
 
 interface TopUser {
   user_id: string;
+  display_name: string;
   sessions: number;
   persona: string;
   top_intents: string[];
@@ -297,8 +298,13 @@ export function getOttiMetrics(period: string, compare: boolean, splitDate: stri
       GROUP BY intent ORDER BY c DESC LIMIT 2
     `).all(u.user_id, currentStart, endTs) as { intent: string; c: number }[];
 
+    const userRow = db.prepare(
+      'SELECT display_name FROM otti_users WHERE user_id = ?'
+    ).get(u.user_id) as { display_name: string } | undefined;
+
     return {
       user_id: u.user_id,
+      display_name: userRow?.display_name || u.user_id,
       sessions: u.sessions,
       persona: personaRow?.persona || 'unknown',
       top_intents: intentRows.map(i => i.intent),

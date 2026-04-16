@@ -31,6 +31,7 @@ interface SpeedByDimension {
 
 interface TopUser {
   user_id: string;
+  display_name: string;
   sessions: number;
   persona: string;
   top_intents: string[];
@@ -269,6 +270,7 @@ export function OttiClient() {
             <SpeedTable title="Speed by Persona" rows={d.speed_by_persona} />
           </div>
           {/* Speed Buckets */}
+          {/* Speed Buckets */}
           <div className="col-span-12 bg-surface border border-black/[0.07] rounded-card p-[22px]">
             <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">
               Speed Distribution
@@ -299,22 +301,22 @@ export function OttiClient() {
         </div>
         <div className="grid grid-cols-12 gap-[10px]">
           {/* Top Users */}
-          <div className="col-span-6 bg-surface border border-black/[0.07] rounded-card p-[22px]">
+          <div className="col-span-7 bg-surface border border-black/[0.07] rounded-card p-[22px]">
             <div className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-g5 mb-[18px]">
               Top Users
             </div>
             <div className="space-y-0">
-              <div className="grid grid-cols-[1fr_60px_80px_80px] gap-2 pb-2 border-b border-black/[0.07]">
+              <div className="grid grid-cols-[1fr_56px_90px_100px] gap-3 pb-2 border-b border-black/[0.07]">
                 <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">User</div>
                 <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5 text-right">Sessions</div>
                 <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Persona</div>
                 <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Top Intent</div>
               </div>
               {d.top_users.map((u) => (
-                <div key={u.user_id} className="grid grid-cols-[1fr_60px_80px_80px] gap-2 py-[9px] border-b border-black/[0.07] last:border-b-0">
-                  <div className="text-[0.74rem] font-mono text-g3 truncate">{u.user_id}</div>
+                <div key={u.user_id} className="grid grid-cols-[1fr_56px_90px_100px] gap-3 py-[10px] border-b border-black/[0.07] last:border-b-0">
+                  <div className="text-[0.78rem] font-medium text-g2 truncate" title={u.user_id}>{u.display_name}</div>
                   <div className="text-[0.78rem] font-semibold tabular-nums text-g2 text-right">{u.sessions}</div>
-                  <div className="text-[0.68rem] px-[6px] py-[1px] rounded bg-g9 text-g3 w-fit">{u.persona}</div>
+                  <div className="text-[0.66rem] px-[7px] py-[2px] rounded-md bg-g9 text-g3 w-fit truncate">{u.persona}</div>
                   <div className="text-[0.68rem] text-g4 truncate">{u.top_intents[0] || ''}</div>
                 </div>
               ))}
@@ -322,7 +324,7 @@ export function OttiClient() {
           </div>
 
           {/* Hourly Heatmap */}
-          <div className="col-span-6">
+          <div className="col-span-5">
             <HourlyHeatmap data={d.hourly_heatmap} />
           </div>
 

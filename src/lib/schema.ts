@@ -156,6 +156,12 @@ export function initSchema() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS otti_users (
+      user_id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      title TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_otti_ts ON otti_sessions(ts_start);
     CREATE INDEX IF NOT EXISTS idx_otti_user ON otti_sessions(user_id);
     CREATE INDEX IF NOT EXISTS idx_otti_intent ON otti_sessions(intent);
@@ -211,6 +217,46 @@ export function seedConfig() {
   };
 
   db.prepare("INSERT INTO sync_config (id, config) VALUES ('default', ?)").run(JSON.stringify(defaultConfig));
+}
+
+export function seedOttiUsers() {
+  const db = getDb();
+  const users: [string, string, string][] = [
+    ['U03DRPJSAGL', 'Arun Venkataramanan', 'Engineering'],
+    ['U0AB8NZGWGY', 'Salvador Gallo', 'Product Support Specialist'],
+    ['U08E107596K', 'Brittany Leclerc', ''],
+    ['U09DG4MNARJ', 'Cody Towstik', 'Senior Software Engineer'],
+    ['U06M91QHS0P', 'Hemalatha K', 'Senior Software Engineer (QA)'],
+    ['U09TTU07X9R', 'Josh Rupert', 'PM - Partners'],
+    ['U07RD1MNQPJ', 'Abhishek Goyal', 'Product Manager'],
+    ['U09U09ZCSHY', 'Oswald Ochoa', 'Product Support Specialist L1'],
+    ['U04H4UV2PDM', 'Joe Lombardi', 'Director, Solutions Engineers'],
+    ['U08QWTQ5WPL', 'Benjamin Covarrubias', 'Product Support Specialist'],
+    ['U0378A39BKM', 'Vivek Chand Rajwar', 'Engineering Manager'],
+    ['U0415JPSLRF', 'Pampapati Shetty', 'Senior Software Engineer - Frontend'],
+    ['U07UJCQSMRP', 'Paulina Soto', 'Product Support Specialist L2'],
+    ['U0A1TFB784T', 'Xochitl Torres', 'Product Support I'],
+    ['U0A3ZP1P1DH', 'Gus Fernandes', 'Senior Backend Engineer'],
+    ['U097S5L33BM', 'Ameer', ''],
+    ['U09TXRU84SC', 'Nicolas Battisti', 'Senior Backend Developer'],
+    ['U06NFNF3ZPG', 'Luke Detering', 'Principal Product Manager'],
+    ['UK2U1Q64S', 'Lena', 'Team Lead | Product Support'],
+    ['U0398FCA3LZ', 'Rohit Gupta', 'Senior Software Engineer (QA)'],
+    ['U038ASQFM9B', 'Melissa Joukema', 'Senior Manager of Product Support'],
+    ['U05NBM1V46L', 'Raja Ram', 'Senior Software Engineer (QA)'],
+    ['U08RURGJR1R', 'Mahesh', 'SSE [Core]'],
+    ['U02SHJG8U1J', 'Sushma Yadav', ''],
+    ['U09JTS8QQKG', 'Chirag Shah', 'Senior Software Engineer'],
+    ['U09MDPP34N4', 'Varun Mhatre', ''],
+    ['U089ZDCFUJJ', 'Elyse Williams', 'Senior Manager of Customer Marketing'],
+  ];
+
+  const upsert = db.prepare(
+    'INSERT OR REPLACE INTO otti_users (user_id, display_name, title) VALUES (?, ?, ?)'
+  );
+  for (const [uid, name, title] of users) {
+    upsert.run(uid, name, title);
+  }
 }
 
 export function seedOttiDeployments() {

@@ -29,7 +29,7 @@ export function SpeedTable({ title, rows }: SpeedTableProps) {
         <div className="text-[0.8rem] text-g5 py-2">No data.</div>
       ) : (
         <div className="space-y-0">
-          <div className="grid grid-cols-[1fr_80px_80px_90px] gap-2 pb-2 border-b border-black/[0.07]">
+          <div className="grid grid-cols-[1fr_58px_58px_56px] gap-[6px] pb-2 border-b border-black/[0.07]">
             <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5">Name</div>
             <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5 text-right">Median</div>
             <div className="text-[0.65rem] font-semibold uppercase tracking-wider text-g5 text-right">P90</div>
@@ -38,7 +38,7 @@ export function SpeedTable({ title, rows }: SpeedTableProps) {
           {rows.map((r) => (
             <div
               key={r.name}
-              className="grid grid-cols-[1fr_80px_80px_90px] gap-2 py-[9px] border-b border-black/[0.07] last:border-b-0"
+              className="grid grid-cols-[1fr_58px_58px_56px] gap-[6px] py-[9px] border-b border-black/[0.07] last:border-b-0"
             >
               <div className="text-[0.78rem] font-medium text-g2">{r.name}</div>
               <div className="text-[0.78rem] font-semibold tabular-nums text-g3 text-right">
