@@ -102,6 +102,12 @@ export function initSchema() {
       changed_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS sync_config (
+      id TEXT PRIMARY KEY DEFAULT 'default',
+      config TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_items_source ON work_items(source);
     CREATE INDEX IF NOT EXISTS idx_items_status ON work_items(status);
     CREATE INDEX IF NOT EXISTS idx_items_created ON work_items(created_at);
@@ -124,14 +130,43 @@ export function seedGoals() {
   const goals = [
     { id: 'ai-copilot', name: 'AI / Copilot Leadership', description: 'Agent pipeline, LLM models, accuracy metrics, Otti Copilot', keywords: JSON.stringify(['copilot','agent','pipeline','llm','gpt','gemini','accuracy','ai','otti copilot','mcp','claude','otti assistant','ml','model','prediction','data science','struct']), sort_order: 1 },
     { id: 'platform', name: 'Platform Modernization', description: 'Django→microservices, Celery→Lambda, bundle size, infra', keywords: JSON.stringify(['django','microservice','celery','lambda','bundle','infra','migration','platform','ottiapi','api gateway','terraform','devops','ci','deploy','docker','ecs','architecture','tdd process','paas','openapi']), sort_order: 2 },
-    { id: 'revenue', name: 'Revenue & Retention', description: 'VendorPay, activation, gross retention, churn, upsell', keywords: JSON.stringify(['vendorpay','activation','retention','churn','upsell','revenue','gross retention','pay','payment','billing','ach','bank','dwolla']), sort_order: 3 },
-    { id: 'integrations', name: 'Integration Excellence', description: 'Data Dash, ERP connectors, Acumatica, partner experience', keywords: JSON.stringify(['data dash','erp','acumatica','connector','partner','integration','pex','ftp','export','import','account build','onboarding project']), sort_order: 4 },
-    { id: 'ops', name: 'Operational Excellence', description: 'R2 release, stabilization marathon, QA, bug burndown', keywords: JSON.stringify(['r2','stabilization','qa','bug','burndown','on-call','release','sprint','hotfix','incident','fix','security','approval','appa']), sort_order: 5 },
-    { id: 'onboarding', name: 'Fast Onboarding', description: 'Login revamp, passkeys, onboarding flow, time-to-value', keywords: JSON.stringify(['login','passkey','onboarding','time-to-value','signup','totp','welcome','implementation','account setup']), sort_order: 6 },
+    { id: 'integrations', name: 'Integration Excellence', description: 'Data Dash, ERP connectors, Acumatica, partner experience', keywords: JSON.stringify(['data dash','erp','acumatica','connector','partner','integration','pex','ftp','export','import','account build','onboarding project']), sort_order: 3 },
+    { id: 'ops', name: 'Operational Excellence', description: 'R2 release, stabilization marathon, QA, bug burndown', keywords: JSON.stringify(['r2','stabilization','qa','bug','burndown','on-call','release','sprint','hotfix','incident','fix','security','approval','appa']), sort_order: 4 },
+    { id: 'onboarding', name: 'Fast Onboarding', description: 'Login revamp, passkeys, onboarding flow, time-to-value', keywords: JSON.stringify(['login','passkey','onboarding','time-to-value','signup','totp','welcome','implementation','account setup']), sort_order: 5 },
   ];
 
   const insert = db.prepare('INSERT INTO goals (id, name, description, keywords, status, origin, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)');
   for (const g of goals) {
     insert.run(g.id, g.name, g.description, g.keywords, 'active', 'inferred', g.sort_order);
   }
+}
+
+export function seedConfig() {
+  const db = getDb();
+  const existing = db.prepare('SELECT COUNT(*) as c FROM sync_config').get() as { c: number };
+  if (existing.c > 0) return;
+
+  const defaultConfig = {
+    jira: {
+      enabled: true,
+      projects: ['INT', 'PEX', 'OA'],
+      cloudId: 'plateiq.atlassian.net',
+    },
+    slack: {
+      enabled: true,
+      mode: 'all',
+      channels: [],
+    },
+    meetings: {
+      enabled: true,
+    },
+    notion: {
+      enabled: true,
+    },
+    gmail: {
+      enabled: true,
+    },
+  };
+
+  db.prepare("INSERT INTO sync_config (id, config) VALUES ('default', ?)").run(JSON.stringify(defaultConfig));
 }

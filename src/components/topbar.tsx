@@ -11,6 +11,7 @@ const navItems = [
   { label: 'Projects', href: '/projects' },
   { label: 'Knowledge', href: '/knowledge' },
   { label: 'Metrics', href: '/metrics' },
+  { label: 'Settings', href: '/settings' },
 ];
 
 export function Topbar() {
