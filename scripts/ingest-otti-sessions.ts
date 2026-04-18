@@ -3,18 +3,30 @@ import { initSchema, seedOttiDeployments } from '../src/lib/schema';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const DEFAULT_SOURCE = path.join(
+export const DEFAULT_OTTI_SESSIONS_SOURCE = path.join(
   process.env.HOME || '~',
   'Documents/code/ottiassistant/data/transcripts/sessions'
 );
 
-function main() {
-  const sourceDir = process.argv[2] || DEFAULT_SOURCE;
-  console.log(`Ingesting sessions from: ${sourceDir}`);
+export interface OttiSessionIngestResult {
+  total: number;
+  errors: number;
+  perDate: Record<string, number>;
+  finalCount: number;
+  skipped?: true;
+  reason?: string;
+}
+
+/**
+ * Ingest Otti session transcripts from a local directory tree
+ * (YYYY-MM-DD/<task_id>.jsonl). Safe to call when the directory is
+ * missing — returns { skipped: true } instead of throwing.
+ */
+export function ingestOttiSessions(sourceDir: string = DEFAULT_OTTI_SESSIONS_SOURCE): OttiSessionIngestResult {
+  const result: OttiSessionIngestResult = { total: 0, errors: 0, perDate: {}, finalCount: 0 };
 
   if (!fs.existsSync(sourceDir)) {
-    console.error(`Source directory not found: ${sourceDir}`);
-    process.exit(1);
+    return { ...result, skipped: true, reason: `Source directory not found: ${sourceDir}` };
   }
 
   initSchema();
@@ -31,18 +43,15 @@ function main() {
       num_events=excluded.num_events, duration_s=excluded.duration_s
   `);
 
-  const dateDirs = fs.readdirSync(sourceDir).filter(d =>
-    fs.statSync(path.join(sourceDir, d)).isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d)
-  ).sort();
-
-  let total = 0;
-  let errors = 0;
-
   const insertMany = db.transaction((rows: any[]) => {
     for (const r of rows) {
       upsert.run(r.id, r.ts_start, r.ts_end, r.user_id, r.channel_id, r.persona, r.intent, r.agent_type, r.model, r.repo_name, r.num_events, r.duration_s);
     }
   });
+
+  const dateDirs = fs.readdirSync(sourceDir).filter(d =>
+    fs.statSync(path.join(sourceDir, d)).isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d)
+  ).sort();
 
   for (const dateDir of dateDirs) {
     const dirPath = path.join(sourceDir, dateDir);
@@ -80,20 +89,33 @@ function main() {
           num_events: lines.length,
           duration_s: durationS,
         });
-        total++;
-      } catch (e) {
-        errors++;
+        result.total++;
+      } catch {
+        result.errors++;
       }
     }
 
     if (batch.length > 0) {
       insertMany(batch);
-      console.log(`  ${dateDir}: ${batch.length} sessions`);
+      result.perDate[dateDir] = batch.length;
     }
   }
 
-  const count = (db.prepare('SELECT COUNT(*) as c FROM otti_sessions').get() as { c: number }).c;
-  console.log(`\nDone. Ingested ${total} sessions (${errors} errors). Total in DB: ${count}`);
+  result.finalCount = (db.prepare('SELECT COUNT(*) as c FROM otti_sessions').get() as { c: number }).c;
+  return result;
 }
 
-main();
+function main() {
+  const sourceDir = process.argv[2] || DEFAULT_OTTI_SESSIONS_SOURCE;
+  console.log(`Ingesting sessions from: ${sourceDir}`);
+  const r = ingestOttiSessions(sourceDir);
+  if (r.skipped) {
+    console.error(r.reason);
+    process.exit(1);
+  }
+  for (const [d, c] of Object.entries(r.perDate)) console.log(`  ${d}: ${c} sessions`);
+  console.log(`\nDone. Ingested ${r.total} sessions (${r.errors} errors). Total in DB: ${r.finalCount}`);
+}
+
+// Only invoke main() when this file is run directly (not when imported).
+if (require.main === module) main();
