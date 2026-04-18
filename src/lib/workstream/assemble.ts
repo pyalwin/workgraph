@@ -8,8 +8,14 @@
 import { getDb } from '../db';
 import { v4 as uuid } from 'uuid';
 
-const CONFIDENCE_THRESHOLD = 0.6;
+// Links are created at ≥0.6 confidence (crossref threshold), but BFS walks
+// only strong edges (≥0.75) so transitive chains of weak mentions don't
+// balloon a workstream into a giant connected component.
+const TRAVERSAL_THRESHOLD = 0.75;
 const MAX_DEPTH = 4;
+const MAX_WORKSTREAM_SIZE = 25;
+
+const TERMINAL_ROLES = new Set(['integration']); // don't expand past integration
 
 interface ItemRow {
   id: string;
@@ -43,22 +49,30 @@ function neighbors(itemId: string): Array<{ id: string; confidence: number }> {
     UNION
     SELECT source_item_id AS id, confidence FROM links
     WHERE target_item_id = ? AND confidence >= ?
-  `).all(itemId, CONFIDENCE_THRESHOLD, itemId, CONFIDENCE_THRESHOLD) as Array<{ id: string; confidence: number }>;
+  `).all(itemId, TRAVERSAL_THRESHOLD, itemId, TRAVERSAL_THRESHOLD) as Array<{ id: string; confidence: number }>;
 }
 
 /**
- * BFS from a seed up to MAX_DEPTH hops along confident edges. Returns the set
- * of item IDs reachable.
+ * BFS from a seed along strong edges (≥TRAVERSAL_THRESHOLD). Stops at
+ * integration/terminal nodes (don't expand past shipped artefacts) and
+ * caps at MAX_WORKSTREAM_SIZE to prevent giant-cluster blowup.
  */
 function bfsFromSeed(seedId: string): Set<string> {
   const visited = new Set<string>([seedId]);
   const frontier: Array<{ id: string; depth: number }> = [{ id: seedId, depth: 0 }];
 
-  while (frontier.length > 0) {
+  while (frontier.length > 0 && visited.size < MAX_WORKSTREAM_SIZE) {
     const { id, depth } = frontier.shift()!;
     if (depth >= MAX_DEPTH) continue;
+
+    // Don't expand past an integration item (trace has shipped — stop the chain
+    // from transitively crossing into other workstreams via a shared PR).
+    const thisItem = loadItem(id);
+    if (thisItem && TERMINAL_ROLES.has(thisItem.trace_role ?? '') && id !== seedId) continue;
+
     for (const n of neighbors(id)) {
       if (visited.has(n.id)) continue;
+      if (visited.size >= MAX_WORKSTREAM_SIZE) break;
       visited.add(n.id);
       frontier.push({ id: n.id, depth: depth + 1 });
     }

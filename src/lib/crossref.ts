@@ -71,14 +71,32 @@ function determineLinkType(
   sourceItem: { source: string; item_type: string },
   targetSource: string,
 ): string {
+  // Implementation direction — GitHub implementing JIRA spec/story/epic
   if (sourceItem.source === 'github' && targetSource === 'jira') return 'implements';
+  // Reverse direction — JIRA item referencing a GitHub PR/commit (often in comments)
+  if (sourceItem.source === 'jira' && targetSource === 'github') return 'implemented_by';
+
+  // Documentation sources referencing JIRA spec
   if ((sourceItem.source === 'notion' || sourceItem.source === 'gmail') && targetSource === 'jira') return 'references';
+  // JIRA referencing a Notion spec
+  if (sourceItem.source === 'jira' && (targetSource === 'notion' || targetSource === 'gmail')) return 'references';
+
+  // Conversational sources — Slack / meetings
   if (
     sourceItem.source === 'slack' ||
     sourceItem.source === 'meeting' ||
     sourceItem.item_type === 'message' ||
     sourceItem.item_type === 'meeting'
   ) return 'discusses';
+  if (targetSource === 'slack' || targetSource === 'meeting') return 'discusses';
+
+  // Same-source pairs — avoid the generic 'mentions' fallback
+  if (sourceItem.source === targetSource) {
+    if (sourceItem.source === 'jira')   return 'related_jira';
+    if (sourceItem.source === 'github') return 'related_code';
+    if (sourceItem.source === 'notion') return 'related_docs';
+  }
+
   return 'mentions';
 }
 
