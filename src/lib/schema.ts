@@ -222,6 +222,33 @@ export function initSchema() {
       PRIMARY KEY (link_id, source_chunk_id, target_chunk_id, signal)
     );
     CREATE INDEX IF NOT EXISTS idx_item_links_chunks_link ON item_links_chunks(link_id);
+
+    CREATE TABLE IF NOT EXISTS decisions (
+      id TEXT PRIMARY KEY,
+      item_id TEXT NOT NULL REFERENCES work_items(id),
+      workstream_id TEXT REFERENCES workstreams(id),
+      title TEXT NOT NULL,
+      decided_at TEXT NOT NULL,
+      decided_by TEXT,
+      status TEXT DEFAULT 'active',
+      summary TEXT,
+      generated_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT,
+      UNIQUE(item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_decisions_decided_at ON decisions(decided_at);
+    CREATE INDEX IF NOT EXISTS idx_decisions_workstream ON decisions(workstream_id);
+
+    CREATE TABLE IF NOT EXISTS decision_items (
+      decision_id TEXT NOT NULL REFERENCES decisions(id),
+      item_id TEXT NOT NULL REFERENCES work_items(id),
+      relation TEXT NOT NULL,
+      event_at TEXT,
+      PRIMARY KEY (decision_id, item_id, relation)
+    );
+    CREATE INDEX IF NOT EXISTS idx_decision_items_item ON decision_items(item_id);
+    CREATE INDEX IF NOT EXISTS idx_decision_items_decision ON decision_items(decision_id);
   `);
 
   migrateWorkItems();

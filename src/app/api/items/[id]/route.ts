@@ -88,7 +88,20 @@ export async function GET(
       timeline_events: w.timeline_events ? JSON.parse(w.timeline_events) : [],
     }));
 
-    return NextResponse.json({ item, versions, linkedItems, goals, workstreams });
+    // Decisions this item is part of (either as the decision itself or a supporting source)
+    const decisions = db.prepare(`
+      SELECT d.id, d.item_id, d.title, d.decided_at, d.decided_by, d.status,
+             d.summary, d.generated_at, di.relation
+      FROM decisions d
+      JOIN decision_items di ON di.decision_id = d.id
+      WHERE di.item_id = ?
+      ORDER BY d.decided_at DESC
+    `).all(id).map((d: any) => ({
+      ...d,
+      summary: d.summary ? JSON.parse(d.summary) : null,
+    }));
+
+    return NextResponse.json({ item, versions, linkedItems, goals, workstreams, decisions });
   } catch {
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }

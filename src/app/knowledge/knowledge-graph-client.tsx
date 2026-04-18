@@ -66,6 +66,37 @@ interface WorkstreamDetail {
   role_in_workstream: string | null;
 }
 
+interface DecisionTraceEntry {
+  item_id: string;
+  source: string;
+  role: string;
+  time: string;
+  title: string;
+  contribution: string;
+}
+
+interface DecisionStructured {
+  context: string;
+  decision: string;
+  rationale: string;
+  outcome: string;
+  status_note: string;
+  traceability: DecisionTraceEntry[];
+}
+
+interface DecisionRecord {
+  id: string;
+  item_id: string;
+  title: string;
+  decided_at: string;
+  decided_by: string | null;
+  status: string;
+  summary: DecisionStructured | null;
+  generated_at: string | null;
+  relation?: string;
+  item_count?: number;
+}
+
 interface GraphEdge {
   id: string;
   source_item_id: string;
@@ -195,6 +226,11 @@ export default function KnowledgeGraphClient() {
   // Workstream detail for selected node
   const [workstreams, setWorkstreams] = useState<WorkstreamDetail[]>([]);
   const [activeWorkstreamId, setActiveWorkstreamId] = useState<string | null>(null);
+
+  // Decisions
+  const [allDecisions, setAllDecisions] = useState<DecisionRecord[]>([]);
+  const [nodeDecisions, setNodeDecisions] = useState<DecisionRecord[]>([]);
+  const [activeDecisionId, setActiveDecisionId] = useState<string | null>(null);
 
   // Graph dimensions
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -363,11 +399,25 @@ export default function KnowledgeGraphClient() {
     return () => clearTimeout(handle);
   }, [searchQuery]);
 
-  // Fetch workstream details when a node is selected
+  // Fetch the recent-decisions list once
   useEffect(() => {
-    if (!selectedNode || !selectedNode.workstream_ids) {
+    (async () => {
+      try {
+        const res = await fetch('/api/decisions');
+        if (!res.ok) return;
+        const json = await res.json();
+        setAllDecisions(json.decisions ?? []);
+      } catch {}
+    })();
+  }, []);
+
+  // Fetch workstreams + decisions for the selected node
+  useEffect(() => {
+    if (!selectedNode) {
       setWorkstreams([]);
       setActiveWorkstreamId(null);
+      setNodeDecisions([]);
+      setActiveDecisionId(null);
       return;
     }
     let cancelled = false;
@@ -380,9 +430,17 @@ export default function KnowledgeGraphClient() {
         setWorkstreams(json.workstreams ?? []);
         const firstWithNarrative = (json.workstreams ?? []).find((w: WorkstreamDetail) => w.narrative) ?? (json.workstreams ?? [])[0];
         setActiveWorkstreamId(firstWithNarrative?.id ?? null);
+
+        const ds: DecisionRecord[] = json.decisions ?? [];
+        setNodeDecisions(ds);
+        // Prefer a decision where this node IS the decision; else the first listed
+        const selfDecision = ds.find(d => d.item_id === selectedNode.id) ?? ds[0];
+        setActiveDecisionId(selfDecision?.id ?? null);
       } catch {
         setWorkstreams([]);
         setActiveWorkstreamId(null);
+        setNodeDecisions([]);
+        setActiveDecisionId(null);
       }
     })();
     return () => { cancelled = true; };
@@ -632,6 +690,39 @@ export default function KnowledgeGraphClient() {
           )}
         </div>
 
+        {/* Recent Decisions */}
+        {allDecisions.length > 0 && (
+          <div className="px-5 pt-3 pb-3 border-b border-black/[0.07]">
+            <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-2">
+              Recent Decisions ({allDecisions.length})
+            </div>
+            <div className="flex flex-col gap-[3px] max-h-[220px] overflow-y-auto">
+              {allDecisions.slice(0, 20).map((d) => {
+                const node = graphData.nodes.find((n) => n.id === d.item_id);
+                const statusColor = d.status === 'implemented' ? '#16a34a'
+                                  : d.status === 'superseded' ? '#6b7280'
+                                  : d.status === 'reversed' ? '#dc2626'
+                                  : '#d97706';
+                return (
+                  <button
+                    key={d.id}
+                    onClick={() => node && setSelectedNode(node)}
+                    className="text-left px-[8px] py-[5px] rounded-[5px] hover:bg-[#fef3c7] transition-colors cursor-pointer border border-transparent hover:border-[#f59e0b]/30"
+                  >
+                    <div className="flex items-center gap-[5px] mb-[1px]">
+                      <div className="w-[6px] h-[6px] rounded-full shrink-0" style={{ backgroundColor: statusColor }} />
+                      <span className="text-[0.6rem] text-[#999] tabular-nums">{d.decided_at.slice(0, 10)}</span>
+                      <span className="text-[0.56rem] uppercase font-semibold" style={{ color: statusColor }}>{d.status}</span>
+                      {d.generated_at && <span className="text-[0.56rem] text-[#bbb]" title="Has structured summary">•</span>}
+                    </div>
+                    <div className="text-[0.72rem] text-[#333] leading-[1.3] line-clamp-2">{d.title}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Source Filters */}
         <div className="px-5 pt-4 pb-3">
           <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-3">Sources</div>
@@ -869,6 +960,113 @@ export default function KnowledgeGraphClient() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Decision Record (structured: Context / Decision / Rationale / Outcome / Status / Trace) */}
+          {nodeDecisions.length > 0 && (
+            <div className="px-5 pt-4 pb-4 border-b border-black/[0.07] bg-[#fffbeb]">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#d97706]">
+                  Decision Record{nodeDecisions.length > 1 ? `s (${nodeDecisions.length})` : ''}
+                </div>
+                {nodeDecisions.length > 1 && (
+                  <select
+                    value={activeDecisionId ?? ''}
+                    onChange={(e) => setActiveDecisionId(e.target.value)}
+                    className="text-[0.65rem] px-[6px] py-[2px] border border-black/[0.1] rounded-[4px] bg-white cursor-pointer"
+                  >
+                    {nodeDecisions.map((d) => (
+                      <option key={d.id} value={d.id}>{d.title.slice(0, 40)}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              {(() => {
+                const d = nodeDecisions.find(x => x.id === activeDecisionId) ?? nodeDecisions[0];
+                if (!d) return null;
+                const s = d.summary;
+                const statusColor = d.status === 'implemented' ? '#16a34a'
+                                  : d.status === 'superseded' ? '#6b7280'
+                                  : d.status === 'reversed' ? '#dc2626'
+                                  : '#d97706';
+                return (
+                  <div className="flex flex-col gap-3">
+                    <div className="text-[0.82rem] font-semibold text-[#111] leading-[1.35]">{d.title}</div>
+                    <div className="flex items-center gap-[8px] text-[0.68rem]">
+                      <span className="px-[6px] py-[1px] rounded-[3px] font-semibold uppercase" style={{ backgroundColor: `${statusColor}18`, color: statusColor }}>{d.status}</span>
+                      <span className="text-[#999] tabular-nums">{d.decided_at.slice(0, 10)}</span>
+                      {d.decided_by && <span className="text-[#999]">· by {d.decided_by}</span>}
+                      {d.relation && d.relation !== 'self' && (
+                        <span className="text-[0.62rem] px-[4px] py-px rounded-[3px] bg-[#e0e7ff] text-[#3730a3]">this item is: {d.relation}</span>
+                      )}
+                    </div>
+
+                    {!s ? (
+                      <div className="text-[0.74rem] text-[#999] italic">Structured summary not yet generated.</div>
+                    ) : (
+                      <div className="flex flex-col gap-[10px]">
+                        <div>
+                          <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Context</div>
+                          <div className="text-[0.77rem] text-[#333] leading-[1.5]">{s.context}</div>
+                        </div>
+                        <div>
+                          <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Decision</div>
+                          <div className="text-[0.8rem] text-[#111] font-medium leading-[1.5] bg-white border-l-[3px] border-[#d97706] pl-3 py-1">{s.decision}</div>
+                        </div>
+                        <div>
+                          <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Rationale</div>
+                          <div className="text-[0.77rem] text-[#333] leading-[1.5]">{s.rationale}</div>
+                        </div>
+                        <div>
+                          <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Outcome</div>
+                          <div className="text-[0.77rem] text-[#333] leading-[1.5]">{s.outcome}</div>
+                        </div>
+                        {s.status_note && (
+                          <div>
+                            <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Status</div>
+                            <div className="text-[0.77rem] text-[#333] leading-[1.5]">{s.status_note}</div>
+                          </div>
+                        )}
+                        {s.traceability?.length > 0 && (
+                          <div>
+                            <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-2">Source Trace ({s.traceability.length})</div>
+                            <div className="relative pl-4">
+                              <div className="absolute left-[5px] top-[6px] bottom-[6px] w-px bg-black/[0.12]" />
+                              {s.traceability.map((t, i) => {
+                                const roleColor = (t.role && traceRoleColors[t.role]) || '#999';
+                                const isThis = t.item_id === selectedNode.id;
+                                return (
+                                  <div
+                                    key={`${t.item_id}-${i}`}
+                                    className={`relative flex items-start gap-3 pb-2 last:pb-0 -mx-2 px-2 rounded-md ${isThis ? 'bg-white' : 'hover:bg-white cursor-pointer'}`}
+                                    onClick={() => {
+                                      if (isThis) return;
+                                      const n = graphData.nodes.find(nn => nn.id === t.item_id);
+                                      if (n) setSelectedNode(n);
+                                    }}
+                                  >
+                                    <div className="absolute left-[-11px] top-[6px] w-[9px] h-[9px] rounded-full" style={{ backgroundColor: roleColor, outline: isThis ? '2px solid #3b82f6' : 'none', outlineOffset: '1px' }} />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-[5px] mb-[1px]">
+                                        <span className="text-[0.6rem] text-[#999] tabular-nums">{t.time}</span>
+                                        <span className="text-[0.55rem] font-semibold px-[4px] py-px rounded-[3px]" style={{ backgroundColor: `${roleColor}18`, color: roleColor }}>{traceRoleLabels[t.role] || t.role}</span>
+                                        <span className="text-[0.58rem] text-[#bbb]">{t.source}</span>
+                                      </div>
+                                      <div className="text-[0.73rem] text-[#222] leading-[1.35] font-medium">{t.title}</div>
+                                      <div className="text-[0.68rem] text-[#666] leading-[1.35] mt-[1px]">{t.contribution}</div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 

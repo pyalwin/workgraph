@@ -11,6 +11,8 @@ import { chunkAllPending } from '../src/lib/chunking';
 import { embedAllPending } from '../src/lib/embeddings/embed';
 import { assembleAll } from '../src/lib/workstream/assemble';
 import { summarizeAllWorkstreams } from '../src/lib/workstream/summary';
+import { extractDecisions } from '../src/lib/decision/extract';
+import { summarizeAllDecisions } from '../src/lib/decision/summary';
 import { getDb } from '../src/lib/db';
 
 initSchema();
@@ -66,13 +68,27 @@ async function run() {
   const ws = assembleAll();
   console.log(`    workstreams=${ws.workstreams}, items-in-ws=${ws.items}, seeds=${ws.seeds}, orphans=${ws.orphans}`);
 
-  // Phase 6: Workstream narrative summaries (Sonnet)
+  // Phase 6: Workstream narrative summaries (Sonnet, paragraph + timeline)
   if (!SKIP_SUMMARIES) {
-    console.log('\n  [6/6] Workstream summaries (Sonnet)...');
+    console.log('\n  [6/8] Workstream summaries (Sonnet)...');
     const sm = await summarizeAllWorkstreams({ force: FULL, minItems: 2, concurrency: 2 });
     console.log(`    generated=${sm.generated}, skipped=${sm.skipped}, failed=${sm.failed}`);
   } else {
-    console.log('\n  [6/6] Summaries SKIPPED (--no-summaries)');
+    console.log('\n  [6/8] Summaries SKIPPED (--no-summaries)');
+  }
+
+  // Phase 7: Decision extraction (every trace_role='decision' → decision record with bidirectional trace)
+  console.log('\n  [7/8] Decision extraction...');
+  const dx = extractDecisions();
+  console.log(`    decisions=${dx.decisions}, relations=${dx.relations}`);
+
+  // Phase 8: Structured decision summaries (Sonnet — Context / Decision / Rationale / Outcome / Traceability)
+  if (!SKIP_SUMMARIES) {
+    console.log('\n  [8/8] Decision structured summaries (Sonnet)...');
+    const ds = await summarizeAllDecisions({ force: FULL, concurrency: 2 });
+    console.log(`    generated=${ds.generated}, skipped=${ds.skipped}, failed=${ds.failed}`);
+  } else {
+    console.log('\n  [8/8] Decision summaries SKIPPED (--no-summaries)');
   }
 
   // Side-channel: metrics + project recaps (kept from prior pipeline)

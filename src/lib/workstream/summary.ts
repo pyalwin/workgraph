@@ -61,6 +61,42 @@ function loadWSItems(wsId: string): WSItem[] {
   `).all(wsId) as WSItem[];
 }
 
+const MAX_PROMPT_ITEMS = 20;
+
+/**
+ * When a workstream has many items, sample smartly: always keep seeds,
+ * decisions, and integrations (the structural anchors); fill remaining
+ * slots with other items sampled evenly chronologically. Preserves the
+ * trace shape while fitting within Sonnet's reasonable-output window.
+ */
+function sampleItemsForPrompt(items: WSItem[]): WSItem[] {
+  if (items.length <= MAX_PROMPT_ITEMS) return items;
+
+  const anchors = items.filter(i =>
+    i.is_seed === 1 ||
+    i.is_terminal === 1 ||
+    i.role_in_workstream === 'decision' ||
+    i.trace_role === 'decision'
+  );
+  const anchorIds = new Set(anchors.map(i => i.id));
+  const remaining = items.filter(i => !anchorIds.has(i.id));
+  const slots = Math.max(0, MAX_PROMPT_ITEMS - anchors.length);
+
+  // Evenly sample remaining items chronologically
+  const sampled: WSItem[] = [];
+  if (slots > 0 && remaining.length > 0) {
+    const step = remaining.length / slots;
+    for (let i = 0; i < slots; i++) {
+      const idx = Math.min(Math.floor(i * step), remaining.length - 1);
+      sampled.push(remaining[idx]);
+    }
+  }
+
+  const merged = [...anchors, ...sampled];
+  merged.sort((a, b) => (a.event_at ?? a.created_at).localeCompare(b.event_at ?? b.created_at));
+  return merged;
+}
+
 function buildPrompt(items: WSItem[]): { system: string; user: string } {
   const system = `You are summarizing a WORKSTREAM — the trace of how an idea evolved into shipped code.
 
@@ -98,7 +134,7 @@ async function callSonnet(prompt: { system: string; user: string }): Promise<Wor
   try {
     const response = await getClient().messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+      max_tokens: 4000,
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
     });
@@ -129,7 +165,12 @@ export async function summarizeWorkstream(wsId: string): Promise<boolean> {
   const items = loadWSItems(wsId);
   if (items.length < 1) return false;
 
-  const prompt = buildPrompt(items);
+  const sampled = sampleItemsForPrompt(items);
+  const truncationNote = sampled.length < items.length
+    ? `\n\nNote: this workstream has ${items.length} total items; ${sampled.length} representative items (anchors + evenly-sampled) are shown below.`
+    : '';
+  const prompt = buildPrompt(sampled);
+  prompt.user = prompt.user + truncationNote;
   const payload = await callSonnet(prompt);
   if (!payload) return false;
 
