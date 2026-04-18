@@ -56,6 +56,18 @@ export default function SettingsPage() {
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [goalForm, setGoalForm] = useState({ name: '', description: '', keywords: '' });
 
+  // Sync state
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<any>(null);
+  const [syncResult, setSyncResult] = useState<any>(null);
+
+  const fetchSyncStatus = () => {
+    fetch('/api/sync')
+      .then((r) => r.json())
+      .then((data) => setSyncStatus(data))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     fetch('/api/config')
       .then((r) => r.json())
@@ -65,7 +77,23 @@ export default function SettingsPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
+    fetchSyncStatus();
   }, []);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch('/api/sync', { method: 'POST' });
+      const data = await res.json();
+      setSyncResult(data);
+      fetchSyncStatus();
+    } catch (err: any) {
+      setSyncResult({ ok: false, error: err.message });
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -170,13 +198,18 @@ export default function SettingsPage() {
     setGoalForm({ name: '', description: '', keywords: '' });
   };
 
-  const saveGoal = () => {
+  const saveGoal = async () => {
     const keywords = goalForm.keywords
       .split(',')
       .map((k) => k.trim())
       .filter(Boolean);
 
     if (editingGoal) {
+      await fetch('/api/config/goals', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editingGoal, name: goalForm.name, description: goalForm.description, keywords }),
+      });
       setGoals((prev) =>
         prev.map((g) =>
           g.id === editingGoal
@@ -185,8 +218,14 @@ export default function SettingsPage() {
         )
       );
     } else {
+      const res = await fetch('/api/config/goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: goalForm.name, description: goalForm.description, keywords }),
+      });
+      const data = await res.json();
       const newGoal: Goal = {
-        id: `goal_${Date.now()}`,
+        id: data.id,
         name: goalForm.name,
         description: goalForm.description,
         keywords: JSON.stringify(keywords),
@@ -198,7 +237,8 @@ export default function SettingsPage() {
     cancelGoalForm();
   };
 
-  const deleteGoal = (goalId: string) => {
+  const deleteGoal = async (goalId: string) => {
+    await fetch(`/api/config/goals?id=${goalId}`, { method: 'DELETE' });
     setGoals((prev) => prev.filter((g) => g.id !== goalId));
     if (editingGoal === goalId) cancelGoalForm();
   };
@@ -217,6 +257,113 @@ export default function SettingsPage() {
       <div className="mb-8">
         <h1 className="text-[1.5rem] font-bold tracking-tight text-black mb-[2px]">Settings</h1>
         <p className="text-[0.82rem] text-[#999]">Configure data sources and strategic goals</p>
+      </div>
+
+      {/* Sync */}
+      <div className="mb-11">
+        <h2 className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-4">Sync</h2>
+        <Card>
+          <CardContent className="pt-[22px]">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="text-[0.87rem] font-medium text-black tracking-tight">Run Sync</div>
+                <div className="text-[0.78rem] text-[#999] mt-[2px]">
+                  Re-classify all items, create cross-references, and compute metrics
+                </div>
+              </div>
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="bg-black text-white rounded-lg px-5 py-[7px] text-[0.82rem] font-medium border-none cursor-pointer hover:bg-[#333] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {syncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            </div>
+
+            {/* Sync Result */}
+            {syncResult && (
+              <div className={
+                'rounded-lg px-4 py-3 mb-4 text-[0.78rem] ' +
+                (syncResult.ok
+                  ? 'bg-[rgba(26,135,84,0.06)] text-[#1a8754]'
+                  : 'bg-[rgba(197,48,48,0.06)] text-[#c53030]')
+              }>
+                {syncResult.ok ? (
+                  <div>
+                    <div className="font-medium mb-2">Sync complete</div>
+
+                    {/* Ingestion summary */}
+                    {(syncResult.meetingsIngested > 0 || syncResult.meetingsSkipped > 0) && (
+                      <div className="text-[0.72rem] opacity-80 mb-2">
+                        Meetings: {syncResult.meetingsIngested > 0 ? `${syncResult.meetingsIngested} new` : ''}
+                        {syncResult.meetingsIngested > 0 && syncResult.meetingsSkipped > 0 ? ', ' : ''}
+                        {syncResult.meetingsSkipped > 0 ? `${syncResult.meetingsSkipped} unchanged` : ''}
+                      </div>
+                    )}
+
+                    {/* Source breakdown */}
+                    {syncResult.breakdown && (
+                      <div className="flex gap-3 mb-2 text-[0.72rem] opacity-80">
+                        {Object.entries(syncResult.breakdown).map(([source, count]: [string, any]) => (
+                          count > 0 && (
+                            <span key={source}>
+                              <span className="font-semibold">{count}</span> {source === 'meeting' ? 'meetings' : source}
+                            </span>
+                          )
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Goal classification */}
+                    {syncResult.goalStats && syncResult.goalStats.length > 0 && (
+                      <div className="text-[0.72rem] opacity-80 mb-1">
+                        <span className="font-medium">Classified to goals: </span>
+                        {syncResult.goalStats
+                          .filter((g: any) => g.item_count > 0)
+                          .map((g: any) => `${g.name} (${g.item_count})`)
+                          .join(', ') || 'No items matched goals'}
+                      </div>
+                    )}
+
+                    <div className="text-[0.72rem] opacity-80 mt-1">
+                      {syncResult.totalItems} total items · {syncResult.totalLinks} cross-references
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="font-medium">Sync failed</div>
+                    <div className="text-[0.72rem] opacity-80">{syncResult.error}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Sync Status per source */}
+            {syncStatus && (
+              <div className="border-t border-black/[0.07] pt-4">
+                <div className="text-[0.72rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-3">Current Data</div>
+                <div className="grid grid-cols-5 gap-3">
+                  {Object.entries(syncStatus.sources || {}).map(([source, info]: [string, any]) => (
+                    <div key={source} className="rounded-lg bg-[#fafafa] px-3 py-[10px]">
+                      <div className="text-[0.72rem] font-medium text-[#999] capitalize">{source === 'meeting' ? 'Meetings' : source}</div>
+                      <div className="text-[1rem] font-bold text-black tabular-nums mt-[2px]">{info.count}</div>
+                      <div className="text-[0.63rem] text-[#bbb] mt-[2px]">
+                        {info.lastSync
+                          ? `Last: ${new Date(info.lastSync).toLocaleDateString()}`
+                          : 'Never synced'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-4 mt-3 text-[0.72rem] text-[#999]">
+                  <span><span className="font-semibold text-[#333] tabular-nums">{syncStatus.totalItems}</span> total items</span>
+                  <span><span className="font-semibold text-[#333] tabular-nums">{syncStatus.totalVersions}</span> versions tracked</span>
+                  <span><span className="font-semibold text-[#333] tabular-nums">{syncStatus.totalLinks}</span> cross-references</span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Data Sources */}

@@ -1,6 +1,37 @@
 import { ingestItems } from '../src/lib/sync/ingest';
 import type { WorkItemInput } from '../src/lib/sync/types';
 
+// Normalize Jira statuses to: done | active | open | backlog
+const STATUS_MAP: Record<string, string> = {
+  'done': 'done',
+  'closed': 'done',
+  'resolved': 'done',
+  'production': 'done',
+  'merged': 'done',
+  'will_not_do': 'done',
+  'not_doing': 'done',
+  'won\'t_do': 'done',
+  'cancelled': 'done',
+  'duplicate': 'done',
+  'in_progress': 'active',
+  'in_development': 'active',
+  'in_review': 'active',
+  'qa': 'active',
+  'testing': 'active',
+  'code_review': 'active',
+  'to_do': 'open',
+  'open': 'open',
+  'new': 'open',
+  'backlog': 'backlog',
+  'icebox': 'backlog',
+};
+
+function normalizeStatus(raw: string | null): string {
+  if (!raw) return 'open';
+  const key = raw.toLowerCase().replace(/\s+/g, '_');
+  return STATUS_MAP[key] || 'open';
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) {
@@ -20,9 +51,9 @@ async function main() {
     title: issue.fields?.summary || issue.key,
     body: issue.fields?.description || null,
     author: issue.fields?.assignee?.displayName || issue.fields?.reporter?.displayName || null,
-    status: issue.fields?.status?.name?.toLowerCase().replace(/\s+/g, '_') || null,
+    status: normalizeStatus(issue.fields?.status?.name),
     priority: issue.fields?.priority?.name?.toLowerCase() || null,
-    url: `https://${issue.self?.split('/rest/')[0]?.split('//')[1] || 'jira'}/browse/${issue.key}`,
+    url: `https://plateiq.atlassian.net/browse/${issue.key}`,
     metadata: {
       labels: issue.fields?.labels || [],
       components: issue.fields?.components?.map((c: any) => c.name) || [],

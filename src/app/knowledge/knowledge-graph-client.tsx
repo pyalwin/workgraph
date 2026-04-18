@@ -176,17 +176,42 @@ export default function KnowledgeGraphClient() {
     const container = containerRef.current;
     if (!container) return;
 
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setDimensions({
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
-        });
-      }
-    });
+    function updateSize() {
+      const rect = container!.getBoundingClientRect();
+      const w = Math.max(rect.width, 400);
+      const h = Math.max(rect.height, 400);
+      setDimensions({ width: w, height: h });
+    }
+
+    // Initial size
+    updateSize();
+
+    const observer = new ResizeObserver(() => updateSize());
     observer.observe(container);
-    return () => observer.disconnect();
-  }, []);
+    window.addEventListener('resize', updateSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, [loading]);
+
+  // Configure forces and zoom to fit after data loads
+  useEffect(() => {
+    if (!loading && graphData.nodes.length > 0 && graphRef.current) {
+      const fg = graphRef.current;
+
+      // Spread nodes out much more
+      fg.d3Force('charge')?.strength(-200).distanceMax(500);
+      fg.d3Force('link')?.distance(100).strength(0.3);
+      fg.d3ReheatSimulation();
+
+      // Multiple zoomToFit attempts to ensure it centers
+      const t1 = setTimeout(() => fg.zoomToFit(400, 80), 1000);
+      const t2 = setTimeout(() => fg.zoomToFit(400, 80), 3000);
+      const t3 = setTimeout(() => fg.zoomToFit(400, 80), 6000);
+      return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+    }
+  }, [loading, graphData.nodes.length]);
 
   // Derive available type tags
   const availableTypes = useMemo(() => {
@@ -235,6 +260,16 @@ export default function KnowledgeGraphClient() {
 
     return { nodes: filteredNodes, links: filteredLinks };
   }, [graphData, sourceFilters, statusFilter, typeFilters]);
+
+  // Re-center when filters change
+  useEffect(() => {
+    if (graphRef.current && filteredData.nodes.length > 0) {
+      const timer = setTimeout(() => {
+        graphRef.current?.zoomToFit(400, 80);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [sourceFilters, statusFilter, typeFilters]);
 
   // Get connected nodes for the selected node
   const connectedNodes = useMemo(() => {
@@ -332,12 +367,14 @@ export default function KnowledgeGraphClient() {
     ctx.fillStyle = isDimmed ? `${n.color}44` : n.color;
     ctx.fill();
 
-    // Label below
-    if (globalScale > 0.5) {
-      ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+    // Label below — only show when zoomed in enough, or for hovered/selected nodes
+    const showLabel = globalScale > 2.5 || isSelected || isHovered || (isConnected && globalScale > 1.2);
+    if (showLabel) {
+      const labelFontSize = Math.max(11 / globalScale, 2);
+      ctx.font = `${labelFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = isDimmed ? '#ccc' : '#555';
+      ctx.fillStyle = isDimmed ? '#ccc' : (isSelected || isHovered) ? '#111' : '#555';
       ctx.fillText(label, x, y + nodeRadius + 2);
     }
   }, [selectedNode, hoveredNode, hoveredConnections]);
@@ -382,7 +419,7 @@ export default function KnowledgeGraphClient() {
 
   if (loading) {
     return (
-      <div className="h-screen flex items-center justify-center bg-[#fafafa]">
+      <div className="fixed inset-0 top-[52px] flex items-center justify-center bg-[#fafafa] z-10">
         <div className="flex items-center gap-3">
           <div className="w-4 h-4 rounded-full border-2 border-[#ddd] border-t-[#333] animate-spin" />
           <span className="text-[0.84rem] text-[#999]">Loading knowledge graph...</span>
@@ -392,7 +429,7 @@ export default function KnowledgeGraphClient() {
   }
 
   return (
-    <div className="h-screen flex bg-[#fafafa] overflow-hidden">
+    <div className="fixed inset-0 top-[52px] flex bg-[#fafafa] overflow-hidden z-10">
       {/* Left Sidebar - Filters */}
       <div className="w-[240px] border-r border-black/[0.07] bg-white flex flex-col shrink-0 overflow-y-auto">
         <div className="px-5 pt-6 pb-4 border-b border-black/[0.07]">
@@ -486,7 +523,7 @@ export default function KnowledgeGraphClient() {
       </div>
 
       {/* Center - Graph */}
-      <div ref={containerRef} className="flex-1 relative">
+      <div ref={containerRef} className="flex-1 relative min-h-0 min-w-0 h-full">
         {filteredData.nodes.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-center">
@@ -512,10 +549,16 @@ export default function KnowledgeGraphClient() {
             onNodeClick={handleNodeClick}
             onNodeHover={handleNodeHover}
             onBackgroundClick={() => setSelectedNode(null)}
-            d3AlphaDecay={0.05}
-            d3VelocityDecay={0.3}
+            d3AlphaDecay={0.02}
+            d3VelocityDecay={0.2}
             warmupTicks={100}
             cooldownTicks={200}
+            cooldownTime={5000}
+            onEngineStop={() => {
+              if (graphRef.current) {
+                graphRef.current.zoomToFit(600, 80);
+              }
+            }}
             enableZoomInteraction={true}
             enablePanInteraction={true}
             backgroundColor="#fafafa"
