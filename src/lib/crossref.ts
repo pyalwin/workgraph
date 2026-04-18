@@ -35,6 +35,16 @@ const WEIGHTS = {
   topics:    0.10,
 };
 
+// Sources whose content is "supporting context" for traces anchored elsewhere
+// (usually JIRA/GitHub). These get a confidence downweight unless there's an
+// explicit reference like a Jira key or URL — we don't want a Notion doc
+// whose only connection is embedding-similarity to create a strong link.
+const SUPPORTING_SOURCES = new Set(['notion', 'meeting', 'gmail']);
+
+function isSupporting(source: string): boolean {
+  return SUPPORTING_SOURCES.has(source);
+}
+
 export function extractEntities(text: string) {
   return {
     jiraKeys: [...new Set(text.match(JIRA_KEY_REGEX) || [])],
@@ -414,13 +424,25 @@ export function createLinksForItem(itemId: string): number {
         WEIGHTS.author    * auth +
         WEIGHTS.context   * ctx.score;
 
-      finalScore = Math.min(1, Math.max(hardScore, weighted * tmul));
+      // Corroboration penalty — single weak signal shouldn't create a link.
+      // Count how many signals cross a 0.2 noise threshold.
+      const strongSignalCount = [emb.score, ent.score, top.score, auth, ctx.score].filter(s => s > 0.2).length;
+      const corroboration = strongSignalCount >= 2 ? 1 : 0.75;
+
+      // Supportive-source downweight — Notion/Meeting/Gmail connections without
+      // an explicit reference are treated as supporting context, not primary
+      // structural links.
+      const supportMul = (isSupporting(item.source) || isSupporting(other.source)) ? 0.8 : 1;
+
+      finalScore = Math.min(1, Math.max(hardScore, weighted * tmul * corroboration * supportMul));
       signals.embedding = emb.score;
       signals.entities = ent.score;
       signals.topics = top.score;
       signals.author = auth;
       signals.context = ctx.score;
       signals.temporal_mul = tmul;
+      signals.corroboration = corroboration;
+      signals.support_mul = supportMul;
       bestChunks = emb.bestChunks;
     }
 

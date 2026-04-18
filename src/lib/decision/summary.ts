@@ -15,42 +15,60 @@ function getClient(): Anthropic {
   return client;
 }
 
+export interface TraceEntry {
+  item_id: string;
+  source: string;
+  role: string;
+  time: string;
+  title: string;
+  contribution: string;
+}
+
 export interface DecisionStructuredSummary {
   context: string;
   decision: string;
   rationale: string;
-  outcome: string;
+  what_was_asked: string;
+  what_was_shipped: string;
+  gap_analysis: string;
   status_note: string;
-  traceability: Array<{
-    item_id: string;
-    source: string;
-    role: string;
-    time: string;
-    title: string;
-    contribution: string;
-  }>;
+  discussion_trace: TraceEntry[];
+  implementation_trace: TraceEntry[];
 }
 
 function buildPrompt(d: DecisionSummary, items: DecisionItem[]): { system: string; user: string } {
-  const system = `You are producing a structured DECISION RECORD.
+  const system = `You are producing a structured DECISION RECORD that explicitly contrasts WHAT WAS ASKED / DISCUSSED (from JIRA / Notion / Slack / meetings) against WHAT WAS SHIPPED (from GitHub PRs and commits).
 
-Input is a decision and all the source items that led up to it or flowed from it.
-Each source item has a "relation" telling you how it fits: origin (seed), discussion, self (the decision itself), specification, implementation, review, integration, follow_up.
+Input: a decision item + all source items that led up to it or flowed from it.
 
-Produce a single JSON object with these exact fields (no prose outside JSON, no markdown fences):
+Source-item phases:
+  DISCUSSION PHASE  — jira, notion, slack, meeting items; origin/discussion/self/specification roles. These define the ask.
+  IMPLEMENTATION PHASE — github items; implementation/review/integration roles. These are the output.
+  FOLLOW-UP         — items that appeared after integration (bug reports, retros).
+
+Return a single JSON object, no markdown fences, no prose outside JSON:
 
 {
-  "context":    "2-3 sentences — what problem or situation motivated this decision. Cite the origin seed or discussion if present.",
-  "decision":   "1-2 sentences — what was actually decided, in concrete terms. Refer to the decision's title but expand it.",
-  "rationale":  "2-3 sentences — WHY this choice. Pull reasoning from the discussion items. If rationale is not explicit in sources, say so plainly.",
-  "outcome":    "2-3 sentences — what got built / merged / shipped as a result. If no implementation yet, say 'No implementation yet — pending specification/PR.'",
-  "status_note": "1 sentence — current state (active / implemented / superseded / reversed), and why.",
-  "traceability": [
-    { "item_id": "<id>", "source": "<jira|slack|notion|github|meeting>", "role": "<origin|discussion|self|specification|implementation|review|integration|follow_up>", "time": "YYYY-MM-DD", "title": "<truncated title>", "contribution": "<1 sentence — what THIS item contributed to the trace>" }
+  "context":          "2-3 sentences — what problem or situation motivated this decision. Cite the origin seed if present.",
+  "decision":         "1-2 sentences — what was actually decided, concrete terms.",
+  "rationale":        "2-3 sentences — WHY this choice. Pull reasoning from discussion items. If rationale is not explicit in sources, say so plainly.",
+  "what_was_asked":   "2-3 sentences summarising the ASK as defined in JIRA / Notion / Slack / meetings. Be specific about scope, acceptance criteria, or stakeholder intent.",
+  "what_was_shipped": "2-3 sentences summarising WHAT WAS ACTUALLY BUILT per GitHub PRs and commits. Mention file areas, approach, or notable trade-offs. If no implementation yet, state 'No implementation yet — pending PR.'",
+  "gap_analysis":     "1-2 sentences comparing ask vs. shipped. Did implementation match? Any scope cut, deviation, or open work? If fully aligned, say so briefly.",
+  "status_note":      "1 sentence — current state (active / implemented / superseded / reversed) with a concrete reason.",
+  "discussion_trace": [
+    { "item_id": "<id>", "source": "<jira|slack|notion|meeting>", "role": "<origin|discussion|self|specification|follow_up>", "time": "YYYY-MM-DD", "title": "<truncated>", "contribution": "<what THIS item added to the ask>" }
+  ],
+  "implementation_trace": [
+    { "item_id": "<id>", "source": "github", "role": "<implementation|review|integration>", "time": "YYYY-MM-DD", "title": "<truncated>", "contribution": "<what THIS PR/commit shipped>" }
   ]
 }
 
-The "traceability" array must include every input item in chronological order. Be specific in "contribution" — don't say "discussed the decision"; say "raised the concern about backfill safety under concurrent writes" (for example).`;
+Rules:
+- Put jira/notion/slack/meeting items in discussion_trace (chronological).
+- Put github items in implementation_trace (chronological).
+- If there are no github items, leave implementation_trace as [] — and say so in what_was_shipped.
+- Contributions must be specific ("raised backfill safety concern under concurrent writes"), never generic ("discussed the decision").`;
 
   const lines: string[] = [
     `Decision: "${d.title}"`,
@@ -64,7 +82,8 @@ The "traceability" array must include every input item in chronological order. B
   for (const it of items) {
     const when = (it.event_at ?? it.created_at).slice(0, 10);
     const summary = it.summary ?? (it.body ? it.body.slice(0, 200) : '');
-    lines.push(`[${it.relation}] (${when}) ${it.source}/${it.item_type} id=${it.id}`);
+    const phase = it.source === 'github' ? 'IMPL' : 'DISC';
+    lines.push(`[${phase}] [${it.relation}] (${when}) ${it.source}/${it.item_type} id=${it.id}`);
     lines.push(`  title: ${it.title.slice(0, 140)}`);
     if (summary) lines.push(`  note:  ${summary.slice(0, 240)}`);
   }
@@ -88,23 +107,27 @@ async function callSonnet(prompt: { system: string; user: string }): Promise<Dec
     if (
       typeof parsed.context !== 'string' ||
       typeof parsed.decision !== 'string' ||
-      typeof parsed.rationale !== 'string' ||
-      typeof parsed.outcome !== 'string'
+      typeof parsed.rationale !== 'string'
     ) return null;
-    return {
-      context: parsed.context,
-      decision: parsed.decision,
-      rationale: parsed.rationale,
-      outcome: parsed.outcome,
-      status_note: parsed.status_note ?? '',
-      traceability: Array.isArray(parsed.traceability) ? parsed.traceability.map((t: any) => ({
+    const toTrace = (arr: any): TraceEntry[] =>
+      Array.isArray(arr) ? arr.map((t: any) => ({
         item_id: String(t.item_id ?? ''),
         source: String(t.source ?? ''),
         role: String(t.role ?? ''),
         time: String(t.time ?? ''),
         title: String(t.title ?? ''),
         contribution: String(t.contribution ?? ''),
-      })) : [],
+      })) : [];
+    return {
+      context: parsed.context,
+      decision: parsed.decision,
+      rationale: parsed.rationale,
+      what_was_asked: parsed.what_was_asked ?? '',
+      what_was_shipped: parsed.what_was_shipped ?? '',
+      gap_analysis: parsed.gap_analysis ?? '',
+      status_note: parsed.status_note ?? '',
+      discussion_trace: toTrace(parsed.discussion_trace),
+      implementation_trace: toTrace(parsed.implementation_trace),
     };
   } catch (err: any) {
     console.error(`  Sonnet error (decision): ${err.message}`);

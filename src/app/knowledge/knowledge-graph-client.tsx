@@ -79,9 +79,12 @@ interface DecisionStructured {
   context: string;
   decision: string;
   rationale: string;
-  outcome: string;
+  what_was_asked: string;
+  what_was_shipped: string;
+  gap_analysis: string;
   status_note: string;
-  traceability: DecisionTraceEntry[];
+  discussion_trace: DecisionTraceEntry[];
+  implementation_trace: DecisionTraceEntry[];
 }
 
 interface DecisionRecord {
@@ -250,11 +253,15 @@ export default function KnowledgeGraphClient() {
           linkCountMap[edge.target_item_id] = (linkCountMap[edge.target_item_id] || 0) + 1;
         }
 
-        const nodes: GraphNode[] = data.nodes.map((item: any) => ({
-          ...item,
-          val: Math.max(2, (linkCountMap[item.id] || 0) * 2),
-          color: item.trace_role ? (traceRoleColors[item.trace_role] ?? sourceColors[item.source] ?? '#999') : (sourceColors[item.source] ?? '#999'),
-        }));
+        const nodes: GraphNode[] = data.nodes.map((item: any) => {
+          const isEpic = item.source === 'jira' && (item.item_type === 'epic' || item.item_type === 'Epic');
+          const baseVal = Math.max(2, (linkCountMap[item.id] || 0) * 2);
+          return {
+            ...item,
+            val: isEpic ? baseVal * 2.5 + 6 : baseVal,
+            color: item.trace_role ? (traceRoleColors[item.trace_role] ?? sourceColors[item.source] ?? '#999') : (sourceColors[item.source] ?? '#999'),
+          };
+        });
 
         const nodeIds = new Set(nodes.map((n) => n.id));
         const links: GraphLink[] = data.edges
@@ -873,6 +880,11 @@ export default function KnowledgeGraphClient() {
               <Badge variant="source" className={`text-white`} style={{ backgroundColor: sourceColors[selectedNode.source] || '#999' }}>
                 {sourceLabels[selectedNode.source] || selectedNode.source}
               </Badge>
+              {selectedNode.source === 'jira' && (selectedNode.item_type === 'epic' || selectedNode.item_type === 'Epic') && (
+                <Badge className="text-[0.63rem] font-semibold bg-[#7c3aed] text-white hover:bg-[#7c3aed]">
+                  ★ Epic
+                </Badge>
+              )}
               {selectedNode.trace_role && (
                 <Badge
                   className="text-[0.63rem] font-medium"
@@ -1018,50 +1030,75 @@ export default function KnowledgeGraphClient() {
                           <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Rationale</div>
                           <div className="text-[0.77rem] text-[#333] leading-[1.5]">{s.rationale}</div>
                         </div>
-                        <div>
-                          <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Outcome</div>
-                          <div className="text-[0.77rem] text-[#333] leading-[1.5]">{s.outcome}</div>
+
+                        <div className="grid grid-cols-2 gap-3 bg-white rounded-md p-3 border border-black/[0.06]">
+                          <div>
+                            <div className="text-[0.58rem] font-bold uppercase tracking-[0.08em] text-[#2563eb] mb-1">What was asked</div>
+                            <div className="text-[0.72rem] text-[#333] leading-[1.45]">{s.what_was_asked || '—'}</div>
+                          </div>
+                          <div>
+                            <div className="text-[0.58rem] font-bold uppercase tracking-[0.08em] text-[#16a34a] mb-1">What was shipped</div>
+                            <div className="text-[0.72rem] text-[#333] leading-[1.45]">{s.what_was_shipped || '—'}</div>
+                          </div>
                         </div>
+                        {s.gap_analysis && (
+                          <div>
+                            <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Gap analysis</div>
+                            <div className="text-[0.74rem] text-[#333] leading-[1.5] italic">{s.gap_analysis}</div>
+                          </div>
+                        )}
+
                         {s.status_note && (
                           <div>
                             <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-1">Status</div>
                             <div className="text-[0.77rem] text-[#333] leading-[1.5]">{s.status_note}</div>
                           </div>
                         )}
-                        {s.traceability?.length > 0 && (
-                          <div>
-                            <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#666] mb-2">Source Trace ({s.traceability.length})</div>
-                            <div className="relative pl-4">
-                              <div className="absolute left-[5px] top-[6px] bottom-[6px] w-px bg-black/[0.12]" />
-                              {s.traceability.map((t, i) => {
-                                const roleColor = (t.role && traceRoleColors[t.role]) || '#999';
-                                const isThis = t.item_id === selectedNode.id;
-                                return (
-                                  <div
-                                    key={`${t.item_id}-${i}`}
-                                    className={`relative flex items-start gap-3 pb-2 last:pb-0 -mx-2 px-2 rounded-md ${isThis ? 'bg-white' : 'hover:bg-white cursor-pointer'}`}
-                                    onClick={() => {
-                                      if (isThis) return;
-                                      const n = graphData.nodes.find(nn => nn.id === t.item_id);
-                                      if (n) setSelectedNode(n);
-                                    }}
-                                  >
-                                    <div className="absolute left-[-11px] top-[6px] w-[9px] h-[9px] rounded-full" style={{ backgroundColor: roleColor, outline: isThis ? '2px solid #3b82f6' : 'none', outlineOffset: '1px' }} />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-[5px] mb-[1px]">
-                                        <span className="text-[0.6rem] text-[#999] tabular-nums">{t.time}</span>
-                                        <span className="text-[0.55rem] font-semibold px-[4px] py-px rounded-[3px]" style={{ backgroundColor: `${roleColor}18`, color: roleColor }}>{traceRoleLabels[t.role] || t.role}</span>
-                                        <span className="text-[0.58rem] text-[#bbb]">{t.source}</span>
+
+                        {[
+                          { label: 'Discussion (JIRA / Notion / Slack / Meetings)', list: s.discussion_trace, accent: '#2563eb' },
+                          { label: 'Implementation (GitHub)', list: s.implementation_trace, accent: '#16a34a' },
+                        ].map(({ label, list, accent }) => (
+                          list && list.length > 0 && (
+                            <div key={label}>
+                              <div className="flex items-center gap-2 mb-2">
+                                <div className="w-[4px] h-[12px] rounded-sm" style={{ backgroundColor: accent }} />
+                                <div className="text-[0.6rem] font-bold uppercase tracking-[0.08em]" style={{ color: accent }}>
+                                  {label} ({list.length})
+                                </div>
+                              </div>
+                              <div className="relative pl-4">
+                                <div className="absolute left-[5px] top-[6px] bottom-[6px] w-px" style={{ backgroundColor: `${accent}33` }} />
+                                {list.map((t, i) => {
+                                  const roleColor = (t.role && traceRoleColors[t.role]) || accent;
+                                  const isThis = t.item_id === selectedNode.id;
+                                  return (
+                                    <div
+                                      key={`${t.item_id}-${i}`}
+                                      className={`relative flex items-start gap-3 pb-2 last:pb-0 -mx-2 px-2 rounded-md ${isThis ? 'bg-white' : 'hover:bg-white cursor-pointer'}`}
+                                      onClick={() => {
+                                        if (isThis) return;
+                                        const n = graphData.nodes.find(nn => nn.id === t.item_id);
+                                        if (n) setSelectedNode(n);
+                                      }}
+                                    >
+                                      <div className="absolute left-[-11px] top-[6px] w-[9px] h-[9px] rounded-full" style={{ backgroundColor: roleColor, outline: isThis ? '2px solid #3b82f6' : 'none', outlineOffset: '1px' }} />
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-[5px] mb-[1px]">
+                                          <span className="text-[0.6rem] text-[#999] tabular-nums">{t.time}</span>
+                                          <span className="text-[0.55rem] font-semibold px-[4px] py-px rounded-[3px]" style={{ backgroundColor: `${roleColor}18`, color: roleColor }}>{traceRoleLabels[t.role] || t.role}</span>
+                                          <span className="text-[0.58rem] text-[#bbb]">{t.source}</span>
+                                        </div>
+                                        <div className="text-[0.73rem] text-[#222] leading-[1.35] font-medium">{t.title}</div>
+                                        <div className="text-[0.68rem] text-[#666] leading-[1.35] mt-[1px]">{t.contribution}</div>
                                       </div>
-                                      <div className="text-[0.73rem] text-[#222] leading-[1.35] font-medium">{t.title}</div>
-                                      <div className="text-[0.68rem] text-[#666] leading-[1.35] mt-[1px]">{t.contribution}</div>
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )
+                        ))}
                       </div>
                     )}
                   </div>

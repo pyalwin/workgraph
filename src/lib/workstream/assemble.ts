@@ -147,6 +147,34 @@ function roleInWorkstream(item: ItemRow, isSeed: boolean, isTerminal: boolean): 
   return item.trace_role;
 }
 
+function isEpic(item: ItemRow): boolean {
+  return item.source === 'jira' && (item.item_type === 'epic' || item.item_type === 'Epic');
+}
+
+/**
+ * Within a workstream, JIRA Epics are the primary structural anchor.
+ * If the cluster contains one or more epics, promote them to seed status
+ * (even if Haiku classified them as 'specification'). Notion/Meeting items
+ * remain members but should not be the sole anchor when an epic exists.
+ */
+function promoteEpicsToSeeds(memberItems: ItemRow[], groupSeeds: Set<string>): Set<string> {
+  const epics = memberItems.filter(isEpic);
+  if (epics.length === 0) return groupSeeds;
+
+  const newSeeds = new Set<string>();
+  for (const e of epics) newSeeds.add(e.id);
+
+  // Keep non-supporting original seeds (JIRA / Slack / GitHub) that weren't already covered.
+  // Drop Notion/Meeting originals as seeds — they're supportive.
+  for (const sid of groupSeeds) {
+    const item = memberItems.find(m => m.id === sid);
+    if (!item) continue;
+    if (item.source === 'notion' || item.source === 'meeting' || item.source === 'gmail') continue;
+    newSeeds.add(sid);
+  }
+  return newSeeds;
+}
+
 export interface AssembleResult {
   workstreams: number;
   items: number;
@@ -190,6 +218,10 @@ export function assembleAll(): AssembleResult {
   const allGroups = [...merged, ...orphans];
 
   const tx = db.transaction(() => {
+    // Decisions reference workstreams via FK — wipe them first to avoid
+    // FK constraint failure. They'll be repopulated by extractDecisions().
+    db.exec('DELETE FROM decision_items');
+    db.exec('DELETE FROM decisions');
     wipeWS.run();
     wipeWSRoot.run();
 
@@ -206,7 +238,10 @@ export function assembleAll(): AssembleResult {
 
       insertWS.run(wsId, earliest, latest);
 
-      const seedSet = new Set(group.seedIds);
+      // Epic promotion: if this cluster contains any JIRA epic, epics become
+      // the primary seed anchors. Notion/Meeting items are removed from the
+      // seed set (they remain members as supporting context).
+      const seedSet = promoteEpicsToSeeds(items, new Set(group.seedIds));
       for (const item of items) {
         const isSeed = seedSet.has(item.id);
         const isTerminal = item.trace_role === 'integration';
