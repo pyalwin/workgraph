@@ -167,7 +167,88 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_otti_intent ON otti_sessions(intent);
     CREATE INDEX IF NOT EXISTS idx_otti_persona ON otti_sessions(persona);
     CREATE INDEX IF NOT EXISTS idx_otti_model ON otti_sessions(model);
+
+    CREATE TABLE IF NOT EXISTS item_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id TEXT NOT NULL REFERENCES work_items(id),
+      chunk_type TEXT NOT NULL,
+      chunk_text TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0,
+      token_count INTEGER,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_item_chunks_item ON item_chunks(item_id);
+    CREATE INDEX IF NOT EXISTS idx_item_chunks_type ON item_chunks(chunk_type);
+
+    CREATE TABLE IF NOT EXISTS chunk_embeddings_meta (
+      chunk_id INTEGER NOT NULL REFERENCES item_chunks(id),
+      model TEXT NOT NULL,
+      dim INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (chunk_id, model)
+    );
+    CREATE INDEX IF NOT EXISTS idx_chunk_emb_meta_model ON chunk_embeddings_meta(model);
+
+    CREATE TABLE IF NOT EXISTS workstreams (
+      id TEXT PRIMARY KEY,
+      narrative TEXT,
+      timeline_events TEXT,
+      earliest_at TEXT,
+      latest_at TEXT,
+      generated_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS workstream_items (
+      workstream_id TEXT NOT NULL REFERENCES workstreams(id),
+      item_id TEXT NOT NULL REFERENCES work_items(id),
+      is_seed INTEGER NOT NULL DEFAULT 0,
+      is_terminal INTEGER NOT NULL DEFAULT 0,
+      role_in_workstream TEXT,
+      event_at TEXT,
+      PRIMARY KEY (workstream_id, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_workstream_items_item ON workstream_items(item_id);
+    CREATE INDEX IF NOT EXISTS idx_workstream_items_ws ON workstream_items(workstream_id);
+
+    CREATE TABLE IF NOT EXISTS item_links_chunks (
+      link_id TEXT NOT NULL REFERENCES links(id),
+      source_chunk_id INTEGER REFERENCES item_chunks(id),
+      target_chunk_id INTEGER REFERENCES item_chunks(id),
+      signal TEXT NOT NULL,
+      score REAL NOT NULL,
+      PRIMARY KEY (link_id, source_chunk_id, target_chunk_id, signal)
+    );
+    CREATE INDEX IF NOT EXISTS idx_item_links_chunks_link ON item_links_chunks(link_id);
   `);
+
+  migrateWorkItems();
+  createVectorTables();
+}
+
+function migrateWorkItems() {
+  const db = getDb();
+  const cols = db.prepare("PRAGMA table_info(work_items)").all() as { name: string }[];
+  const have = new Set(cols.map(c => c.name));
+  if (!have.has('trace_role'))      db.exec("ALTER TABLE work_items ADD COLUMN trace_role TEXT");
+  if (!have.has('substance'))       db.exec("ALTER TABLE work_items ADD COLUMN substance TEXT");
+  if (!have.has('trace_event_at'))  db.exec("ALTER TABLE work_items ADD COLUMN trace_event_at TEXT");
+}
+
+function createVectorTables() {
+  const db = getDb();
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks_text USING vec0(
+        chunk_id integer primary key,
+        embedding float[768]
+      );
+    `);
+  } catch (err: any) {
+    console.warn(`Vector table creation skipped: ${err.message}`);
+  }
 }
 
 export function seedGoals() {
