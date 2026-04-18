@@ -24,11 +24,46 @@ interface GraphNode {
   type_tag: string | null;
   topic_tags: string | null;
   goal_names: string | null;
+  trace_role: string | null;
+  substance: string | null;
+  trace_event_at: string | null;
+  workstream_ids: string | null;
   // force-graph props
   val: number;
   color: string;
   x?: number;
   y?: number;
+}
+
+interface SearchHit {
+  id: string;
+  title: string;
+  source: string;
+  item_type: string;
+  trace_role: string | null;
+  match_excerpt: string;
+  distance: number;
+  workstream_ids: string[];
+}
+
+interface WorkstreamTimelineEvent {
+  item_id: string;
+  source: string;
+  role: string | null;
+  time: string;
+  title: string;
+  one_liner: string;
+}
+
+interface WorkstreamDetail {
+  id: string;
+  narrative: string | null;
+  timeline_events: WorkstreamTimelineEvent[];
+  earliest_at: string;
+  latest_at: string;
+  is_seed: number;
+  is_terminal: number;
+  role_in_workstream: string | null;
 }
 
 interface GraphEdge {
@@ -87,6 +122,28 @@ const linkTypeLabels: Record<string, string> = {
   mentions: 'Mentions',
 };
 
+const traceRoleColors: Record<string, string> = {
+  seed:           '#e11d48', // red — start
+  discussion:     '#f59e0b', // amber
+  decision:       '#d97706', // orange
+  specification:  '#2563eb', // blue
+  implementation: '#7c3aed', // violet
+  review:         '#0891b2', // cyan
+  integration:    '#16a34a', // green — terminal
+  follow_up:      '#6b7280', // grey
+};
+
+const traceRoleLabels: Record<string, string> = {
+  seed: 'Seed',
+  discussion: 'Discussion',
+  decision: 'Decision',
+  specification: 'Spec',
+  implementation: 'Implementation',
+  review: 'Review',
+  integration: 'Integration',
+  follow_up: 'Follow-up',
+};
+
 const statusOptions = ['All', 'Open', 'Active', 'Done'] as const;
 
 function truncate(text: string, maxLen: number): string {
@@ -126,6 +183,19 @@ export default function KnowledgeGraphClient() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
 
+  // Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const searchHighlight = useMemo(() => new Set(searchResults.map(r => r.id)), [searchResults]);
+
+  // Coloring mode
+  const [colorMode, setColorMode] = useState<'source' | 'trace_role'>('source');
+
+  // Workstream detail for selected node
+  const [workstreams, setWorkstreams] = useState<WorkstreamDetail[]>([]);
+  const [activeWorkstreamId, setActiveWorkstreamId] = useState<string | null>(null);
+
   // Graph dimensions
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
@@ -147,7 +217,7 @@ export default function KnowledgeGraphClient() {
         const nodes: GraphNode[] = data.nodes.map((item: any) => ({
           ...item,
           val: Math.max(2, (linkCountMap[item.id] || 0) * 2),
-          color: sourceColors[item.source] || '#999',
+          color: item.trace_role ? (traceRoleColors[item.trace_role] ?? sourceColors[item.source] ?? '#999') : (sourceColors[item.source] ?? '#999'),
         }));
 
         const nodeIds = new Set(nodes.map((n) => n.id));
@@ -271,6 +341,53 @@ export default function KnowledgeGraphClient() {
     }
   }, [sourceFilters, statusFilter, typeFilters]);
 
+  // Debounced semantic search
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    const handle = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&k=40`);
+        const json = await res.json();
+        setSearchResults(json.results || []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [searchQuery]);
+
+  // Fetch workstream details when a node is selected
+  useEffect(() => {
+    if (!selectedNode || !selectedNode.workstream_ids) {
+      setWorkstreams([]);
+      setActiveWorkstreamId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/items/${selectedNode.id}`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (cancelled) return;
+        setWorkstreams(json.workstreams ?? []);
+        const firstWithNarrative = (json.workstreams ?? []).find((w: WorkstreamDetail) => w.narrative) ?? (json.workstreams ?? [])[0];
+        setActiveWorkstreamId(firstWithNarrative?.id ?? null);
+      } catch {
+        setWorkstreams([]);
+        setActiveWorkstreamId(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedNode]);
+
   // Get connected nodes for the selected node
   const connectedNodes = useMemo(() => {
     if (!selectedNode) return [];
@@ -338,10 +455,22 @@ export default function KnowledgeGraphClient() {
     const isSelected = selectedNode?.id === n.id;
     const isHovered = hoveredNode?.id === n.id;
     const isConnected = hoveredNode ? hoveredConnections.has(n.id) : false;
-    const isDimmed = hoveredNode && !isHovered && !isConnected && hoveredNode.id !== n.id;
+    const isSearchMatch = searchHighlight.size > 0 && searchHighlight.has(n.id);
+    const isDimmedByHover = hoveredNode && !isHovered && !isConnected && hoveredNode.id !== n.id;
+    const isDimmedBySearch = searchHighlight.size > 0 && !isSearchMatch;
+    const isDimmed = isDimmedByHover || isDimmedBySearch;
 
     const x = node.x || 0;
     const y = node.y || 0;
+
+    // Search-match ring (drawn before selection ring so both show)
+    if (isSearchMatch && !isSelected) {
+      ctx.beginPath();
+      ctx.arc(x, y, nodeRadius + 4, 0, 2 * Math.PI);
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2.5 / globalScale;
+      ctx.stroke();
+    }
 
     // Selection ring
     if (isSelected) {
@@ -377,7 +506,7 @@ export default function KnowledgeGraphClient() {
       ctx.fillStyle = isDimmed ? '#ccc' : (isSelected || isHovered) ? '#111' : '#555';
       ctx.fillText(label, x, y + nodeRadius + 2);
     }
-  }, [selectedNode, hoveredNode, hoveredConnections]);
+  }, [selectedNode, hoveredNode, hoveredConnections, searchHighlight]);
 
   // Custom link renderer
   const linkCanvasObject = useCallback((link: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -437,6 +566,70 @@ export default function KnowledgeGraphClient() {
           <p className="text-[0.72rem] text-[#999]">
             {filteredData.nodes.length} nodes &middot; {filteredData.links.length} edges
           </p>
+        </div>
+
+        {/* Semantic Search */}
+        <div className="px-5 pt-3 pb-3 border-b border-black/[0.07]">
+          <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-2">Search</div>
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Find across all sources..."
+              className="w-full px-[10px] py-[6px] pr-7 text-[0.76rem] rounded-[6px] border border-black/[0.1] bg-white focus:outline-none focus:border-[#3b82f6] placeholder:text-[#bbb]"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-[18px] h-[18px] flex items-center justify-center text-[#bbb] hover:text-[#555] cursor-pointer"
+                title="Clear"
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+          {searching && (
+            <div className="mt-2 text-[0.68rem] text-[#999]">Searching...</div>
+          )}
+          {!searching && searchResults.length > 0 && (
+            <div className="mt-2">
+              <div className="text-[0.66rem] text-[#999] mb-1">{searchResults.length} matches</div>
+              <div className="flex flex-col gap-[3px] max-h-[240px] overflow-y-auto">
+                {searchResults.slice(0, 20).map((hit) => {
+                  const node = graphData.nodes.find((n) => n.id === hit.id);
+                  return (
+                    <button
+                      key={hit.id}
+                      onClick={() => node && setSelectedNode(node)}
+                      className="text-left px-[8px] py-[5px] rounded-[5px] hover:bg-[#f5f5f5] transition-colors cursor-pointer border border-transparent hover:border-black/[0.07]"
+                    >
+                      <div className="flex items-center gap-[5px] mb-[1px]">
+                        <div
+                          className="w-[6px] h-[6px] rounded-full shrink-0"
+                          style={{ backgroundColor: (hit.trace_role && traceRoleColors[hit.trace_role]) || sourceColors[hit.source] || '#999' }}
+                        />
+                        <span className="text-[0.62rem] text-[#999] uppercase">{sourceLabels[hit.source] || hit.source}</span>
+                        {hit.trace_role && (
+                          <span className="text-[0.58rem] px-[4px] py-px rounded-[3px]" style={{ backgroundColor: `${traceRoleColors[hit.trace_role]}15`, color: traceRoleColors[hit.trace_role] }}>
+                            {traceRoleLabels[hit.trace_role] || hit.trace_role}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[0.72rem] text-[#333] leading-[1.3] line-clamp-2">
+                        {hit.title}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!searching && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
+            <div className="mt-2 text-[0.68rem] text-[#999]">No matches</div>
+          )}
         </div>
 
         {/* Source Filters */}
@@ -584,11 +777,27 @@ export default function KnowledgeGraphClient() {
               </button>
             </div>
 
-            {/* Source + Status badges */}
+            {/* Source + Status + trace_role badges */}
             <div className="flex items-center gap-[6px] flex-wrap mb-3">
               <Badge variant="source" className={`text-white`} style={{ backgroundColor: sourceColors[selectedNode.source] || '#999' }}>
                 {sourceLabels[selectedNode.source] || selectedNode.source}
               </Badge>
+              {selectedNode.trace_role && (
+                <Badge
+                  className="text-[0.63rem] font-medium"
+                  style={{
+                    backgroundColor: `${traceRoleColors[selectedNode.trace_role] ?? '#999'}18`,
+                    color: traceRoleColors[selectedNode.trace_role] ?? '#555',
+                  }}
+                >
+                  {traceRoleLabels[selectedNode.trace_role] || selectedNode.trace_role}
+                </Badge>
+              )}
+              {selectedNode.substance && (
+                <Badge variant="outline" className="text-[0.63rem]">
+                  {selectedNode.substance}
+                </Badge>
+              )}
               {selectedNode.status && (
                 <Badge variant="secondary" className="text-[0.63rem]">
                   {selectedNode.status.replace('_', ' ')}
@@ -660,6 +869,84 @@ export default function KnowledgeGraphClient() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Workstreams (narrative + timeline) */}
+          {workstreams.length > 0 && (
+            <div className="px-5 pt-4 pb-4 border-b border-black/[0.07]">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#999]">
+                  Workstream{workstreams.length > 1 ? `s (${workstreams.length})` : ''}
+                </div>
+                {workstreams.length > 1 && (
+                  <select
+                    value={activeWorkstreamId ?? ''}
+                    onChange={(e) => setActiveWorkstreamId(e.target.value)}
+                    className="text-[0.65rem] px-[6px] py-[2px] border border-black/[0.1] rounded-[4px] bg-white cursor-pointer"
+                  >
+                    {workstreams.map((w, i) => (
+                      <option key={w.id} value={w.id}>WS {i + 1} · {w.timeline_events?.length || 0} items</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              {(() => {
+                const ws = workstreams.find(w => w.id === activeWorkstreamId) ?? workstreams[0];
+                if (!ws) return null;
+                return (
+                  <div className="flex flex-col gap-3">
+                    {ws.narrative ? (
+                      <div className="text-[0.78rem] text-[#333] leading-[1.55] bg-[#fafafa] border border-black/[0.05] rounded-[6px] p-[10px]">
+                        {ws.narrative}
+                      </div>
+                    ) : (
+                      <div className="text-[0.74rem] text-[#999] italic">Narrative not yet generated. Run the pipeline to create one.</div>
+                    )}
+                    {ws.timeline_events?.length > 0 && (
+                      <div className="relative pl-5">
+                        <div className="absolute left-[7px] top-[6px] bottom-[6px] w-px bg-black/[0.1]" />
+                        {ws.timeline_events.map((ev, i) => {
+                          const isThis = ev.item_id === selectedNode.id;
+                          const color = (ev.role && traceRoleColors[ev.role]) || '#999';
+                          return (
+                            <div
+                              key={`${ev.item_id}-${i}`}
+                              className={`relative flex items-start gap-3 pb-2 last:pb-0 -mx-2 px-2 rounded-md ${isThis ? 'bg-[#f5f7ff]' : 'hover:bg-[#f9f9f9] cursor-pointer'}`}
+                              onClick={() => {
+                                if (isThis) return;
+                                const n = graphData.nodes.find(nn => nn.id === ev.item_id);
+                                if (n) setSelectedNode(n);
+                              }}
+                            >
+                              <div
+                                className="absolute left-[-13px] top-[6px] w-[9px] h-[9px] rounded-full"
+                                style={{ backgroundColor: color, outline: isThis ? '2px solid #3b82f6' : 'none', outlineOffset: '1px' }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-[6px] mb-[1px]">
+                                  <span className="text-[0.63rem] text-[#999] tabular-nums">{ev.time}</span>
+                                  {ev.role && (
+                                    <span
+                                      className="text-[0.56rem] font-semibold px-[5px] py-px rounded-[3px]"
+                                      style={{ backgroundColor: `${color}18`, color }}
+                                    >
+                                      {traceRoleLabels[ev.role] || ev.role}
+                                    </span>
+                                  )}
+                                  <span className="text-[0.62rem] text-[#bbb]">{ev.source}</span>
+                                </div>
+                                <div className="text-[0.76rem] text-[#222] leading-[1.35] font-medium">{ev.title}</div>
+                                {ev.one_liner && <div className="text-[0.7rem] text-[#666] leading-[1.35] mt-[2px]">{ev.one_liner}</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 

@@ -9,10 +9,14 @@ export async function GET() {
   const db = getDb();
 
   const items = db.prepare(`
-    SELECT wi.id, wi.title, wi.summary, wi.source, wi.source_id, wi.item_type, wi.status, wi.author, wi.url, wi.body, wi.created_at,
+    SELECT
+      wi.id, wi.title, wi.summary, wi.source, wi.source_id, wi.item_type, wi.status,
+      wi.author, wi.url, wi.body, wi.created_at,
+      wi.trace_role, wi.substance, wi.trace_event_at,
       (SELECT GROUP_CONCAT(DISTINCT t.name) FROM item_tags it JOIN tags t ON t.id = it.tag_id WHERE it.item_id = wi.id AND t.category = 'type') as type_tag,
       (SELECT GROUP_CONCAT(DISTINCT t.name) FROM item_tags it JOIN tags t ON t.id = it.tag_id WHERE it.item_id = wi.id AND t.category = 'topic') as topic_tags,
-      (SELECT GROUP_CONCAT(DISTINCT g.name) FROM item_tags it JOIN goals g ON g.id = it.tag_id WHERE it.item_id = wi.id) as goal_names
+      (SELECT GROUP_CONCAT(DISTINCT g.name) FROM item_tags it JOIN goals g ON g.id = it.tag_id WHERE it.item_id = wi.id) as goal_names,
+      (SELECT GROUP_CONCAT(wsi.workstream_id) FROM workstream_items wsi WHERE wsi.item_id = wi.id) as workstream_ids
     FROM work_items wi
     ORDER BY wi.created_at DESC
     LIMIT 300

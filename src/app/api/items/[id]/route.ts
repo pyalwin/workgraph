@@ -40,8 +40,9 @@ export async function GET(
     const db = getDb();
 
     const item = db.prepare(`
-      SELECT id, source, source_id, item_type, title, body, author, status,
-             priority, url, metadata, created_at, updated_at
+      SELECT id, source, source_id, item_type, title, body, summary, author, status,
+             priority, url, metadata, created_at, updated_at,
+             trace_role, substance, trace_event_at, enriched_at
       FROM work_items WHERE id = ?
     `).get(id);
 
@@ -74,7 +75,20 @@ export async function GET(
       SELECT g.name FROM item_tags it JOIN goals g ON g.id = it.tag_id WHERE it.item_id = ?
     `).all(id) as GoalRow[];
 
-    return NextResponse.json({ item, versions, linkedItems, goals });
+    // Workstream memberships
+    const workstreams = db.prepare(`
+      SELECT ws.id, ws.narrative, ws.timeline_events, ws.earliest_at, ws.latest_at,
+             wsi.is_seed, wsi.is_terminal, wsi.role_in_workstream
+      FROM workstream_items wsi
+      JOIN workstreams ws ON ws.id = wsi.workstream_id
+      WHERE wsi.item_id = ?
+      ORDER BY ws.latest_at DESC
+    `).all(id).map((w: any) => ({
+      ...w,
+      timeline_events: w.timeline_events ? JSON.parse(w.timeline_events) : [],
+    }));
+
+    return NextResponse.json({ item, versions, linkedItems, goals, workstreams });
   } catch {
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
