@@ -8,6 +8,7 @@ import { anomalyScan } from './anomalies';
 import { projectSummaryRegen } from './project-summary';
 import { projectActionsRefresh } from './project-actions';
 import { projectReadmeRefresh } from './project-readme';
+import { projectOkrsRefresh } from './project-okrs';
 
 export const functions = [
   heartbeat,
@@ -17,4 +18,5 @@ export const functions = [
   projectSummaryRegen,
   projectActionsRefresh,
   projectReadmeRefresh,
+  projectOkrsRefresh,
 ];

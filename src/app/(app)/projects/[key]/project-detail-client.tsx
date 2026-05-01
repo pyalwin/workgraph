@@ -23,6 +23,7 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshingReadme, setRefreshingReadme] = useState(false);
+  const [refreshingOkrs, setRefreshingOkrs] = useState(false);
   const [readmeOpen, setReadmeOpen] = useState(false);
   const [openItemId, setOpenItemId] = useState<string | null>(null);
 
@@ -61,6 +62,17 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
       // ignore
     }
     setRefreshingReadme(false);
+  };
+
+  const handleRefreshOkrs = async () => {
+    setRefreshingOkrs(true);
+    try {
+      await fetch(`/api/projects/${projectKey}/refresh-okrs`, { method: 'POST' });
+      await fetchData();
+    } catch {
+      // ignore
+    }
+    setRefreshingOkrs(false);
   };
 
   if (loading && !data) {
@@ -156,6 +168,59 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
 
       <div className="detail-body">
         <div className="detail-main">
+          {/* OKRs — measurable goals tied to the README */}
+          <section className="detail-section">
+            <div className="proj-okrs-head">
+              <h4>OKRs</h4>
+              <button
+                type="button"
+                className="proj-okrs-regen"
+                onClick={handleRefreshOkrs}
+                disabled={refreshingOkrs}
+              >
+                {refreshingOkrs ? 'Regenerating…' : (d.okrs && d.okrs.length > 0 ? 'Regenerate' : 'Generate')}
+              </button>
+            </div>
+            {d.okrs && d.okrs.length > 0 ? (
+              <ul className="proj-okrs">
+                {d.okrs.map((o) => (
+                  <li key={o.id} className="proj-okr">
+                    <div className="proj-okr-head">
+                      <span className="proj-okr-eyebrow">Objective</span>
+                      <h5>{o.title}</h5>
+                      {o.why && <p className="proj-okr-why">{o.why}</p>}
+                    </div>
+                    {o.key_results.length > 0 && (
+                      <ul className="proj-okr-krs">
+                        {o.key_results.map((kr) => (
+                          <li key={kr.id} className="proj-okr-kr">
+                            <span className="proj-okr-kr-text">{kr.text}</span>
+                            <div className="proj-okr-kr-meta">
+                              {kr.target_metric && (
+                                <span className="proj-okr-kr-metric">
+                                  {kr.target_metric} = {kr.target_value}
+                                </span>
+                              )}
+                              {kr.target_at && (
+                                <span className="proj-okr-kr-due">
+                                  by {new Date(kr.target_at).toLocaleDateString()}
+                                </span>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="proj-okrs-empty">
+                No OKRs yet. {d.readme?.content ? 'Generating in the background — reload in a few seconds, or click Generate.' : 'Generate the README first; OKRs are anchored to it.'}
+              </p>
+            )}
+          </section>
+
           <section className="detail-section">
             <h4>Status snapshot</h4>
             <div className="proj-detail-grid">

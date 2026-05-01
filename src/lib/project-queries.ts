@@ -82,6 +82,26 @@ export interface ProjectActionItem {
   due_at: string | null;
 }
 
+export interface ProjectKeyResult {
+  id: string;
+  text: string;
+  why: string | null;
+  target_metric: string | null;
+  target_value: number | null;
+  target_at: string | null;
+  ai_confidence: number | null;
+  derived_from: string;
+}
+
+export interface ProjectObjective {
+  id: string;
+  title: string;
+  why: string | null;
+  ai_confidence: number | null;
+  derived_from: string;
+  key_results: ProjectKeyResult[];
+}
+
 export interface ProjectDetail {
   project: { key: string; name: string; total_tickets: number; total_prs: number };
   health: ProjectHealth;
@@ -91,6 +111,7 @@ export interface ProjectDetail {
   anomalies?: ProjectAnomaly[];
   actionItems?: ProjectActionItem[];
   readme?: { content: string | null; generatedAt: string | null };
+  okrs?: ProjectObjective[];
 }
 
 export interface ProjectSummaryCard {

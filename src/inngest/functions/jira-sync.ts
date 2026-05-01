@@ -226,12 +226,44 @@ export const jiraSyncWorkspace = inngest.createFunction(
       );
     }
 
+    // OKRs — only seed for projects that already have a README AND have
+    // no AI-generated OKRs yet. Projects whose README was just seeded above
+    // will get their OKRs on the NEXT sync (or via the auto-seed in the
+    // GET /api/projects/[key] handler when the user opens the project page).
+    const okrNeedingProjects = await step.run('list-projects-needing-okrs', () => {
+      const db = getDb();
+      return projectKeys.filter((projectKey) => {
+        const hasReadme = db
+          .prepare(`SELECT readme IS NOT NULL AS has FROM project_summaries WHERE project_key = ?`)
+          .get(projectKey) as { has: number } | undefined;
+        if (!hasReadme?.has) return false;
+        const hasOkrs = db
+          .prepare(
+            `SELECT COUNT(*) AS c FROM goals
+             WHERE project_key = ? AND kind='objective' AND derived_from='ai_okr' AND status='active'`,
+          )
+          .get(projectKey) as { c: number };
+        return hasOkrs.c === 0;
+      });
+    });
+
+    if (okrNeedingProjects.length > 0) {
+      await step.sendEvent(
+        'fan-out-project-okrs',
+        okrNeedingProjects.map((projectKey) => ({
+          name: 'workgraph/project.okrs.refresh',
+          data: { projectKey },
+        })),
+      );
+    }
+
     return {
       workspaceId,
       slot,
       enriched,
       projectsRefreshed: projectKeys.length,
       readmesSeeded: readmeNeedingProjects.length,
+      okrsSeeded: okrNeedingProjects.length,
     };
   },
 );

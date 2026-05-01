@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db';
 import { getProjectDetail } from '@/lib/project-queries';
 import { getOrGenerateSummary } from '@/lib/project-summary';
 import { getProjectReadme } from '@/lib/sync/project-readme';
+import { getProjectOKRs, type ProjectOKR } from '@/lib/sync/project-okrs';
 import { inngest } from '@/inngest/client';
 
 export const dynamic = 'force-dynamic';
@@ -103,6 +104,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ key: stri
     anomalies?: ProjectAnomaly[];
     actionItems?: ProjectActionItem[];
     readme?: { content: string | null; generatedAt: string | null };
+    okrs?: ProjectOKR[];
   };
 
   // Generate or fetch cached summary
@@ -122,6 +124,14 @@ export async function GET(req: NextRequest, props: { params: Promise<{ key: stri
       .catch(() => { /* swallow — best-effort */ });
   }
   detail.readme = { content: readme.readme, generatedAt: readme.generatedAt };
+
+  // OKRs — anchored on the README. Auto-seed when README exists but no OKRs do.
+  detail.okrs = getProjectOKRs(projectKey);
+  if (readme.readme && detail.okrs.length === 0) {
+    inngest
+      .send({ name: 'workgraph/project.okrs.refresh', data: { projectKey } })
+      .catch(() => { /* swallow */ });
+  }
 
   return NextResponse.json(detail);
 }

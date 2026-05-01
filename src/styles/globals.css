@@ -3985,3 +3985,84 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   color: var(--ink-4, #7a7670);
   font-size: 0.88rem;
 }
+
+/* OKRs (Phase 6) */
+.proj-okrs-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.proj-okrs-head h4 { margin: 0; }
+.proj-okrs-regen {
+  margin-left: auto;
+  padding: 0.3rem 0.7rem;
+  background: var(--bone-2, #f3efe7);
+  border: 1px solid rgba(21, 20, 15, 0.08);
+  border-radius: 5px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: var(--ink-2, #2a2822);
+}
+.proj-okrs-regen:hover { background: var(--bone, #faf8f3); border-color: rgba(21, 20, 15, 0.18); }
+.proj-okrs-regen:disabled { opacity: 0.5; cursor: wait; }
+.proj-okrs-empty { color: var(--ink-4, #7a7670); font-size: 0.88rem; }
+.proj-okrs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.proj-okr {
+  padding: 1rem 1.1rem;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(21, 20, 15, 0.08);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  backdrop-filter: blur(6px);
+}
+.proj-okr-head { display: flex; flex-direction: column; gap: 0.25rem; }
+.proj-okr-eyebrow {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #d97757;
+}
+.proj-okr-head h5 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink, #15140f);
+}
+.proj-okr-why { margin: 0; font-size: 0.85rem; color: var(--ink-3, #53504a); line-height: 1.5; }
+.proj-okr-krs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  border-top: 1px solid rgba(21, 20, 15, 0.05);
+  padding-top: 0.85rem;
+}
+.proj-okr-kr {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.proj-okr-kr-text { font-size: 0.88rem; color: var(--ink-2, #2a2822); line-height: 1.4; }
+.proj-okr-kr-meta { display: flex; gap: 0.85rem; font-size: 0.75rem; color: var(--ink-4, #7a7670); }
+.proj-okr-kr-metric {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink-3, #53504a);
+}
+.proj-okr-kr-due {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
