@@ -89,7 +89,8 @@ export function ProjectsIndexClient({ initialCards }: { initialCards: ProjectSum
   const [period, setPeriod] = useState('30d');
   const [cards, setCards] = useState(initialCards);
   const { state, setState } = useWorkgraphState();
-  const role = ROLES[state.role];
+  const role = ROLES[state.role] ?? Object.values(ROLES)[0];
+  const roleLabel = role?.label ?? 'Workspace User';
 
   useEffect(() => {
     if (period === '30d') {
@@ -148,7 +149,7 @@ export function ProjectsIndexClient({ initialCards }: { initialCards: ProjectSum
           </div>
         </div>
         <div className="proj-rolebar-right">
-          <div className="proj-rolebar-label">Role · {role.label.toLowerCase()}</div>
+          <div className="proj-rolebar-label">Role · {roleLabel.toLowerCase()}</div>
         </div>
       </div>
 
