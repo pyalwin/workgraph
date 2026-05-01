@@ -275,6 +275,56 @@ export function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_system_health_ran ON system_health(ran_at);
 
+    -- Action items extracted by AI from issue body / comments / threads.
+    -- Surfaced on the per-user tracker.
+    CREATE TABLE IF NOT EXISTS action_items (
+      id TEXT PRIMARY KEY,
+      source_item_id TEXT NOT NULL REFERENCES work_items(id),
+      text TEXT NOT NULL,
+      assignee TEXT,
+      due_at TEXT,
+      user_priority TEXT,                  -- 'p0'..'p3', set by user
+      ai_priority TEXT,                    -- 'p0'..'p3', set by AI
+      state TEXT NOT NULL DEFAULT 'open',  -- open / done / dismissed
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_action_items_source ON action_items(source_item_id);
+    CREATE INDEX IF NOT EXISTS idx_action_items_assignee ON action_items(assignee);
+    CREATE INDEX IF NOT EXISTS idx_action_items_state ON action_items(state);
+
+    -- Anomalies detected on a weekly cadence. Auto-resolves if the
+    -- triggering condition no longer holds.
+    CREATE TABLE IF NOT EXISTS anomalies (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      scope TEXT NOT NULL,                  -- 'project:PEX' | 'item:PEX-123'
+      kind TEXT NOT NULL,                   -- stale | churning | scope_creep | priority_inversion | deadline_risk | owner_gap | goal_drift
+      severity REAL NOT NULL,               -- 0..1
+      evidence_item_ids TEXT NOT NULL,      -- JSON array of item ids
+      explanation TEXT,                     -- one-sentence AI explanation
+      detected_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT,                     -- nullable; set when condition no longer holds
+      dismissed_by_user INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(workspace_id, scope, kind)
+    );
+    CREATE INDEX IF NOT EXISTS idx_anomalies_workspace ON anomalies(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_anomalies_open ON anomalies(workspace_id, resolved_at, dismissed_by_user);
+
+    -- Per-workspace mapping from auth user → display names / emails / handles
+    -- in source data. Resolves "Arun" / "arunv@…" / "@arun" to the same logged
+    -- in user. Required for is_mine, per-user tracker, and assignee matching.
+    CREATE TABLE IF NOT EXISTS workspace_user_aliases (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      auth_user_id TEXT NOT NULL,           -- WorkOS user.id
+      source TEXT NOT NULL,                 -- 'jira' | 'slack' | 'github' | …
+      alias TEXT NOT NULL,                  -- normalized lowercase
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(workspace_id, source, alias)
+    );
+    CREATE INDEX IF NOT EXISTS idx_aliases_user ON workspace_user_aliases(workspace_id, auth_user_id);
+
     CREATE TABLE IF NOT EXISTS item_links_chunks (
       link_id TEXT NOT NULL REFERENCES links(id),
       source_chunk_id INTEGER REFERENCES item_chunks(id),
@@ -342,7 +392,20 @@ export function initSchema() {
   migrateWorkItems();
   migrateWorkspaceConfig();
   migrateConnectorConfigs();
+  migrateGoals();
   createVectorTables();
+}
+
+function migrateGoals() {
+  const db = getDb();
+  const cols = db.prepare("PRAGMA table_info(goals)").all() as { name: string }[];
+  const have = new Set(cols.map(c => c.name));
+  if (!have.has('owner_user_id'))    db.exec("ALTER TABLE goals ADD COLUMN owner_user_id TEXT");
+  if (!have.has('target_metric'))    db.exec("ALTER TABLE goals ADD COLUMN target_metric TEXT");
+  if (!have.has('target_value'))     db.exec("ALTER TABLE goals ADD COLUMN target_value REAL");
+  if (!have.has('target_at'))        db.exec("ALTER TABLE goals ADD COLUMN target_at TEXT");
+  if (!have.has('ai_confidence'))    db.exec("ALTER TABLE goals ADD COLUMN ai_confidence REAL");
+  if (!have.has('derived_from'))     db.exec("ALTER TABLE goals ADD COLUMN derived_from TEXT NOT NULL DEFAULT 'manual'");
 }
 
 function migrateWorkItems() {

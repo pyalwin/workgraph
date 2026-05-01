@@ -32,6 +32,13 @@ export const goals = sqliteTable('goals', {
   sourceCount: integer('source_count').default(0),
   createdAt: text('created_at').default(sql`(datetime('now'))`),
   updatedAt: text('updated_at').default(sql`(datetime('now'))`),
+  // Phase 2.2 — measurable goals
+  ownerUserId: text('owner_user_id'),
+  targetMetric: text('target_metric'),
+  targetValue: real('target_value'),
+  targetAt: text('target_at'),
+  aiConfidence: real('ai_confidence'),
+  derivedFrom: text('derived_from').notNull().default('manual'),
 });
 
 export const projects = sqliteTable('projects', {
@@ -490,6 +497,68 @@ export const systemHealth = sqliteTable(
   (t) => [index('idx_system_health_ran').on(t.ranAt)],
 );
 
+// ─────── action items + anomalies + identity mapping ──────────────────────
+
+export const actionItems = sqliteTable(
+  'action_items',
+  {
+    id: text('id').primaryKey(),
+    sourceItemId: text('source_item_id')
+      .notNull()
+      .references(() => workItems.id),
+    text: text('text').notNull(),
+    assignee: text('assignee'),
+    dueAt: text('due_at'),
+    userPriority: text('user_priority'),
+    aiPriority: text('ai_priority'),
+    state: text('state').notNull().default('open'),
+    createdAt: text('created_at').default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    index('idx_action_items_source').on(t.sourceItemId),
+    index('idx_action_items_assignee').on(t.assignee),
+    index('idx_action_items_state').on(t.state),
+  ],
+);
+
+export const anomalies = sqliteTable(
+  'anomalies',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    scope: text('scope').notNull(),
+    kind: text('kind').notNull(),
+    severity: real('severity').notNull(),
+    evidenceItemIds: text('evidence_item_ids').notNull(),
+    explanation: text('explanation'),
+    detectedAt: text('detected_at').notNull().default(sql`(datetime('now'))`),
+    resolvedAt: text('resolved_at'),
+    dismissedByUser: integer('dismissed_by_user').notNull().default(0),
+  },
+  (t) => [
+    uniqueIndex('uniq_anomalies_workspace_scope_kind').on(t.workspaceId, t.scope, t.kind),
+    index('idx_anomalies_workspace').on(t.workspaceId),
+    index('idx_anomalies_open').on(t.workspaceId, t.resolvedAt, t.dismissedByUser),
+  ],
+);
+
+export const workspaceUserAliases = sqliteTable(
+  'workspace_user_aliases',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    authUserId: text('auth_user_id').notNull(),
+    source: text('source').notNull(),
+    alias: text('alias').notNull(),
+    createdAt: text('created_at').default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    uniqueIndex('uniq_aliases_workspace_source_alias').on(t.workspaceId, t.source, t.alias),
+    index('idx_aliases_user').on(t.workspaceId, t.authUserId),
+  ],
+);
+
 // Convenience: every table re-exported as `schema` for `drizzle({ schema })`.
 export const schema = {
   goals,
@@ -519,4 +588,7 @@ export const schema = {
   itemLinksChunks,
   aiProviderConfigs,
   systemHealth,
+  actionItems,
+  anomalies,
+  workspaceUserAliases,
 };
