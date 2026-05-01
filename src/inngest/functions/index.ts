@@ -3,5 +3,6 @@
  * picked up by the /api/inngest serve handler.
  */
 import { heartbeat } from './heartbeat';
+import { jiraSyncTick, jiraSyncWorkspace } from './jira-sync';
 
-export const functions = [heartbeat];
+export const functions = [heartbeat, jiraSyncTick, jiraSyncWorkspace];
