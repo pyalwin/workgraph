@@ -10,7 +10,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Powered by Claude](https://img.shields.io/badge/Powered%20by-Claude-D97757?logo=anthropic&logoColor=white)](https://anthropic.com/)
 
-[**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Architecture**](#-architecture) · [**Connectors**](#-connectors) · [**Contributing**](#-contributing)
+[**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Connectors**](#-connectors) · [**Modules**](#-modules) · [**Contributing**](#-contributing)
 
 </div>
 
@@ -29,7 +29,6 @@ This project is **100% open source** under the [MIT License](#-license). Fork it
 ## Table of Contents
 
 - [Features](#-features)
-- [Architecture](#-architecture)
 - [Tech Stack](#-tech-stack)
 - [Quickstart](#-quickstart)
 - [Configuration](#-configuration)
@@ -58,31 +57,6 @@ This project is **100% open source** under the [MIT License](#-license). Fork it
 - **Metrics dashboard.** Cross-source velocity, cycle time, deployment frequency, adoption charts.
 - **OAuth + MCP.** Secure OAuth 2.0 flows for SaaS sources, plus Model Context Protocol support for Claude-native tools.
 - **Local-first.** SQLite + sqlite-vec. Encrypted token storage. No analytics, no telemetry, no cloud.
-
----
-
-## Architecture
-
-```mermaid
-flowchart LR
-    Src["Sources"] --> Sync["Sync Pipeline"]
-    Sync --> DB[("SQLite + vec")]
-    DB <--> AI["Claude"]
-    DB --> UI["Next.js UI"]
-
-    classDef base fill:#fafafa,stroke:#525252,color:#171717,stroke-width:1.25px
-    classDef store fill:#0f172a,stroke:#0f172a,color:#f8fafc,stroke-width:1.25px
-    classDef ai fill:#fef3e2,stroke:#D97757,color:#7c2d12,stroke-width:1.25px
-
-    class Src,Sync,UI base
-    class DB store
-    class AI ai
-```
-
-> **Sources** — Jira, Slack, Notion, GitHub/GitLab, Linear, Granola, Google Workspace, Teams (via OAuth or MCP)
-> **Sync Pipeline** — ingest → enrich → extract → embed → link
-> **Claude** — cross-reference, classify to goals, summarize workstreams
-> **UI** — Overview · Knowledge Graph · Projects · Metrics · Decisions · Settings
 
 ---
 
