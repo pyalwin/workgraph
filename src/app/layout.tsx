@@ -1,13 +1,11 @@
 import '@/styles/globals.css';
 import { AuthKitProvider } from '@workos-inc/authkit-nextjs/components';
 import { withAuth } from '@workos-inc/authkit-nextjs';
-import { WorkgraphStateProvider } from '@/components/workgraph-state';
-import { WorkspaceAppShell } from '@/components/workspace-app-shell';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'WorkGraph',
-  description: 'Your second brain for work',
+  description: 'Local-first work intelligence — your tickets, docs, meetings, and chat, unified.',
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -17,11 +15,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en">
       <body>
-        <AuthKitProvider initialAuth={initialAuth}>
-          <WorkgraphStateProvider>
-            <WorkspaceAppShell>{children}</WorkspaceAppShell>
-          </WorkgraphStateProvider>
-        </AuthKitProvider>
+        <AuthKitProvider initialAuth={initialAuth}>{children}</AuthKitProvider>
       </body>
     </html>
   );

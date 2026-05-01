@@ -23,7 +23,7 @@ export function Topbar() {
   return (
     <header className="topbar">
       <div style={{ display: 'flex', alignItems: 'center' }}>
-        <Link href="/" className="brand">
+        <Link href="/dashboard" className="brand">
           <span className="brand-mark">W</span>
           <span className="brand-name">WorkGraph</span>
         </Link>

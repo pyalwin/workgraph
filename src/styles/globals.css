@@ -2418,3 +2418,207 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   font-size: 12px;
   color: var(--ink-4);
 }
+
+/* ─── Landing page ─────────────────────────────────────────── */
+
+.landing {
+  min-height: 100vh;
+  background: var(--bone, #faf8f3);
+  color: var(--ink, #15140f);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 2.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.landing-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+}
+
+.landing-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: var(--ink, #15140f);
+  color: var(--bone, #faf8f3);
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.landing-brand-name {
+  letter-spacing: -0.01em;
+}
+
+.landing-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  font-size: 0.9rem;
+}
+
+.landing-nav-links a {
+  color: var(--ink-3, #53504a);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.landing-nav-links a:hover {
+  color: var(--ink, #15140f);
+}
+
+.landing-nav-cta {
+  background: var(--ink, #15140f);
+  color: var(--bone, #faf8f3) !important;
+  padding: 0.45rem 0.95rem;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.landing-nav-cta:hover {
+  opacity: 0.9;
+}
+
+.landing-hero {
+  max-width: 880px;
+  margin: 4rem auto 5rem;
+  padding: 0 2.5rem;
+  text-align: center;
+}
+
+.landing-eyebrow {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-4, #7a7670);
+  margin: 0 0 1rem;
+}
+
+.landing-title {
+  font-size: clamp(2.25rem, 5.5vw, 3.75rem);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  font-weight: 600;
+  margin: 0 0 1.5rem;
+}
+
+.landing-title-em {
+  background: linear-gradient(120deg, #d97757, #b04929);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.landing-lede {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: var(--ink-3, #53504a);
+  max-width: 640px;
+  margin: 0 auto 2.5rem;
+}
+
+.landing-cta-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.landing-cta-primary {
+  background: var(--ink, #15140f);
+  color: var(--bone, #faf8f3);
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: opacity 120ms ease;
+}
+
+.landing-cta-primary:hover {
+  opacity: 0.9;
+}
+
+.landing-cta-secondary {
+  color: var(--ink-2, #2a2822);
+  text-decoration: none;
+  font-weight: 500;
+  padding: 0.75rem 0.5rem;
+  transition: color 120ms ease;
+}
+
+.landing-cta-secondary:hover {
+  color: var(--ink, #15140f);
+}
+
+.landing-grid {
+  max-width: 1100px;
+  margin: 0 auto 5rem;
+  padding: 0 2.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.landing-card {
+  padding: 1.75rem;
+  background: var(--bone-2, #f3efe7);
+  border: 1px solid var(--ink-7, #e2ddd4);
+  border-radius: 10px;
+  transition: border-color 120ms ease, transform 200ms ease;
+}
+
+.landing-card:hover {
+  border-color: var(--ink-5, #a4a09a);
+  transform: translateY(-2px);
+}
+
+.landing-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.landing-card p {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--ink-3, #53504a);
+}
+
+.landing-foot {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2.5rem 2.5rem 3rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--ink-4, #7a7670);
+  flex-wrap: wrap;
+  gap: 1rem;
+  border-top: 1px solid var(--ink-7, #e2ddd4);
+}
+
+.landing-foot a {
+  color: var(--ink-2, #2a2822);
+  text-decoration: none;
+}
+
+.landing-foot a:hover {
+  color: var(--ink, #15140f);
+  text-decoration: underline;
+}
