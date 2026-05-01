@@ -48,16 +48,6 @@ const EnrichmentSchema = z.object({
       }),
     )
     .describe('Characteristic entities that turn this into a graph-quality node'),
-  action_items: z
-    .array(
-      z.object({
-        text: z.string().describe('Concrete actionable statement'),
-        assignee: z.string().nullable().describe('Best-effort assignee from text'),
-        due_at: z.string().nullable().describe('ISO date if explicitly mentioned'),
-        ai_priority: z.enum(['p0', 'p1', 'p2', 'p3']),
-      }),
-    )
-    .describe('Action items extracted from body / comments'),
   anomaly_signals: z
     .array(
       z.object({
@@ -118,12 +108,6 @@ Entity types to extract (only when genuinely present — skip if uncertain):
    - risk:           blocker / dependency / regulatory concern
    - effort_signal:  explicit estimate or implicit "this will take a while" cue
 
-Action items: concrete next steps mentioned in body or comments. ai_priority:
-   - p0: outage / blocking / customer escalation
-   - p1: deadline within a sprint, dependency for goal
-   - p2: should-do this quarter
-   - p3: nice-to-have / backlog
-
 Anomaly signals (only flag what's evident from THIS item alone — workspace-wide
 scans run separately):
    - stale: status active but no progress signal in body for 14+ days
@@ -169,26 +153,6 @@ function persistEntities(itemId: string, list: Enrichment['entities']) {
     if (!canonical || !surface) continue;
     const entityId = upsertEntity(canonical, e.type);
     insert.run(itemId, entityId, surface, 0.85);
-  }
-}
-
-function persistActionItems(itemId: string, list: Enrichment['action_items']) {
-  const db = getDb();
-  // Replace the AI-generated set on each enrichment pass. User-edited rows
-  // are preserved because we only delete state='open' AI rows that haven't
-  // been touched (no user_priority set).
-  db.prepare(
-    `DELETE FROM action_items WHERE source_item_id = ? AND state = 'open' AND user_priority IS NULL`,
-  ).run(itemId);
-
-  const insert = db.prepare(`
-    INSERT INTO action_items (id, source_item_id, text, assignee, due_at, ai_priority, state)
-    VALUES (?, ?, ?, ?, ?, ?, 'open')
-  `);
-  for (const a of list) {
-    const text = a.text.trim();
-    if (!text) continue;
-    insert.run(uuid(), itemId, text, a.assignee, a.due_at, a.ai_priority);
   }
 }
 
@@ -347,7 +311,6 @@ export async function enrichItemFully(
   storeTopicTags(itemId, result.topics);
   storeGoalTags(itemId, result.goals);
   persistEntities(itemId, result.entities);
-  persistActionItems(itemId, result.action_items);
   persistAnomalies(itemId, workspaceId, result.anomaly_signals);
 
   return { ok: true, enrichment: result };

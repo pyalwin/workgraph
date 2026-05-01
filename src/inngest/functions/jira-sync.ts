@@ -177,6 +177,32 @@ export const jiraSyncWorkspace = inngest.createFunction(
       return recomputeIsMineForSource(workspaceId, row.auth_user_id, 'jira');
     });
 
-    return { workspaceId, slot, enriched };
+    // 5. Fan out one project-action-items refresh per project. The function
+    //    runs project-level (not per-ticket) action item synthesis to avoid
+    //    duplicating the same logical action across siblings.
+    const projectKeys = await step.run('list-distinct-projects', () => {
+      const db = getDb();
+      return (
+        db
+          .prepare(
+            `SELECT DISTINCT json_extract(metadata, '$.entity_key') AS k
+             FROM work_items
+             WHERE source='jira' AND json_extract(metadata, '$.entity_key') IS NOT NULL`,
+          )
+          .all() as { k: string }[]
+      ).map((r) => r.k);
+    });
+
+    if (projectKeys.length > 0) {
+      await step.sendEvent(
+        'fan-out-project-actions',
+        projectKeys.map((projectKey) => ({
+          name: 'workgraph/project.action-items.refresh',
+          data: { projectKey },
+        })),
+      );
+    }
+
+    return { workspaceId, slot, enriched, projectsRefreshed: projectKeys.length };
   },
 );
