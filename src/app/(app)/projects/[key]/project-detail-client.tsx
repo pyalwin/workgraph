@@ -2,9 +2,18 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import type { ProjectDetail } from '@/lib/project-queries';
 import { Markdown } from '@/components/prompt-kit/markdown';
 import { ItemDetailDrawer } from '@/components/item-detail-drawer';
+
+type Tab = 'overview' | 'goals' | 'actions' | 'activity';
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'goals', label: 'Goals' },
+  { id: 'actions', label: 'Actions' },
+  { id: 'activity', label: 'Activity' },
+];
 
 const STATUS_LABEL: Record<string, string> = {
   healthy: 'On track',
@@ -18,6 +27,23 @@ const STATUS_CLASS: Record<string, string> = {
 };
 
 export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams.get('tab');
+  const initialTab: Tab = TABS.some((t) => t.id === tabFromUrl) ? (tabFromUrl as Tab) : 'overview';
+  const [tab, setTabState] = useState<Tab>(initialTab);
+
+  const setTab = useCallback(
+    (next: Tab) => {
+      setTabState(next);
+      const sp = new URLSearchParams(searchParams.toString());
+      sp.set('tab', next);
+      router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+    },
+    [router, pathname, searchParams],
+  );
+
   const [period, setPeriod] = useState('30d');
   const [data, setData] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -125,6 +151,30 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
         </div>
       </header>
 
+      {/* ───── Tabs ───── */}
+      <nav className="proj-tabs" role="tablist" aria-label="Project sections">
+        {TABS.map((t) => {
+          const count = tabCount(t.id, { okrsCount, actionCount, anomalyCount, ticketCount: d.tickets.length });
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              className={`proj-tab ${active ? 'active' : ''}`}
+              onClick={() => setTab(t.id)}
+            >
+              <span>{t.label}</span>
+              {typeof count === 'number' && count > 0 && (
+                <span className="proj-tab-count">{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      {tab === 'overview' && (<>
       {/* ───── Recap (rolling status) ───── */}
       <section className="proj-section">
         <div className="proj-section-head">
@@ -174,6 +224,10 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
         </div>
       </section>
 
+      </>)}
+
+      {tab === 'goals' && (
+      <>
       {/* ───── OKRs ───── */}
       <section className="proj-section">
         <div className="proj-section-head">
@@ -240,6 +294,10 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
         </div>
       </section>
 
+      </>)}
+
+      {tab === 'actions' && (
+      <>
       {/* ───── Action items ───── */}
       <section className="proj-section">
         <div className="proj-section-head">
@@ -302,6 +360,10 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
         </section>
       )}
 
+      </>)}
+
+      {tab === 'activity' && (
+      <>
       {/* ───── Velocity chart ───── */}
       {d.velocity_weekly.length > 0 && (
         <section className="proj-section">
@@ -379,9 +441,27 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
         </section>
       )}
 
+      </>)}
+
       <ItemDetailDrawer itemId={openItemId} onClose={() => setOpenItemId(null)} />
     </div>
   );
+}
+
+function tabCount(
+  tabId: Tab,
+  counts: { okrsCount: number; actionCount: number; anomalyCount: number; ticketCount: number },
+): number | null {
+  switch (tabId) {
+    case 'overview':
+      return null;
+    case 'goals':
+      return counts.okrsCount;
+    case 'actions':
+      return counts.actionCount + counts.anomalyCount;
+    case 'activity':
+      return counts.ticketCount;
+  }
 }
 
 function Stat({

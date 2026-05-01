@@ -4537,3 +4537,57 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   .proj-ticket { grid-template-columns: auto 1fr auto; }
   .proj-ticket-id { display: none; }
 }
+
+/* Project page — tab nav */
+.proj-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 2rem;
+  padding: 4px;
+  background: var(--bone-2, #f3efe7);
+  border: 1px solid var(--rule, rgba(21, 20, 15, 0.07));
+  border-radius: 10px;
+  width: fit-content;
+}
+.proj-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.95rem;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--ink-3, #53504a);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+.proj-tab:hover { color: var(--ink, #15140f); }
+.proj-tab.active {
+  background: var(--paper, #fff);
+  color: var(--ink, #15140f);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04), 0 2px 6px -2px rgba(0, 0, 0, 0.08);
+}
+.proj-tab-count {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  background: var(--bone, #faf8f3);
+  color: var(--ink-3, #53504a);
+  border-radius: 4px;
+  min-width: 18px;
+  text-align: center;
+}
+.proj-tab.active .proj-tab-count {
+  background: var(--bone-2, #f3efe7);
+  color: var(--ink-2, #2a2822);
+}
+
+@media (max-width: 640px) {
+  .proj-tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+}
