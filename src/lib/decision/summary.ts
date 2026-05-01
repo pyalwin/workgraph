@@ -8,6 +8,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db';
 import { getDecisionItems, listDecisions, type DecisionItem, type DecisionSummary } from './extract';
+import { getWorkspaceConfig } from '../workspace-config';
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -37,14 +38,22 @@ export interface DecisionStructuredSummary {
 }
 
 function buildPrompt(d: DecisionSummary, items: DecisionItem[]): { system: string; user: string } {
-  const system = `You are producing a structured DECISION RECORD that explicitly contrasts WHAT WAS ASKED / DISCUSSED (from JIRA / Notion / Slack / meetings) against WHAT WAS SHIPPED (from GitHub PRs and commits).
+  const config = getWorkspaceConfig();
+  const sourceKinds = Object.entries(config.sources)
+    .map(([id, source]) => `- ${id}: ${source.label} (${source.kind})`)
+    .join('\n');
+
+  const system = `You are producing a structured DECISION RECORD for a configurable organizational work-trace system. It should explicitly contrast WHAT WAS ASKED / DISCUSSED against WHAT WAS COMPLETED or EXECUTED.
 
 Input: a decision item + all source items that led up to it or flowed from it.
 
+Configured source registry:
+${sourceKinds}
+
 Source-item phases:
-  DISCUSSION PHASE  — jira, notion, slack, meeting items; origin/discussion/self/specification roles. These define the ask.
-  IMPLEMENTATION PHASE — github items; implementation/review/integration roles. These are the output.
-  FOLLOW-UP         — items that appeared after integration (bug reports, retros).
+  DISCUSSION PHASE — origin/discussion/self/specification roles. These define the ask, rationale, and plan.
+  EXECUTION PHASE  — execution/review/completion roles. These are the resulting actions or outputs.
+  FOLLOW-UP        — items that appeared after completion.
 
 Return a single JSON object, no markdown fences, no prose outside JSON:
 
@@ -52,22 +61,22 @@ Return a single JSON object, no markdown fences, no prose outside JSON:
   "context":          "2-3 sentences — what problem or situation motivated this decision. Cite the origin seed if present.",
   "decision":         "1-2 sentences — what was actually decided, concrete terms.",
   "rationale":        "2-3 sentences — WHY this choice. Pull reasoning from discussion items. If rationale is not explicit in sources, say so plainly.",
-  "what_was_asked":   "2-3 sentences summarising the ASK as defined in JIRA / Notion / Slack / meetings. Be specific about scope, acceptance criteria, or stakeholder intent.",
-  "what_was_shipped": "2-3 sentences summarising WHAT WAS ACTUALLY BUILT per GitHub PRs and commits. Mention file areas, approach, or notable trade-offs. If no implementation yet, state 'No implementation yet — pending PR.'",
-  "gap_analysis":     "1-2 sentences comparing ask vs. shipped. Did implementation match? Any scope cut, deviation, or open work? If fully aligned, say so briefly.",
+  "what_was_asked":   "2-3 sentences summarising the ASK. Be specific about scope, acceptance criteria, constraints, or stakeholder intent.",
+  "what_was_shipped": "2-3 sentences summarising WHAT WAS ACTUALLY COMPLETED or EXECUTED. Mention outputs, approach, or notable trade-offs. If no execution yet, state 'No execution yet.'",
+  "gap_analysis":     "1-2 sentences comparing ask vs. outcome. Did execution match? Any scope cut, deviation, or open work? If fully aligned, say so briefly.",
   "status_note":      "1 sentence — current state (active / implemented / superseded / reversed) with a concrete reason.",
   "discussion_trace": [
-    { "item_id": "<id>", "source": "<jira|slack|notion|meeting>", "role": "<origin|discussion|self|specification|follow_up>", "time": "YYYY-MM-DD", "title": "<truncated>", "contribution": "<what THIS item added to the ask>" }
+    { "item_id": "<id>", "source": "<source>", "role": "<origin|discussion|self|specification|follow_up>", "time": "YYYY-MM-DD", "title": "<truncated>", "contribution": "<what THIS item added to the ask>" }
   ],
   "implementation_trace": [
-    { "item_id": "<id>", "source": "github", "role": "<implementation|review|integration>", "time": "YYYY-MM-DD", "title": "<truncated>", "contribution": "<what THIS PR/commit shipped>" }
+    { "item_id": "<id>", "source": "<source>", "role": "<execution|review|completion>", "time": "YYYY-MM-DD", "title": "<truncated>", "contribution": "<what THIS item completed or executed>" }
   ]
 }
 
 Rules:
-- Put jira/notion/slack/meeting items in discussion_trace (chronological).
-- Put github items in implementation_trace (chronological).
-- If there are no github items, leave implementation_trace as [] — and say so in what_was_shipped.
+- Put origin/discussion/self/specification/follow_up items in discussion_trace (chronological).
+- Put execution/review/completion items in implementation_trace (chronological). The JSON field is still named implementation_trace for API compatibility, but interpret it as execution trace.
+- If there are no execution/review/completion items, leave implementation_trace as [] and say so in what_was_shipped.
 - Contributions must be specific ("raised backfill safety concern under concurrent writes"), never generic ("discussed the decision").`;
 
   const lines: string[] = [
@@ -82,7 +91,10 @@ Rules:
   for (const it of items) {
     const when = (it.event_at ?? it.created_at).slice(0, 10);
     const summary = it.summary ?? (it.body ? it.body.slice(0, 200) : '');
-    const phase = it.source === 'github' ? 'IMPL' : 'DISC';
+    const sourceKind = config.sources[it.source]?.kind ?? it.source;
+    const phase = ['code', 'execution'].includes(sourceKind) || ['execution', 'review', 'completion', 'implementation', 'integration'].includes(it.relation)
+      ? 'EXEC'
+      : 'DISC';
     lines.push(`[${phase}] [${it.relation}] (${when}) ${it.source}/${it.item_type} id=${it.id}`);
     lines.push(`  title: ${it.title.slice(0, 140)}`);
     if (summary) lines.push(`  note:  ${summary.slice(0, 240)}`);

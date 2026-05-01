@@ -1,13 +1,47 @@
 import { getDb } from '../db';
-import { initSchema, seedGoals } from '../schema';
+import { initSchema } from '../schema';
 import { v4 as uuid } from 'uuid';
 import { diffFields, createVersionRecord } from './versioning';
 import type { WorkItemInput, SyncResult } from './types';
 
+export interface LinkRowInput {
+  from: { source: string; source_id: string };
+  to: { source: string; source_id: string };
+  link_type: string;
+  confidence?: number;
+}
+
+/**
+ * Resolve (source, source_id) pairs to work_items.id and insert into the links
+ * table. Idempotent — uses a deterministic id, INSERT OR IGNORE on collision.
+ */
+export function ingestLinks(links: LinkRowInput[]): { inserted: number; skipped: number } {
+  initSchema();
+  const db = getDb();
+  const lookup = db.prepare('SELECT id FROM work_items WHERE source = ? AND source_id = ?');
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO links (id, source_item_id, target_item_id, link_type, confidence) VALUES (?, ?, ?, ?, ?)',
+  );
+
+  let inserted = 0;
+  let skipped = 0;
+  const tx = db.transaction(() => {
+    for (const l of links) {
+      const src = lookup.get(l.from.source, l.from.source_id) as { id: string } | undefined;
+      const tgt = lookup.get(l.to.source, l.to.source_id) as { id: string } | undefined;
+      if (!src || !tgt || src.id === tgt.id) { skipped++; continue; }
+      const linkId = `${src.id}::${l.link_type}::${tgt.id}`;
+      const r = insert.run(linkId, src.id, tgt.id, l.link_type, l.confidence ?? 1.0);
+      if (r.changes > 0) inserted++; else skipped++;
+    }
+  });
+  tx();
+  return { inserted, skipped };
+}
+
 export function ingestItems(items: WorkItemInput[]): SyncResult {
   const db = getDb();
   initSchema();
-  seedGoals();
 
   const result: SyncResult = {
     source: items[0]?.source || 'unknown',

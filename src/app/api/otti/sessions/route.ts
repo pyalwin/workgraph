@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { initSchema } from '@/lib/schema';
+import { initOttiModule } from '@/lib/modules/otti';
 import { getOttiMetrics } from '@/lib/otti-queries';
 
 export const dynamic = 'force-dynamic';
 
 export function GET(req: NextRequest) {
   initSchema();
+  initOttiModule();
 
   const params = req.nextUrl.searchParams;
   const period = params.get('period') || '7d';

@@ -147,24 +147,34 @@ const linkTypeColors: Record<string, string> = {
   references: '#1a8754',
   discusses: '#3b82f6',
   mentions: '#ccc',
+  in_repo: '#475569',
+  has_release: '#0ea5e9',
+  in_project: '#475569',
+  in_team: '#94a3b8',
+  child_of: '#7c3aed',
 };
 
 const linkTypeLabels: Record<string, string> = {
   implements: 'Implements',
   references: 'References',
+  in_repo: 'In repo',
+  has_release: 'Has release',
+  in_project: 'In project',
+  in_team: 'In team',
+  child_of: 'Child of',
   discusses: 'Discusses',
   mentions: 'Mentions',
 };
 
 const traceRoleColors: Record<string, string> = {
-  seed:           '#e11d48', // red — start
-  discussion:     '#f59e0b', // amber
-  decision:       '#d97706', // orange
-  specification:  '#2563eb', // blue
+  seed: '#e11d48', // red — start
+  discussion: '#f59e0b', // amber
+  decision: '#d97706', // orange
+  specification: '#2563eb', // blue
   implementation: '#7c3aed', // violet
-  review:         '#0891b2', // cyan
-  integration:    '#16a34a', // green — terminal
-  follow_up:      '#6b7280', // grey
+  review: '#0891b2', // cyan
+  integration: '#16a34a', // green — terminal
+  follow_up: '#6b7280', // grey
 };
 
 const traceRoleLabels: Record<string, string> = {
@@ -253,14 +263,82 @@ export default function KnowledgeGraphClient() {
           linkCountMap[edge.target_item_id] = (linkCountMap[edge.target_item_id] || 0) + 1;
         }
 
+        // Inbound link count = how many "children" point TO this node.
+        // Parent nodes (repo, project, epic, team, milestone) are sized by it.
+        const inboundCountMap: Record<string, number> = {};
+        for (const edge of data.edges) {
+          inboundCountMap[edge.target_item_id] = (inboundCountMap[edge.target_item_id] || 0) + 1;
+        }
+
+        const PARENT_TYPES = new Set(['repository', 'project', 'epic', 'team', 'milestone']);
+        const RELEASE_TYPES = new Set(['release']);
+
+        // Build a parent-id map from in_project / in_repo / in_team / child_of edges
+        // so we can tint each child by its parent. Visual clustering by color is
+        // legible even when force-layout hasn't fully settled.
+        const STRUCTURAL_PARENT_LINKS = new Set(['in_project', 'in_repo', 'in_team']);
+        const parentOf: Record<string, string> = {};
+        for (const e of data.edges) {
+          if (STRUCTURAL_PARENT_LINKS.has(e.link_type)) parentOf[e.source_item_id] = e.target_item_id;
+        }
+        // Stable hash → distinct hue per parent id
+        const parentHue = (parentId: string): number => {
+          let h = 0;
+          for (let i = 0; i < parentId.length; i++) h = (h * 31 + parentId.charCodeAt(i)) >>> 0;
+          return h % 360;
+        };
+        const parentColorById: Record<string, string> = {};
+        for (const parentId of new Set(Object.values(parentOf))) {
+          parentColorById[parentId] = `hsl(${parentHue(parentId)} 65% 45%)`;
+        }
+
         const nodes: GraphNode[] = data.nodes.map((item: any) => {
-          const isEpic = item.source === 'jira' && (item.item_type === 'epic' || item.item_type === 'Epic');
-          const baseVal = Math.max(2, (linkCountMap[item.id] || 0) * 2);
-          return {
-            ...item,
-            val: isEpic ? baseVal * 2.5 + 6 : baseVal,
-            color: item.trace_role ? (traceRoleColors[item.trace_role] ?? sourceColors[item.source] ?? '#999') : (sourceColors[item.source] ?? '#999'),
-          };
+          const itemType = (item.item_type || '').toLowerCase();
+          const isParent = PARENT_TYPES.has(itemType);
+          const isRelease = RELEASE_TYPES.has(itemType);
+          const isPR = item.source === 'github' && itemType === 'pull_request';
+          const linkCount = linkCountMap[item.id] || 0;
+          const inboundCount = inboundCountMap[item.id] || 0;
+          const baseVal = Math.max(2, linkCount * 2);
+
+          let meta: any = item.metadata;
+          if (typeof meta === 'string') {
+            try { meta = JSON.parse(meta); } catch { meta = null; }
+          }
+          const commits = (meta?.commits_count as number | undefined) ?? 0;
+
+          let val = baseVal;
+          if (isParent) {
+            // Parent nodes scale with the number of children pointing to them.
+            // sqrt keeps a 100-child epic from dwarfing the screen.
+            val = Math.max(8, 6 + Math.sqrt(inboundCount) * 4);
+          } else if (isPR && commits > 0) {
+            val = Math.max(baseVal, 3 + Math.sqrt(commits) * 2.5);
+          } else if (isRelease) {
+            val = Math.max(4, baseVal);
+          }
+
+          // Color: trace role > parent → its own slate-tinted hue >
+          // child → tint matching its parent's color > release sky >
+          // source default. Parent-tint makes 900 children of one project
+          // visibly cluster by hue even if their spatial layout is loose.
+          const parentId = parentOf[item.id];
+          let color: string;
+          if (item.trace_role) {
+            color = traceRoleColors[item.trace_role] ?? sourceColors[item.source] ?? '#999';
+          } else if (isParent) {
+            color = parentColorById[item.id] || '#1f2937';
+          } else if (isRelease) {
+            color = '#0ea5e9';
+          } else if (parentId && parentColorById[parentId]) {
+            // Lighter version of parent color for child distinction
+            const h = parentHue(parentId);
+            color = `hsl(${h} 60% 60%)`;
+          } else {
+            color = sourceColors[item.source] ?? '#999';
+          }
+
+          return { ...item, val, color };
         });
 
         const nodeIds = new Set(nodes.map((n) => n.id));
@@ -313,15 +391,82 @@ export default function KnowledgeGraphClient() {
     if (!loading && graphData.nodes.length > 0 && graphRef.current) {
       const fg = graphRef.current;
 
-      // Spread nodes out much more
-      fg.d3Force('charge')?.strength(-200).distanceMax(500);
-      fg.d3Force('link')?.distance(100).strength(0.3);
+      // Layout philosophy: tight clusters around their hub, well-separated
+      // between hubs, gentle gravity to keep the whole graph centered.
+      //   1. Charge (repulsion) is *local* — limited maxDistance so siblings
+      //      push apart but unrelated clusters don't fly across the canvas.
+      //   2. Structural links pull strongly + short, so 900 children of one
+      //      project compress into a blob instead of a wide ring.
+      //   3. forceCenter + small forceX/Y pulls the whole graph back toward
+      //      the middle of the viewport — counteracts cumulative repulsion.
+      //   4. forceCollide prevents overlap so big hub nodes don't sit on
+      //      top of their children.
+      const STRUCTURAL = new Set(['in_project', 'in_repo', 'child_of', 'has_release', 'in_team']);
+      const SEMANTIC = new Set(['executes', 'mentions', 'references', 'discusses', 'related_code', 'implements', 'related_tracker']);
+
+      // d3-force-3d is what react-force-graph uses internally; it has no
+      // TypeScript types but the API is stable (same as d3-force).
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const d3: any = require('d3-force-3d');
+
+      // No repulsion — collide alone keeps nodes from overlapping.
+      // forceCenter is useless for symmetric layouts (the global average
+      // is already at origin). Per-axis forceX/Y at extreme strengths is
+      // what actually pulls each individual cluster toward the middle.
+      fg.d3Force('charge')?.strength(0);
+      fg.d3Force('link')
+        ?.distance((link: any) => {
+          const t = link.type;
+          if (STRUCTURAL.has(t)) return 16;
+          if (SEMANTIC.has(t)) return 28;
+          return 24;
+        })
+        ?.strength((link: any) => {
+          const t = link.type;
+          if (STRUCTURAL.has(t)) return 1.0;
+          if (SEMANTIC.has(t)) return 0.9;
+          return 0.7;
+        });
+
+      // Dominant per-node centering. Alpha decays from 1 to 0 — at alpha=1
+      // each node moves 80% of the way to origin per tick. Combined with
+      // velocityDecay=0.4 this damps out before overshoot.
+      fg.d3Force('center', null);
+      fg.d3Force('x', d3.forceX(0).strength(0.8));
+      fg.d3Force('y', d3.forceY(0).strength(0.8));
+      fg.d3Force('radial', d3.forceRadial(0, 0, 0).strength(0.4));
+
+      // Anti-overlap — minimum padding so clusters can pack tightly.
+      fg.d3Force('collide', d3.forceCollide().radius((node: any) => Math.sqrt(node.val ?? 4) + 1).iterations(2));
+
       fg.d3ReheatSimulation();
 
-      // Multiple zoomToFit attempts to ensure it centers
+      // Post-simulation safety net: if any cluster ended up far from
+      // origin (because the sim cooled before it could migrate in), scale
+      // every node's position back toward 0 so the rendered graph is
+      // always compact. We compute a target radius based on node count.
+      const compactGraph = () => {
+        const nodes = (fg.graphData?.()?.nodes ?? []) as any[];
+        if (!nodes.length) return;
+        let maxDist = 0;
+        for (const n of nodes) {
+          const d = Math.hypot(n.x ?? 0, n.y ?? 0);
+          if (d > maxDist) maxDist = d;
+        }
+        const targetRadius = Math.sqrt(nodes.length) * 8; // ~360 for 2000 nodes
+        if (maxDist > targetRadius * 1.4) {
+          const scale = targetRadius / maxDist;
+          for (const n of nodes) {
+            n.x = (n.x ?? 0) * scale;
+            n.y = (n.y ?? 0) * scale;
+          }
+          fg.d3ReheatSimulation();
+        }
+      };
+
       const t1 = setTimeout(() => fg.zoomToFit(400, 80), 1000);
-      const t2 = setTimeout(() => fg.zoomToFit(400, 80), 3000);
-      const t3 = setTimeout(() => fg.zoomToFit(400, 80), 6000);
+      const t2 = setTimeout(() => { compactGraph(); fg.zoomToFit(400, 80); }, 4000);
+      const t3 = setTimeout(() => { compactGraph(); fg.zoomToFit(400, 80); }, 9000);
       return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
     }
   }, [loading, graphData.nodes.length]);
@@ -414,7 +559,7 @@ export default function KnowledgeGraphClient() {
         if (!res.ok) return;
         const json = await res.json();
         setAllDecisions(json.decisions ?? []);
-      } catch {}
+      } catch { }
     })();
   }, []);
 
@@ -707,9 +852,9 @@ export default function KnowledgeGraphClient() {
               {allDecisions.slice(0, 20).map((d) => {
                 const node = graphData.nodes.find((n) => n.id === d.item_id);
                 const statusColor = d.status === 'implemented' ? '#16a34a'
-                                  : d.status === 'superseded' ? '#6b7280'
-                                  : d.status === 'reversed' ? '#dc2626'
-                                  : '#d97706';
+                  : d.status === 'superseded' ? '#6b7280'
+                    : d.status === 'reversed' ? '#dc2626'
+                      : '#d97706';
                 return (
                   <button
                     key={d.id}
@@ -765,11 +910,10 @@ export default function KnowledgeGraphClient() {
               <button
                 key={status}
                 onClick={() => setStatusFilter(status)}
-                className={`px-[10px] py-[4px] rounded-[6px] text-[0.72rem] border transition-all cursor-pointer font-[inherit] ${
-                  statusFilter === status
-                    ? 'bg-black border-black text-white font-medium'
-                    : 'bg-white border-black/[0.07] text-[#777] hover:border-black/[0.13] hover:text-[#333]'
-                }`}
+                className={`px-[10px] py-[4px] rounded-[6px] text-[0.72rem] border transition-all cursor-pointer font-[inherit] ${statusFilter === status
+                  ? 'bg-black border-black text-white font-medium'
+                  : 'bg-white border-black/[0.07] text-[#777] hover:border-black/[0.13] hover:text-[#333]'
+                  }`}
               >
                 {status}
               </button>
@@ -786,11 +930,10 @@ export default function KnowledgeGraphClient() {
                 <button
                   key={type}
                   onClick={() => toggleType(type)}
-                  className={`px-[8px] py-[3px] rounded-[5px] text-[0.68rem] border transition-all cursor-pointer font-[inherit] ${
-                    typeFilters.has(type)
-                      ? 'bg-[#3b82f6] border-[#3b82f6] text-white font-medium'
-                      : 'bg-white border-black/[0.07] text-[#777] hover:border-black/[0.13] hover:text-[#333]'
-                  }`}
+                  className={`px-[8px] py-[3px] rounded-[5px] text-[0.68rem] border transition-all cursor-pointer font-[inherit] ${typeFilters.has(type)
+                    ? 'bg-[#3b82f6] border-[#3b82f6] text-white font-medium'
+                    : 'bg-white border-black/[0.07] text-[#777] hover:border-black/[0.13] hover:text-[#333]'
+                    }`}
                 >
                   {type}
                 </button>
@@ -840,11 +983,11 @@ export default function KnowledgeGraphClient() {
             onNodeClick={handleNodeClick}
             onNodeHover={handleNodeHover}
             onBackgroundClick={() => setSelectedNode(null)}
-            d3AlphaDecay={0.02}
-            d3VelocityDecay={0.2}
-            warmupTicks={100}
-            cooldownTicks={200}
-            cooldownTime={5000}
+            d3AlphaDecay={0.012}
+            d3VelocityDecay={0.4}
+            warmupTicks={200}
+            cooldownTicks={600}
+            cooldownTime={12000}
             onEngineStop={() => {
               if (graphRef.current) {
                 graphRef.current.zoomToFit(600, 80);
@@ -999,9 +1142,9 @@ export default function KnowledgeGraphClient() {
                 if (!d) return null;
                 const s = d.summary;
                 const statusColor = d.status === 'implemented' ? '#16a34a'
-                                  : d.status === 'superseded' ? '#6b7280'
-                                  : d.status === 'reversed' ? '#dc2626'
-                                  : '#d97706';
+                  : d.status === 'superseded' ? '#6b7280'
+                    : d.status === 'reversed' ? '#dc2626'
+                      : '#d97706';
                 return (
                   <div className="flex flex-col gap-3">
                     <div className="text-[0.82rem] font-semibold text-[#111] leading-[1.35]">{d.title}</div>

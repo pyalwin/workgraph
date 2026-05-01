@@ -1,12 +1,17 @@
-import { initSchema, seedOttiDeployments, seedOttiUsers } from '@/lib/schema';
+import { initSchema } from '@/lib/schema';
+import { initOttiModule } from '@/lib/modules/otti';
 import { OttiClient } from './otti-client';
+import { WorkspaceModuleGuard } from '@/components/workspace-module-guard';
 
 export const dynamic = 'force-dynamic';
 
 export default function OttiPage() {
   initSchema();
-  seedOttiDeployments();
-  seedOttiUsers();
+  initOttiModule();
 
-  return <OttiClient />;
+  return (
+    <WorkspaceModuleGuard module="otti">
+      <OttiClient />
+    </WorkspaceModuleGuard>
+  );
 }

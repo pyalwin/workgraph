@@ -2,10 +2,11 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 config({ path: resolve(process.cwd(), '.env.local') });
 
-import { initSchema, seedGoals } from '../src/lib/schema';
+import { initSchema } from '../src/lib/schema';
 import { createLinksForAll } from '../src/lib/crossref';
 import { computeAllMetrics } from '../src/lib/metrics';
 import { enrichAll } from '../src/lib/sync/enrich';
+import { extractAllEntities } from '../src/lib/sync/extract-entities';
 import { generateAllRecaps } from '../src/lib/sync/recap';
 import { chunkAllPending } from '../src/lib/chunking';
 import { embedAllPending } from '../src/lib/embeddings/embed';
@@ -14,9 +15,10 @@ import { summarizeAllWorkstreams } from '../src/lib/workstream/summary';
 import { extractDecisions } from '../src/lib/decision/extract';
 import { summarizeAllDecisions } from '../src/lib/decision/summary';
 import { getDb } from '../src/lib/db';
+import { seedWorkspaceConfig } from '../src/lib/workspace-config';
 
 initSchema();
-seedGoals();
+seedWorkspaceConfig();
 
 const args = new Set(process.argv.slice(2));
 const FULL = args.has('--full');
@@ -37,22 +39,31 @@ async function run() {
   console.log(`    enriched=${enr.enriched}, failed=${enr.failed}`);
 
   // Phase 2: Chunking
-  console.log('\n  [2/6] Chunking...');
+  console.log('\n  [2/7] Chunking...');
   const ch = chunkAllPending({ force: FULL });
   console.log(`    items=${ch.items}, chunks=${ch.chunks}`);
 
-  // Phase 3: Embeddings (local, Ollama)
+  // Phase 3: Entity extraction (Haiku + tool_use, typed + canonicalized + offsets)
+  console.log('\n  [3/7] Entity extraction (Haiku tool_use)...');
+  if (FULL) {
+    getDb().exec('DELETE FROM entity_mentions');
+    // keep entities table — canonical forms are reusable
+  }
+  const ent = await extractAllEntities({ force: FULL, concurrency: 4 });
+  console.log(`    processed=${ent.processed}, mentions=${ent.mentions}, failed=${ent.failed}`);
+
+  // Phase 4: Embeddings (local, Ollama)
   if (!SKIP_EMBED) {
-    console.log('\n  [3/6] Embedding chunks (Ollama nomic-embed-text)...');
+    console.log('\n  [4/7] Embedding chunks (Ollama nomic-embed-text)...');
     const em = await embedAllPending({ concurrency: 4 });
     console.log(`    embedded=${em.embedded}, skipped=${em.skipped}, failed=${em.failed}`);
   } else {
-    console.log('\n  [3/6] Embedding SKIPPED (--no-embed)');
+    console.log('\n  [4/7] Embedding SKIPPED (--no-embed)');
   }
 
-  // Phase 4: Multi-signal link detection
+  // Phase 5: Multi-signal link detection
   if (!SKIP_LINKS) {
-    console.log('\n  [4/6] Link detection (multi-signal)...');
+    console.log('\n  [5/7] Link detection (multi-signal)...');
     if (FULL) {
       getDb().exec('DELETE FROM item_links_chunks');
       getDb().exec('DELETE FROM links');
@@ -60,11 +71,11 @@ async function run() {
     const lk = createLinksForAll({});
     console.log(`    items=${lk.items}, links=${lk.links}`);
   } else {
-    console.log('\n  [4/6] Links SKIPPED (--no-links)');
+    console.log('\n  [5/7] Links SKIPPED (--no-links)');
   }
 
-  // Phase 5: Workstream assembly
-  console.log('\n  [5/6] Workstream assembly...');
+  // Phase 6: Workstream assembly
+  console.log('\n  [6/7] Workstream assembly...');
   const ws = assembleAll();
   console.log(`    workstreams=${ws.workstreams}, items-in-ws=${ws.items}, seeds=${ws.seeds}, orphans=${ws.orphans}`);
 

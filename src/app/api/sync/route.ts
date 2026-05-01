@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema, seedGoals, seedConfig } from '@/lib/schema';
+import { initSchema } from '@/lib/schema';
 import { computeAllMetrics } from '@/lib/metrics';
 import { createLinksForAll } from '@/lib/crossref';
 import { enrichAll } from '@/lib/sync/enrich';
@@ -37,8 +37,6 @@ function ingestMeetingsJson(): { synced: number; skipped: number } {
 export async function POST() {
   try {
     initSchema();
-    seedGoals();
-    seedConfig();
 
     // Phase 1: Ingest local data (meetings.json)
     const meetingsResult = ingestMeetingsJson();

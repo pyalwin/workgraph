@@ -7,6 +7,7 @@
  */
 import { getDb } from '../db';
 import { v4 as uuid } from 'uuid';
+import { getWorkspaceConfig, isTerminalLifecycleStage, normalizeLifecycleStage } from '../workspace-config';
 
 // Links are created at ≥0.6 confidence (crossref threshold), but BFS walks
 // only strong edges (≥0.75) so transitive chains of weak mentions don't
@@ -14,8 +15,6 @@ import { v4 as uuid } from 'uuid';
 const TRAVERSAL_THRESHOLD = 0.75;
 const MAX_DEPTH = 4;
 const MAX_WORKSTREAM_SIZE = 25;
-
-const TERMINAL_ROLES = new Set(['integration']); // don't expand past integration
 
 interface ItemRow {
   id: string;
@@ -68,7 +67,7 @@ function bfsFromSeed(seedId: string): Set<string> {
     // Don't expand past an integration item (trace has shipped — stop the chain
     // from transitively crossing into other workstreams via a shared PR).
     const thisItem = loadItem(id);
-    if (thisItem && TERMINAL_ROLES.has(thisItem.trace_role ?? '') && id !== seedId) continue;
+    if (thisItem && isTerminalLifecycleStage(thisItem.trace_role) && id !== seedId) continue;
 
     for (const n of neighbors(id)) {
       if (visited.has(n.id)) continue;
@@ -135,10 +134,14 @@ function mergeOverlapping(sets: Map<string, Set<string>>): Array<{ seedIds: stri
  */
 function orphanWorkstreams(claimed: Set<string>): Array<{ seedIds: string[]; members: Set<string> }> {
   const db = getDb();
+  const executionStages = getWorkspaceConfig().lifecycle.stages
+    .filter((s) => s.id === 'execution' || s.terminal)
+    .flatMap((s) => [s.id, ...(s.legacyIds ?? [])]);
+  const placeholders = executionStages.map(() => '?').join(',');
   const orphanImpls = db.prepare(`
     SELECT id FROM work_items
-    WHERE trace_role = 'implementation' OR trace_role = 'integration'
-  `).all() as { id: string }[];
+    WHERE trace_role IN (${placeholders})
+  `).all(...executionStages) as { id: string }[];
 
   const out: Array<{ seedIds: string[]; members: Set<string> }> = [];
   for (const { id } of orphanImpls) {
@@ -147,7 +150,7 @@ function orphanWorkstreams(claimed: Set<string>): Array<{ seedIds: string[]; mem
     // Elect a pseudo-seed: prefer the earliest-dated specification item, else the orphan itself
     const memberItems = [...members].map(loadItem).filter((x): x is ItemRow => !!x);
     const spec = memberItems
-      .filter(m => m.trace_role === 'specification')
+      .filter(m => normalizeLifecycleStage(m.trace_role) === 'specification')
       .sort((a, b) => (a.trace_event_at ?? a.created_at).localeCompare(b.trace_event_at ?? b.created_at))[0];
     const seed = spec?.id ?? id;
     out.push({ seedIds: [seed], members });
@@ -158,11 +161,12 @@ function orphanWorkstreams(claimed: Set<string>): Array<{ seedIds: string[]; mem
 
 function roleInWorkstream(item: ItemRow, isSeed: boolean, isTerminal: boolean): string | null {
   if (isSeed && item.trace_role !== 'seed') return 'seed'; // orphan-promoted seed
-  return item.trace_role;
+  return normalizeLifecycleStage(item.trace_role);
 }
 
 function isEpic(item: ItemRow): boolean {
-  return item.source === 'jira' && (item.item_type === 'epic' || item.item_type === 'Epic');
+  const sourceKind = getWorkspaceConfig().sources[item.source]?.kind;
+  return sourceKind === 'tracker' && item.item_type.toLowerCase() === 'epic';
 }
 
 /**
@@ -258,7 +262,7 @@ export function assembleAll(): AssembleResult {
       const seedSet = promoteEpicsToSeeds(items, new Set(group.seedIds));
       for (const item of items) {
         const isSeed = seedSet.has(item.id);
-        const isTerminal = item.trace_role === 'integration';
+        const isTerminal = isTerminalLifecycleStage(item.trace_role);
         insertWSI.run(
           wsId,
           item.id,

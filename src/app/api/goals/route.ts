@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
-import { initSchema, seedGoals } from '@/lib/schema';
+import { initSchema } from '@/lib/schema';
 import { v4 as uuid } from 'uuid';
 
 export async function GET() {
   initSchema();
-  seedGoals();
   const db = getDb();
   const goals = db.prepare("SELECT * FROM goals WHERE status IN ('active', 'suggested') ORDER BY sort_order").all();
   return NextResponse.json(goals);

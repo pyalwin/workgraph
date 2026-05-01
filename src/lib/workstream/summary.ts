@@ -10,6 +10,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb } from '../db';
 import { listWorkstreams } from './assemble';
+import { getWorkspaceConfig } from '../workspace-config';
 
 interface WSItem {
   id: string;
@@ -98,17 +99,21 @@ function sampleItemsForPrompt(items: WSItem[]): WSItem[] {
 }
 
 function buildPrompt(items: WSItem[]): { system: string; user: string } {
-  const system = `You are summarizing a WORKSTREAM — the trace of how an idea evolved into shipped code.
+  const config = getWorkspaceConfig();
+  const lifecycle = config.lifecycle.stages
+    .map((s) => `${s.id} (${s.label})`)
+    .join(' → ');
+  const system = `You are summarizing a WORKSTREAM — the trace of how a signal evolved into decisions, plans, execution, completion, and follow-up.
 
-A workstream is made of items across sources (Notion / JIRA / Slack / GitHub / meetings), each tagged with a role in the lifecycle:
-seed → discussion → decision → specification → implementation → review → integration → follow_up
+A workstream is made of items across configured sources, each tagged with a role in the configured lifecycle:
+${lifecycle}
 
 Produce exactly two outputs as a single JSON object:
 
 1. "narrative": 3-5 sentence prose paragraph describing the arc. Cover:
    - Where/how it started (the seed)
    - Key decision points or debates
-   - What got built, and how it shipped
+   - What was planned, executed, reviewed, completed, or followed up
    - Be specific: mention titles, dates, outcomes. Avoid generic summaries.
 
 2. "timeline_events": An array, one entry per item in chronological order:
@@ -119,7 +124,7 @@ Return ONLY valid JSON, no markdown fences, no commentary.`;
 
   const lines: string[] = ['Items in this workstream (chronological):', ''];
   for (const it of items) {
-    const roleMark = it.is_seed ? '★SEED ' : it.is_terminal ? '✓INTEG ' : '       ';
+    const roleMark = it.is_seed ? '★SEED ' : it.is_terminal ? '✓DONE  ' : '       ';
     const role = it.role_in_workstream ?? it.trace_role ?? '—';
     const when = (it.event_at ?? it.created_at).slice(0, 10);
     const summary = it.summary ?? (it.body ? it.body.slice(0, 180) : '');

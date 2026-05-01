@@ -1,17 +1,9 @@
 import { getDb } from '../db';
 import { initSchema } from '../schema';
 import Anthropic from '@anthropic-ai/sdk';
+import { getWorkspaceConfig, seedWorkspaceConfig } from '../workspace-config';
 
-export type TraceRole =
-  | 'seed'
-  | 'discussion'
-  | 'decision'
-  | 'specification'
-  | 'implementation'
-  | 'review'
-  | 'integration'
-  | 'follow_up'
-  | null;
+export type TraceRole = string | null;
 
 export type Substance =
   | 'bug'
@@ -23,10 +15,6 @@ export type Substance =
   | 'research'
   | null;
 
-const TRACE_ROLES: ReadonlyArray<Exclude<TraceRole, null>> = [
-  'seed', 'discussion', 'decision', 'specification',
-  'implementation', 'review', 'integration', 'follow_up',
-];
 const SUBSTANCES: ReadonlyArray<Exclude<Substance, null>> = [
   'bug', 'feature', 'refactor', 'docs', 'infra', 'process', 'research',
 ];
@@ -48,27 +36,31 @@ function getClient(): Anthropic {
 
 function buildSystemPrompt(): string {
   const db = getDb();
+  const config = getWorkspaceConfig();
   const goals = db
     .prepare("SELECT id, name, description FROM goals WHERE status = 'active' ORDER BY sort_order")
     .all() as { id: string; name: string; description: string }[];
 
   const goalList = goals.map(g => `- "${g.id}": ${g.name} — ${g.description}`).join('\n');
+  const stages = config.lifecycle.stages.map((stage) => {
+    const legacy = stage.legacyIds?.length ? ` Legacy equivalents: ${stage.legacyIds.join(', ')}.` : '';
+    return `   - "${stage.id}": ${stage.label} — ${stage.description}${legacy}`;
+  }).join('\n');
+  const sourceKinds = Object.entries(config.sources)
+    .map(([id, source]) => `- ${id}: ${source.label} (${source.kind})`)
+    .join('\n');
 
-  return `You are classifying a work item (JIRA ticket, Slack message, Notion page, GitHub PR/commit, or meeting note) by its ROLE in the evolution of a decision into shipped code.
+  return `You are classifying a work item in a configurable organizational work-trace system. A work item may come from a tracker, communication tool, document system, meeting transcript, code host, approval system, case tool, CRM, or another configured source.
+
+Configured source registry:
+${sourceKinds}
 
 Return a single JSON object (no markdown fences, no commentary) with these fields:
 
 1. "summary": concise 1-2 sentence summary of what this item is about.
 
-2. "trace_role": where does this item sit in the lifecycle of an idea becoming code? Pick exactly ONE of:
-   - "seed": first articulation of a problem, idea, or customer ask — starting point of work (design doc, customer-reported ticket, Slack thread opening a topic)
-   - "discussion": exploration, debate, alternatives, feedback (Slack threads, meeting notes, Notion comments)
-   - "decision": a choice was made, direction set ("we're going with approach X", ADRs, JIRA comments locking scope)
-   - "specification": chosen approach formalized for implementation (tech spec, JIRA story with acceptance criteria, epic description)
-   - "implementation": code being produced (open PRs, commits)
-   - "review": others evaluating the work (PR reviews, review threads)
-   - "integration": merged/shipped (merged PR, release note)
-   - "follow_up": retrospective or issue raised AFTER shipping (bug report about the new feature, post-ship chatter)
+2. "trace_role": where does this item sit in the configured lifecycle? Pick exactly ONE of:
+${stages}
    - "null": noise, small talk, pure status updates — doesn't fit any lifecycle stage
 
 3. "substance": what is this item ABOUT? Pick exactly ONE of:
@@ -83,7 +75,7 @@ Return a single JSON object (no markdown fences, no commentary) with these field
 
 4. "topics": 2-5 topic tags (lowercase, hyphenated). Examples: auth, pipeline, vendor-pay, api-gateway, deployment, testing.
 
-5. "entities": mentioned entities — people names, team names, product names, Jira keys (PEX-123), channel names (#pex-dev). Array of strings.
+5. "entities": important mentioned entities in plain text. Array of strings. Use generic named concepts rather than source-specific assumptions.
 
 6. "goals": zero or more strategic goal IDs this item genuinely fits. Use IDs from this list only:
 ${goalList}
@@ -120,8 +112,9 @@ async function callHaiku(
     if (!jsonMatch) return null;
 
     const parsed = JSON.parse(jsonMatch[0]);
+    const allowedTraceRoles = getWorkspaceConfig().lifecycle.stages.map((s) => s.id);
 
-    const traceRole = normalizeEnum<Exclude<TraceRole, null>>(parsed.trace_role, TRACE_ROLES);
+    const traceRole = normalizeEnum<string>(parsed.trace_role, allowedTraceRoles);
     const substance = normalizeEnum<Exclude<Substance, null>>(parsed.substance, SUBSTANCES);
 
     return {
@@ -240,6 +233,7 @@ export async function enrichAll(options: {
 } = {}): Promise<{ enriched: number; failed: number; total: number }> {
   const db = getDb();
   initSchema();
+  seedWorkspaceConfig();
 
   const limit = options.limit ?? 1000;
   const concurrency = options.concurrency ?? 5;

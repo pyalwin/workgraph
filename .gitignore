@@ -2,3 +2,18 @@ node_modules/
 .next/
 *.db
 .DS_Store
+
+# Local env / secrets
+.env
+.env.local
+.env.*.local
+
+# Local tool state
+.claude/
+.superpowers/
+
+# Runtime logs
+logs/
+
+# Build artifacts
+tsconfig.tsbuildinfo

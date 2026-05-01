@@ -1,5 +1,6 @@
 import { getDb } from '../src/lib/db';
-import { initSchema, seedOttiDeployments } from '../src/lib/schema';
+import { initSchema } from '../src/lib/schema';
+import { initOttiModule, seedOttiDeployments } from '../src/lib/modules/otti';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -30,6 +31,7 @@ export function ingestOttiSessions(sourceDir: string = DEFAULT_OTTI_SESSIONS_SOU
   }
 
   initSchema();
+  initOttiModule();
   seedOttiDeployments();
   const db = getDb();
 

@@ -16,6 +16,7 @@
  */
 import { getDb } from '../db';
 import { v4 as uuid } from 'uuid';
+import { normalizeLifecycleStage, relationForLifecycleStage } from '../workspace-config';
 
 interface ItemRow {
   id: string;
@@ -38,13 +39,6 @@ interface DecisionCore {
 }
 
 const UPSTREAM_ROLES = new Set(['seed', 'discussion']);
-const DOWNSTREAM_ROLES: Record<string, 'specification' | 'implementation' | 'review' | 'integration' | 'follow_up'> = {
-  specification: 'specification',
-  implementation: 'implementation',
-  review: 'review',
-  integration: 'integration',
-  follow_up: 'follow_up',
-};
 
 function loadItem(id: string): ItemRow | null {
   return getDb().prepare(`
@@ -98,23 +92,22 @@ function collectRelatedItems(decisionItem: ItemRow, workstreamId: string | null)
 }
 
 function classifyRelation(candidate: ItemRow, decisionItem: ItemRow): string | null {
-  if (!candidate.trace_role) return null;
+  const stage = normalizeLifecycleStage(candidate.trace_role);
+  if (!stage) return null;
   const cTime = eventAtOf(candidate);
   const dTime = eventAtOf(decisionItem);
 
-  if (candidate.trace_role === 'seed') return 'origin';
-  if (UPSTREAM_ROLES.has(candidate.trace_role)) {
+  if (stage === 'seed') return 'origin';
+  if (UPSTREAM_ROLES.has(stage)) {
     return cTime <= dTime ? 'discussion' : null;
   }
-  const downstream = DOWNSTREAM_ROLES[candidate.trace_role];
-  if (downstream) {
-    return cTime >= dTime ? downstream : null;
-  }
+  const downstream = relationForLifecycleStage(stage);
+  if (downstream && downstream !== 'self') return cTime >= dTime ? downstream : null;
   return null;
 }
 
 function inferStatus(related: Array<{ item: ItemRow; relation: string }>): 'active' | 'implemented' | 'superseded' | 'reversed' {
-  const hasIntegration = related.some(r => r.relation === 'integration');
+  const hasIntegration = related.some(r => r.relation === 'completion' || r.relation === 'integration');
   if (hasIntegration) return 'implemented';
   // Simple heuristic for v1; future: parse decision title for "cancelled"/"superseded"/"deprecated"
   return 'active';
@@ -224,8 +217,10 @@ export function getDecisionItems(decisionId: string): DecisionItem[] {
       WHEN 'discussion' THEN 2
       WHEN 'self' THEN 3
       WHEN 'specification' THEN 4
+      WHEN 'execution' THEN 5
       WHEN 'implementation' THEN 5
       WHEN 'review' THEN 6
+      WHEN 'completion' THEN 7
       WHEN 'integration' THEN 7
       WHEN 'follow_up' THEN 8
       ELSE 9

@@ -18,6 +18,7 @@
  */
 import { getDb } from './db';
 import { v4 as uuid } from 'uuid';
+import { getWorkspaceConfig } from './workspace-config';
 
 const JIRA_KEY_REGEX = /[A-Z][A-Z0-9]+-\d+/g;
 const MENTION_REGEX  = /@[\w.-]+/g;
@@ -35,14 +36,14 @@ const WEIGHTS = {
   topics:    0.10,
 };
 
-// Sources whose content is "supporting context" for traces anchored elsewhere
-// (usually JIRA/GitHub). These get a confidence downweight unless there's an
-// explicit reference like a Jira key or URL — we don't want a Notion doc
-// whose only connection is embedding-similarity to create a strong link.
-const SUPPORTING_SOURCES = new Set(['notion', 'meeting', 'gmail']);
-
 function isSupporting(source: string): boolean {
-  return SUPPORTING_SOURCES.has(source);
+  const config = getWorkspaceConfig();
+  const sourceKind = config.sources[source]?.kind ?? source;
+  return config.linking.supportingSourceKinds.includes(sourceKind);
+}
+
+function sourceKind(source: string): string {
+  return getWorkspaceConfig().sources[source]?.kind ?? source;
 }
 
 export function extractEntities(text: string) {
@@ -71,33 +72,22 @@ function determineLinkType(
   sourceItem: { source: string; item_type: string },
   targetSource: string,
 ): string {
-  // Implementation direction — GitHub implementing JIRA spec/story/epic
-  if (sourceItem.source === 'github' && targetSource === 'jira') return 'implements';
-  // Reverse direction — JIRA item referencing a GitHub PR/commit (often in comments)
-  if (sourceItem.source === 'jira' && targetSource === 'github') return 'implemented_by';
+  const sourceK = sourceKind(sourceItem.source);
+  const targetK = sourceKind(targetSource);
 
-  // Documentation sources referencing JIRA spec
-  if ((sourceItem.source === 'notion' || sourceItem.source === 'gmail') && targetSource === 'jira') return 'references';
-  // JIRA referencing a Notion spec
-  if (sourceItem.source === 'jira' && (targetSource === 'notion' || targetSource === 'gmail')) return 'references';
-
-  // Conversational sources — Slack / meetings
+  if (sourceK === 'code' && targetK === 'tracker') return 'executes';
+  if (sourceK === 'tracker' && targetK === 'code') return 'executed_by';
+  if (sourceK === 'document' || targetK === 'document') return 'references';
   if (
-    sourceItem.source === 'slack' ||
-    sourceItem.source === 'meeting' ||
+    sourceK === 'communication' ||
+    targetK === 'communication' ||
+    sourceK === 'meeting' ||
+    targetK === 'meeting' ||
     sourceItem.item_type === 'message' ||
     sourceItem.item_type === 'meeting'
   ) return 'discusses';
-  if (targetSource === 'slack' || targetSource === 'meeting') return 'discusses';
-
-  // Same-source pairs — avoid the generic 'mentions' fallback
-  if (sourceItem.source === targetSource) {
-    if (sourceItem.source === 'jira')   return 'related_jira';
-    if (sourceItem.source === 'github') return 'related_code';
-    if (sourceItem.source === 'notion') return 'related_docs';
-  }
-
-  return 'mentions';
+  if (sourceK === targetK) return `related_${sourceK}`;
+  return 'related';
 }
 
 function upsertLink(
@@ -169,6 +159,40 @@ function getItem(itemId: string): WorkItemRow | null {
 function findCandidates(item: WorkItemRow): string[] {
   const db = getDb();
   const ids = new Set<string>();
+  const itemText = `${item.title || ''}\n${item.body || ''}`;
+
+  // Forward — per-connector reference detection. Each adapter declares how to
+  // parse references to its own items out of free text (Jira keys, GitHub
+  // owner/repo#N URLs, Notion page URLs, etc.). The DB lookup filters out
+  // false positives by requiring the candidate to match an actual source_id.
+  // This makes cross-ref org/system-agnostic — adding a new source plus its
+  // idDetection handler means PRs can reference its items without changing
+  // crossref itself.
+  const { listConnectors } = require('./connectors/registry') as typeof import('./connectors/registry');
+  for (const connector of listConnectors()) {
+    if (!connector.idDetection) continue;
+    const refs = connector.idDetection.findReferences(itemText);
+    if (refs.length === 0) continue;
+    const placeholders = refs.map(() => '?').join(',');
+    const rows = db.prepare(
+      `SELECT id FROM work_items WHERE id != ? AND source = ? AND source_id IN (${placeholders})`,
+    ).all(item.id, connector.source, ...refs) as { id: string }[];
+    for (const r of rows) ids.add(r.id);
+  }
+
+  // Reverse — if this item's own source has idDetection AND its source_id
+  // looks like an ID (not a derived bucket key), find items whose text
+  // contains it. LIKE scan capped at 2× the time window.
+  const selfConnector = listConnectors().find((c) => c.source === item.source);
+  if (selfConnector?.idDetection && !item.source_id.startsWith('project:') && !item.source_id.startsWith('repo:') && !item.source_id.startsWith('release:')) {
+    const reverseRows = db.prepare(`
+      SELECT id FROM work_items
+      WHERE id != ?
+        AND (title LIKE '%' || ? || '%' OR body LIKE '%' || ? || '%')
+        AND datetime(created_at) BETWEEN datetime(?, '-${WINDOW_DAYS * 2} days') AND datetime(?, '+${WINDOW_DAYS} days')
+    `).all(item.id, item.source_id, item.source_id, item.created_at, item.created_at) as { id: string }[];
+    for (const r of reverseRows) ids.add(r.id);
+  }
 
   // Time window
   const created = item.created_at;
@@ -179,8 +203,17 @@ function findCandidates(item: WorkItemRow): string[] {
   `).all(item.id, created, created) as { id: string }[];
   for (const r of timeRows) ids.add(r.id);
 
-  // Shared entity tags
+  // Shared typed entities from the configurable ontology.
   const entityRows = db.prepare(`
+    SELECT DISTINCT emb.item_id AS id
+    FROM entity_mentions ema
+    JOIN entity_mentions emb ON emb.entity_id = ema.entity_id AND emb.item_id != ema.item_id
+    WHERE ema.item_id = ?
+  `).all(item.id) as { id: string }[];
+  for (const r of entityRows) ids.add(r.id);
+
+  // Legacy fallback while old rows and enrichment tags still exist.
+  const legacyEntityRows = db.prepare(`
     SELECT DISTINCT wb.id
     FROM item_tags ita
     JOIN item_tags itb ON itb.tag_id = ita.tag_id AND itb.item_id != ita.item_id
@@ -188,7 +221,7 @@ function findCandidates(item: WorkItemRow): string[] {
     JOIN work_items wb ON wb.id = itb.item_id
     WHERE ita.item_id = ?
   `).all(item.id) as { id: string }[];
-  for (const r of entityRows) ids.add(r.id);
+  for (const r of legacyEntityRows) ids.add(r.id);
 
   // Shared author (normalized)
   if (item.author && item.author.trim()) {
@@ -248,13 +281,26 @@ function cosineBuf(a: Float32Array, b: Float32Array): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
+/** Build a regex that matches a literal source_id as a whole token, not as a
+ *  prefix of a longer one. Without this, PEX-94 falsely matches inside PEX-948. */
+function escapeForRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+function mentionsId(haystack: string, id: string): boolean {
+  // \b before, then the literal id, then a non-{letter,digit,-} (or end-of-string)
+  // boundary so PEX-948 doesn't match "PEX-94".
+  const re = new RegExp(`(^|[^A-Za-z0-9-])${escapeForRegex(id)}(?![A-Za-z0-9-])`);
+  return re.test(haystack);
+}
+
 function scoreExplicit(a: WorkItemRow, b: WorkItemRow): { score: number; note?: string } {
   const aText = `${a.title}\n${a.body || ''}`;
   const bText = `${b.title}\n${b.body || ''}`;
 
-  // Does A mention B's source_id (Jira key / PR number / etc)?
-  if (b.source === 'jira' && aText.includes(b.source_id)) return { score: 1.0, note: `mentions ${b.source_id}` };
-  if (a.source === 'jira' && bText.includes(a.source_id)) return { score: 1.0, note: `mentions ${a.source_id}` };
+  // Does A mention B's tracker/source ID? Use whole-token match so PEX-94
+  // doesn't false-positive against PEX-948.
+  if (sourceKind(b.source) === 'tracker' && mentionsId(aText, b.source_id)) return { score: 1.0, note: `mentions ${b.source_id}` };
+  if (sourceKind(a.source) === 'tracker' && mentionsId(bText, a.source_id)) return { score: 1.0, note: `mentions ${a.source_id}` };
 
   // Jira keys in both texts that match
   const keysA = new Set(aText.match(JIRA_KEY_REGEX) || []);
@@ -262,8 +308,8 @@ function scoreExplicit(a: WorkItemRow, b: WorkItemRow): { score: number; note?: 
   for (const k of keysA) if (keysB.has(k)) return { score: 0.8, note: `shared key ${k}` };
 
   // URL references
-  if (a.source === 'notion' || a.source === 'gmail' || a.source === 'slack') {
-    if (b.source === 'github' && b.metadata) {
+  if (['document', 'communication'].includes(sourceKind(a.source))) {
+    if (sourceKind(b.source) === 'code' && b.metadata) {
       try {
         const m = JSON.parse(b.metadata);
         const urlHits = [m.url, `#${m.pr_number}`, m.sha?.slice?.(0, 7)].filter(Boolean);
@@ -279,8 +325,8 @@ function scoreStructural(a: WorkItemRow, b: WorkItemRow): { score: number; note?
   const mA = a.metadata ? safeParse(a.metadata) : {};
   const mB = b.metadata ? safeParse(b.metadata) : {};
 
-  // PR ↔ commit in same repo + branch
-  if (a.source === 'github' && b.source === 'github') {
+  // Code review artifact ↔ commit in same system + branch.
+  if (sourceKind(a.source) === 'code' && sourceKind(b.source) === 'code') {
     if (a.item_type === 'pull_request' && b.item_type === 'commit' && mA.repo && mA.repo === mB.repo && mA.branch && mB.sha) {
       return { score: 1.0, note: 'PR↔commit same repo+branch' };
     }
@@ -289,11 +335,11 @@ function scoreStructural(a: WorkItemRow, b: WorkItemRow): { score: number; note?
     }
   }
 
-  // PR branch → Jira ticket key
-  if (a.source === 'github' && b.source === 'jira' && mA.jira_key && mA.jira_key === b.source_id) {
+  // Code branch metadata → tracker item key.
+  if (sourceKind(a.source) === 'code' && sourceKind(b.source) === 'tracker' && mA.jira_key && mA.jira_key === b.source_id) {
     return { score: 1.0, note: `PR branch → ${b.source_id}` };
   }
-  if (b.source === 'github' && a.source === 'jira' && mB.jira_key && mB.jira_key === a.source_id) {
+  if (sourceKind(b.source) === 'code' && sourceKind(a.source) === 'tracker' && mB.jira_key && mB.jira_key === a.source_id) {
     return { score: 1.0, note: `PR branch → ${a.source_id}` };
   }
 
@@ -313,21 +359,27 @@ function scoreStructural(a: WorkItemRow, b: WorkItemRow): { score: number; note?
 }
 
 function scoreEntities(aId: string, bId: string): { score: number; shared: string[] } {
+  const config = getWorkspaceConfig();
   const rows = getDb().prepare(`
-    SELECT t.name, t.category, COUNT(*) OVER (PARTITION BY t.id) AS global_count
-    FROM item_tags ia
-    JOIN item_tags ib ON ib.tag_id = ia.tag_id AND ib.item_id = ?
-    JOIN tags t ON t.id = ia.tag_id
-    WHERE ia.item_id = ? AND t.category = 'entity'
-  `).all(bId, aId) as Array<{ name: string; category: string; global_count: number }>;
+    SELECT e.canonical_form, e.entity_type, COUNT(DISTINCT emg.item_id) AS global_count
+    FROM entity_mentions ema
+    JOIN entity_mentions emb ON emb.entity_id = ema.entity_id AND emb.item_id = ?
+    JOIN entities e ON e.id = ema.entity_id
+    LEFT JOIN entity_mentions emg ON emg.entity_id = e.id
+    WHERE ema.item_id = ?
+    GROUP BY e.id
+  `).all(bId, aId) as Array<{ canonical_form: string; entity_type: string; global_count: number }>;
   if (rows.length === 0) return { score: 0, shared: [] };
-  // Rarity-weighted: rare tags score higher
+
+  // Type + rarity weighted: configured high-signal entity classes (for example
+  // capability/system/artifact) score higher than weak context (actor/channel).
   let score = 0;
   for (const r of rows) {
     const rarity = Math.min(1, 5 / Math.max(1, r.global_count));
-    score += 0.3 + 0.3 * rarity;
+    const typeWeight = config.linking.entityWeights[r.entity_type] ?? config.linking.defaultEntityWeight;
+    score += typeWeight * (0.5 + 0.5 * rarity);
   }
-  return { score: Math.min(1, score), shared: rows.map(r => r.name) };
+  return { score: Math.min(1, score), shared: rows.map(r => `${r.entity_type}:${r.canonical_form}`) };
 }
 
 function scoreTopics(aId: string, bId: string): { score: number; count: number } {
