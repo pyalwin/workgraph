@@ -433,9 +433,9 @@ function LinkArt() {
       <circle cx="126" cy="124" r="3" className="link-endpoint accent" />
 
       {/* Floating signal label centered between the two cards */}
-      <g transform="translate(86 90)">
-        <rect width="68" height="18" rx="9" className="link-pill" />
-        <text x="34" y="12" className="link-pill-text">
+      <g transform="translate(70 89)">
+        <rect width="100" height="20" rx="10" className="link-pill" />
+        <text x="50" y="10" className="link-pill-text" dominantBaseline="central">
           topic match · 0.92
         </text>
       </g>
