@@ -11,6 +11,7 @@ node_modules/
 # Local tool state
 .claude/
 .superpowers/
+docs/superpowers/
 
 # Runtime logs
 logs/
