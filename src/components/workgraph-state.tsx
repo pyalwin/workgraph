@@ -163,7 +163,7 @@ export function WorkgraphStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (prevWorkspaceId.current !== null && prevWorkspaceId.current !== state.workspaceId) {
       const menu = activeWorkspace.ui?.menu;
-      const landingHref = menu?.[0]?.href ?? '/';
+      const landingHref = menu?.[0]?.href ?? '/dashboard';
       router.push(landingHref);
     }
     prevWorkspaceId.current = state.workspaceId;
