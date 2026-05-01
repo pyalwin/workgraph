@@ -1,6 +1,7 @@
 import { generateText } from 'ai';
 import { getDb } from './db';
 import { getModel } from './ai';
+import { inngest } from '@/inngest/client';
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -15,10 +16,6 @@ function isCacheStale(generatedAt: string | null): boolean {
   return age > CACHE_TTL_MS;
 }
 
-// Background regeneration registry — prevents two parallel regens for the
-// same project key. Resolves after the AI call writes the cache.
-const inFlight = new Map<string, Promise<string>>();
-
 export async function getOrGenerateSummary(projectKey: string, projectName: string): Promise<string> {
   const db = getDb();
 
@@ -32,18 +29,30 @@ export async function getOrGenerateSummary(projectKey: string, projectName: stri
     return cached.recap;
   }
 
-  // Stale cache — return what we have NOW and refresh in the background.
-  // The user gets an instant page; the next reload sees the fresh value.
-  if (cached?.recap) {
-    void backgroundRegen(projectKey, projectName);
-    return cached.recap;
-  }
+  // Stale or cold — dispatch a durable Inngest job to regenerate. The job
+  // runs in a separate worker, survives request termination, and retries
+  // on failure. We return the previous value (or a computed fallback) NOW
+  // so the page is instant.
+  await dispatchRegen(projectKey, projectName);
 
-  // Cold cache — return a computed fallback immediately and kick off
-  // generation in the background. Avoids a 10-30s blocking AI call on
-  // first project load.
-  void backgroundRegen(projectKey, projectName);
+  if (cached?.recap) return cached.recap;
   return computeQuickFallback(projectKey, projectName);
+}
+
+async function dispatchRegen(projectKey: string, projectName: string): Promise<void> {
+  try {
+    await inngest.send({
+      name: 'workgraph/project-summary.regen',
+      data: { projectKey, projectName },
+    });
+  } catch (err) {
+    // If Inngest is unreachable (dev server down, network), fall back to
+    // an in-process fire-and-forget. Still better than blocking the page.
+    console.warn(`[project-summary] inngest.send failed, falling back to in-process: ${(err as Error).message}`);
+    void generateAndStore(projectKey, projectName).catch((e) =>
+      console.error(`[project-summary] in-process regen failed for ${projectKey}:`, e),
+    );
+  }
 }
 
 function computeQuickFallback(projectKey: string, projectName: string): string {
@@ -63,22 +72,7 @@ function computeQuickFallback(projectKey: string, projectName: string): string {
   }
 }
 
-async function backgroundRegen(projectKey: string, projectName: string): Promise<string> {
-  const existing = inFlight.get(projectKey);
-  if (existing) return existing;
-  const promise = generateAndStore(projectKey, projectName)
-    .catch((err) => {
-      console.error(`[project-summary] regen failed for ${projectKey}:`, err);
-      return '';
-    })
-    .finally(() => {
-      inFlight.delete(projectKey);
-    });
-  inFlight.set(projectKey, promise);
-  return promise;
-}
-
-async function generateAndStore(projectKey: string, projectName: string): Promise<string> {
+export async function generateAndStore(projectKey: string, projectName: string): Promise<string> {
   const db = getDb();
 
   // Gather context for the summary
@@ -154,7 +148,8 @@ Rules:
     storeSummary(projectKey, projectName, summary);
     return summary;
   } catch (e) {
-    // If API fails, return computed fallback
+    // Surface to dev-server stderr so the failure is debuggable.
+    console.error(`[project-summary] AI call failed for ${projectKey}:`, (e as Error).message);
     return `${projectName}: ${tickets.length} tickets completed recently.`;
   }
 }

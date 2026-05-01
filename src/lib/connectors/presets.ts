@@ -74,7 +74,10 @@ export const CONNECTOR_PRESETS: Record<string, ConnectorPreset> = {
     iconKey: 'SiJira',
     monogram: 'J',
     brandHex: '#0052CC',
-    stdio: { command: 'npx', args: ['-y', 'mcp-atlassian'] },
+    // Use the locally-installed package so jsdom (a transitive of dompurify
+     // that the package forgets to declare) resolves out of OUR node_modules.
+     // npx isolates each install in its own temp dir which can't see jsdom.
+    stdio: { command: 'node', args: ['./node_modules/mcp-atlassian/dist/index.js'] },
     fields: [
       {
         name: 'jiraUrl',
@@ -457,7 +460,10 @@ export const CONNECTOR_PRESETS: Record<string, ConnectorPreset> = {
     iconKey: 'SiConfluence',
     monogram: 'C',
     brandHex: '#172B4D',
-    stdio: { command: 'npx', args: ['-y', 'mcp-atlassian'] },
+    // Use the locally-installed package so jsdom (a transitive of dompurify
+     // that the package forgets to declare) resolves out of OUR node_modules.
+     // npx isolates each install in its own temp dir which can't see jsdom.
+    stdio: { command: 'node', args: ['./node_modules/mcp-atlassian/dist/index.js'] },
     fields: [
       {
         name: 'confluenceUrl',

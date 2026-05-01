@@ -5,5 +5,12 @@
 import { heartbeat } from './heartbeat';
 import { jiraSyncTick, jiraSyncWorkspace } from './jira-sync';
 import { anomalyScan } from './anomalies';
+import { projectSummaryRegen } from './project-summary';
 
-export const functions = [heartbeat, jiraSyncTick, jiraSyncWorkspace, anomalyScan];
+export const functions = [
+  heartbeat,
+  jiraSyncTick,
+  jiraSyncWorkspace,
+  anomalyScan,
+  projectSummaryRegen,
+];
