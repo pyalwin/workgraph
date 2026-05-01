@@ -9,7 +9,7 @@ export type AITask =
   | 'decision'
   | 'narrative';
 
-const DEFAULT_MODEL = 'minimax/minimax-m2.7';
+const DEFAULT_MODEL = 'google/gemini-2.5-flash-lite';
 
 const TASK_MODELS: Record<AITask, string> = {
   enrich: DEFAULT_MODEL,

@@ -25,7 +25,7 @@ const SUPPORTED_PROVIDERS: ProviderDef[] = [
     envVar: 'OPENROUTER_API_KEY',
     helpUrl: 'https://openrouter.ai/keys',
     helpText:
-      'Default provider — routes all enrichment, summaries, and decisions through OpenRouter (default model: minimax/minimax-m2.7).',
+      'Default provider — routes all enrichment, summaries, and decisions through OpenRouter (default model: google/gemini-2.5-flash-lite).',
     supportsBaseUrl: true,
   },
 ];

@@ -85,7 +85,7 @@ See [**Quickstart**](#-quickstart) below.
 | Framework | [Next.js 14](https://nextjs.org/) (App Router) + [React 18](https://react.dev/) |
 | Language | [TypeScript 5](https://www.typescriptlang.org/) |
 | Storage | [SQLite](https://sqlite.org/) via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) + [`sqlite-vec`](https://github.com/asg017/sqlite-vec) for vector search |
-| LLM | [OpenRouter](https://openrouter.ai/) (default model: `minimax/minimax-m2.7`) via [Vercel AI SDK](https://ai-sdk.dev/) |
+| LLM | [OpenRouter](https://openrouter.ai/) (default model: `google/gemini-2.5-flash-lite`) via [Vercel AI SDK](https://ai-sdk.dev/) |
 | Tool integration | [Model Context Protocol](https://modelcontextprotocol.io/) |
 | UI | [Tailwind CSS](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/) primitives |
 | Graph viz | [`react-force-graph-2d`](https://github.com/vasturiano/react-force-graph) |
@@ -117,7 +117,7 @@ Create `.env.local` in the project root:
 
 ```bash
 # Required — AI provider key for summaries, classification, decision extraction.
-# Default provider is OpenRouter (model: minimax/minimax-m2.7). You can also
+# Default provider is OpenRouter (model: google/gemini-2.5-flash-lite). You can also
 # set this in Settings → AI; values saved there take precedence over env.
 OPENROUTER_API_KEY=sk-or-...
 
@@ -150,7 +150,7 @@ Open <http://localhost:3000>, wire up connectors under **Settings**, and run you
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENROUTER_API_KEY` | yes¹ | OpenRouter key — default provider, used for enrichment, summaries, decisions, classification (model: `minimax/minimax-m2.7`) |
+| `OPENROUTER_API_KEY` | yes¹ | OpenRouter key — default provider, used for enrichment, summaries, decisions, classification (model: `google/gemini-2.5-flash-lite`) |
 | `WORKGRAPH_SECRET_KEY` | yes | 32-byte hex key (AES-GCM) for encrypting OAuth tokens and stored AI provider keys |
 | `OAUTH_REDIRECT_BASE_URL` | yes | Public-facing base URL for OAuth callbacks (e.g. `http://localhost:3000`) |
 
