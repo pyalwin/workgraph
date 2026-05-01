@@ -151,7 +151,7 @@ export function WorkgraphStateProvider({ children }: { children: ReactNode }) {
       modules: { overview: true, projects: false, knowledge: true, goals: true, otti: false },
       ui: {
         menu: [
-          { id: 'overview', label: 'Overview', href: '/', module: 'overview' },
+          { id: 'overview', label: 'Overview', href: '/dashboard', module: 'overview' },
           { id: 'knowledge', label: 'Knowledge', href: '/knowledge', module: 'knowledge' },
           { id: 'goals', label: 'Metrics', href: '/metrics', module: 'goals' },
         ],

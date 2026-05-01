@@ -116,7 +116,7 @@ export const DEFAULT_WORKSPACE_CONFIG: WorkspaceConfig = {
   customTables: [],
   ui: {
     menu: [
-      { id: 'overview', label: 'Overview', href: '/', module: 'overview' },
+      { id: 'overview', label: 'Overview', href: '/dashboard', module: 'overview' },
       { id: 'knowledge', label: 'Knowledge', href: '/knowledge', module: 'knowledge' },
       { id: 'goals', label: 'Metrics', href: '/metrics', module: 'goals' },
     ],
@@ -443,7 +443,7 @@ export const OTTI_WORKSPACE_CONFIG: WorkspaceConfig = {
 
 const ENGINEERING_UI: WorkspaceUiConfig = {
   menu: [
-    { id: 'overview', label: 'Overview', href: '/', module: 'overview' },
+    { id: 'overview', label: 'Overview', href: '/dashboard', module: 'overview' },
     { id: 'projects', label: 'Projects', href: '/projects', module: 'projects' },
     { id: 'knowledge', label: 'Knowledge', href: '/knowledge', module: 'knowledge' },
     { id: 'goals', label: 'Goals', href: '/metrics', module: 'goals' },
@@ -676,7 +676,7 @@ function uiForPreset(preset: string): WorkspaceUiConfig {
   if (preset === 'sales') {
     return {
       menu: [
-        { id: 'overview', label: 'Pipeline', href: '/', module: 'overview' },
+        { id: 'overview', label: 'Pipeline', href: '/dashboard', module: 'overview' },
         { id: 'knowledge', label: 'Accounts', href: '/knowledge', module: 'knowledge' },
         { id: 'goals', label: 'Targets', href: '/metrics', module: 'goals' },
       ],
@@ -703,7 +703,7 @@ function uiForPreset(preset: string): WorkspaceUiConfig {
   if (preset === 'legal') {
     return {
       menu: [
-        { id: 'overview', label: 'Matters', href: '/', module: 'overview' },
+        { id: 'overview', label: 'Matters', href: '/dashboard', module: 'overview' },
         { id: 'knowledge', label: 'Knowledge', href: '/knowledge', module: 'knowledge' },
         { id: 'goals', label: 'Risks', href: '/metrics', module: 'goals' },
       ],
@@ -730,7 +730,7 @@ function uiForPreset(preset: string): WorkspaceUiConfig {
   if (preset === 'operations') {
     return {
       menu: [
-        { id: 'overview', label: 'Operations', href: '/', module: 'overview' },
+        { id: 'overview', label: 'Operations', href: '/dashboard', module: 'overview' },
         { id: 'knowledge', label: 'Processes', href: '/knowledge', module: 'knowledge' },
         { id: 'goals', label: 'KPIs', href: '/metrics', module: 'goals' },
       ],
@@ -757,7 +757,7 @@ function uiForPreset(preset: string): WorkspaceUiConfig {
   if (preset === 'finance') {
     return {
       menu: [
-        { id: 'overview', label: 'Finance', href: '/', module: 'overview' },
+        { id: 'overview', label: 'Finance', href: '/dashboard', module: 'overview' },
         { id: 'knowledge', label: 'Analysis', href: '/knowledge', module: 'knowledge' },
         { id: 'goals', label: 'Controls', href: '/metrics', module: 'goals' },
       ],
@@ -784,7 +784,7 @@ function uiForPreset(preset: string): WorkspaceUiConfig {
   if (preset === 'custom-workspace') {
     return {
       menu: [
-        { id: 'overview', label: 'Overview', href: '/', module: 'overview' },
+        { id: 'overview', label: 'Overview', href: '/dashboard', module: 'overview' },
         { id: 'knowledge', label: 'Knowledge', href: '/knowledge', module: 'knowledge' },
         { id: 'goals', label: 'Metrics', href: '/metrics', module: 'goals' },
       ],
