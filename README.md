@@ -64,78 +64,25 @@ This project is **100% open source** under the [MIT License](#-license). Fork it
 ## Architecture
 
 ```mermaid
-flowchart TD
-    subgraph SOURCES["External Sources"]
-        direction LR
-        S1[Jira / Confluence]
-        S2[Slack]
-        S3[Notion]
-        S4[GitHub / GitLab]
-        S5[Linear]
-        S6[Granola]
-        S7[Google Workspace]
-        S8[Microsoft Teams]
-    end
+flowchart LR
+    Src["Sources"] --> Sync["Sync Pipeline"]
+    Sync --> DB[("SQLite + vec")]
+    DB <--> AI["Claude"]
+    DB --> UI["Next.js UI"]
 
-    subgraph AUTH["Auth Layer"]
-        direction LR
-        A1[OAuth 2.0]
-        A2[Model Context Protocol]
-    end
+    classDef base fill:#fafafa,stroke:#525252,color:#171717,stroke-width:1.25px
+    classDef store fill:#0f172a,stroke:#0f172a,color:#f8fafc,stroke-width:1.25px
+    classDef ai fill:#fef3e2,stroke:#D97757,color:#7c2d12,stroke-width:1.25px
 
-    subgraph ADAPTERS["Connector Adapters · src/lib/connectors/"]
-        AD["normalize → work_items"]
-    end
-
-    subgraph PIPELINE["Sync Pipeline · src/lib/sync/"]
-        direction LR
-        P1[Ingest] --> P2[Enrich] --> P3[Extract] --> P4[Embed] --> P5[Link]
-    end
-
-    subgraph STORAGE["Local Storage"]
-        DB[("SQLite + sqlite-vec<br/>data/workgraph.db")]
-    end
-
-    subgraph INTEL["Intelligence Layer"]
-        direction LR
-        I1[Cross-reference]
-        I2[Classify to Goals]
-        I3[Summarize via Claude]
-    end
-
-    subgraph UI["Next.js 14 App Router"]
-        direction LR
-        U1[Overview]
-        U2[Knowledge Graph]
-        U3[Projects]
-        U4[Metrics]
-        U5[Decisions]
-        U6[Settings]
-    end
-
-    SOURCES --> AUTH
-    AUTH --> ADAPTERS
-    ADAPTERS --> PIPELINE
-    PIPELINE --> STORAGE
-    STORAGE <--> INTEL
-    STORAGE --> UI
-
-    classDef sourceNode fill:#475569,stroke:#94a3b8,color:#f8fafc,stroke-width:1px
-    classDef authNode fill:#7c3aed,stroke:#a78bfa,color:#fff,stroke-width:1px
-    classDef adapterNode fill:#0891b2,stroke:#22d3ee,color:#fff,stroke-width:1px
-    classDef pipelineNode fill:#0ea5e9,stroke:#7dd3fc,color:#fff,stroke-width:1px
-    classDef storageNode fill:#003B57,stroke:#075985,color:#fff,stroke-width:2px
-    classDef intelNode fill:#D97757,stroke:#fbbf24,color:#fff,stroke-width:1px
-    classDef uiNode fill:#10b981,stroke:#6ee7b7,color:#fff,stroke-width:1px
-
-    class S1,S2,S3,S4,S5,S6,S7,S8 sourceNode
-    class A1,A2 authNode
-    class AD adapterNode
-    class P1,P2,P3,P4,P5 pipelineNode
-    class DB storageNode
-    class I1,I2,I3 intelNode
-    class U1,U2,U3,U4,U5,U6 uiNode
+    class Src,Sync,UI base
+    class DB store
+    class AI ai
 ```
+
+> **Sources** — Jira, Slack, Notion, GitHub/GitLab, Linear, Granola, Google Workspace, Teams (via OAuth or MCP)
+> **Sync Pipeline** — ingest → enrich → extract → embed → link
+> **Claude** — cross-reference, classify to goals, summarize workstreams
+> **UI** — Overview · Knowledge Graph · Projects · Metrics · Decisions · Settings
 
 ---
 
@@ -316,29 +263,6 @@ workgraph/
 ---
 
 ## Data Flow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Src as Source<br/>(Jira / Slack / …)
-    participant Adp as Connector<br/>Adapter
-    participant DB as SQLite +<br/>sqlite-vec
-    participant Cla as Claude<br/>(Haiku / Sonnet)
-    participant UI as Next.js UI
-
-    Src->>Adp: Fetch new / updated items
-    Adp->>DB: Insert work_items (deduped)
-    DB->>Cla: Send for enrichment
-    Cla-->>DB: Summaries · tags · signals
-    DB->>DB: Extract entities (keys, URLs)
-    DB->>DB: Generate embeddings
-    DB->>DB: Build cross-references
-    DB->>DB: Classify to goals
-    DB->>Cla: Assemble workstream contexts
-    Cla-->>DB: Narrative summaries
-    UI->>DB: Query graph + summaries
-    DB-->>UI: Render
-```
 
 1. **Sync** — A connector adapter fetches new/updated items from a source and writes them to `work_items` (deduped by `(source, source_id)`).
 2. **Enrich** — Claude Haiku adds summaries, tags, and authorship signals.
