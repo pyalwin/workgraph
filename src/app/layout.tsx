@@ -13,8 +13,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const { accessToken, ...initialAuth } = auth;
 
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <AuthKitProvider initialAuth={initialAuth}>{children}</AuthKitProvider>
       </body>
     </html>
