@@ -2381,23 +2381,16 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
 }
 
 /* ———————————— AUTH (WorkOS AuthKit) ———————————— */
-.nav-auth {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.nav-auth-loading {
+  font-size: 12px;
+  color: var(--ink-4);
   margin-left: 8px;
 }
-.nav-auth-user {
-  font-size: 12px;
-  color: var(--ink-2);
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 .nav-auth-btn {
   display: inline-flex;
   align-items: center;
+  margin-left: 8px;
   padding: 5px 12px;
   border-radius: 6px;
   border: 1px solid var(--rule);
@@ -2414,9 +2407,144 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   border-color: var(--ink-5);
   color: var(--ink);
 }
-.nav-auth-loading {
-  font-size: 12px;
-  color: var(--ink-4);
+
+/* Avatar trigger */
+.nav-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin-left: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: var(--ink, #15140f);
+  color: var(--bone, #faf8f3);
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 200ms ease, border-color 140ms ease;
+  overflow: hidden;
+  padding: 0;
+}
+
+.nav-avatar:hover {
+  transform: translateY(-1px);
+  border-color: var(--ink-5);
+  box-shadow: 0 2px 8px -3px rgba(0, 0, 0, 0.3);
+}
+
+.nav-avatar:focus-visible {
+  outline: 2px solid #d97757;
+  outline-offset: 2px;
+}
+
+.nav-avatar[data-state='open'] {
+  border-color: var(--ink-3);
+}
+
+.nav-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.nav-avatar-initials {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  text-transform: uppercase;
+}
+
+/* Popover menu */
+.nav-avatar-menu {
+  min-width: 220px;
+  padding: 6px;
+  background: var(--paper, #fff);
+  border: 1px solid var(--rule, rgba(21, 20, 15, 0.1));
+  border-radius: 10px;
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.04),
+    0 12px 32px -8px rgba(0, 0, 0, 0.18);
+  z-index: 50;
+  font-size: 13px;
+  color: var(--ink-2);
+  animation: nav-avatar-menu-in 140ms ease;
+}
+
+@keyframes nav-avatar-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.nav-avatar-menu-head {
+  padding: 10px 12px 8px;
+}
+
+.nav-avatar-menu-name {
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-avatar-menu-email {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--ink-4, #7a7670);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-avatar-menu-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--rule, rgba(21, 20, 15, 0.08));
+}
+
+.nav-avatar-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  font-size: 13px;
+}
+
+.nav-avatar-menu-item:hover,
+.nav-avatar-menu-item:focus-visible {
+  background: var(--bone-2, #f3efe7);
+  color: var(--ink);
+  outline: none;
+}
+
+.nav-avatar-menu-item-danger {
+  color: #b04929;
+}
+
+.nav-avatar-menu-item-danger:hover,
+.nav-avatar-menu-item-danger:focus-visible {
+  background: rgba(217, 119, 87, 0.1);
+  color: #7c2d12;
+}
+
+.nav-avatar-menu-shortcut {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ink-5, #a4a09a);
+  letter-spacing: 0.02em;
 }
 
 /* ─── Landing page ─────────────────────────────────────────── */

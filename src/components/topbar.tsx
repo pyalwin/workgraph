@@ -29,25 +29,13 @@ export function Topbar() {
         </Link>
         <nav className="nav">
           {navItems.filter((item) => !item.module || modules[item.module] !== false).map((item) => {
-            const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+            const active = item.href === '/dashboard' ? pathname === '/dashboard' : pathname.startsWith(item.href);
             return (
               <Link key={item.href} href={item.href} className={active ? 'active' : ''}>
                 {item.label}
               </Link>
             );
           })}
-          <Link
-            href="/settings?tab=workspaces"
-            className={pathname.startsWith('/settings') && pathname.includes('workspaces') ? 'active' : ''}
-          >
-            Workspaces
-          </Link>
-          <Link
-            href="/settings"
-            className={pathname.startsWith('/settings') ? 'active' : ''}
-          >
-            Settings
-          </Link>
         </nav>
       </div>
       <div className="top-right">
