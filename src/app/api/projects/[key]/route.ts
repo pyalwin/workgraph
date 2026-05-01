@@ -71,6 +71,9 @@ function getProjectAnomalies(projectKey: string): ProjectAnomaly[] {
 
 function getProjectActionItems(projectKey: string): ProjectActionItem[] {
   const db = getDb();
+  // Action items now live on the project hub work_item (source_id='project:KEY').
+  // Also accept legacy per-ticket items (entity_key match) so any stragglers
+  // still surface on the project page during the migration window.
   return db
     .prepare(
       `SELECT ai.id, ai.source_item_id, wi.source_id, wi.title AS source_title,
@@ -79,12 +82,15 @@ function getProjectActionItems(projectKey: string): ProjectActionItem[] {
        JOIN work_items wi ON wi.id = ai.source_item_id
        WHERE ai.state = 'open'
          AND wi.source = 'jira'
-         AND json_extract(wi.metadata, '$.entity_key') = ?
+         AND (
+           wi.source_id = ?
+           OR json_extract(wi.metadata, '$.entity_key') = ?
+         )
        ORDER BY COALESCE(ai.user_priority, ai.ai_priority, 'p9') ASC,
                 ai.due_at ASC NULLS LAST
        LIMIT 30`,
     )
-    .all(projectKey) as ProjectActionItem[];
+    .all(`project:${projectKey}`, projectKey) as ProjectActionItem[];
 }
 
 function safeParse<T>(s: string, fallback: T): T {
