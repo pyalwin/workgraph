@@ -423,17 +423,17 @@ function LinkArt() {
         <line x1="8" y1="50" x2="64" y2="50" className="source-card-line" />
       </g>
 
-      {/* Connecting curve — meeting → ticket */}
+      {/* Connecting curve — bottom-right of meeting → top-left of ticket */}
       <path
-        d="M 96 80 C 130 90, 130 130, 152 138"
+        d="M 114 74 C 134 92, 110 108, 126 124"
         className="link-curve"
         fill="none"
       />
-      <circle cx="96" cy="80" r="3" className="link-endpoint" />
-      <circle cx="152" cy="138" r="3" className="link-endpoint accent" />
+      <circle cx="114" cy="74" r="3" className="link-endpoint" />
+      <circle cx="126" cy="124" r="3" className="link-endpoint accent" />
 
-      {/* Floating signal label */}
-      <g transform="translate(96 102)">
+      {/* Floating signal label centered between the two cards */}
+      <g transform="translate(86 90)">
         <rect width="68" height="18" rx="9" className="link-pill" />
         <text x="34" y="12" className="link-pill-text">
           topic match · 0.92
