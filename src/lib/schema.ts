@@ -257,6 +257,14 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_workstream_items_item ON workstream_items(item_id);
     CREATE INDEX IF NOT EXISTS idx_workstream_items_ws ON workstream_items(workstream_id);
 
+    CREATE TABLE IF NOT EXISTS ai_provider_configs (
+      provider_id TEXT PRIMARY KEY,
+      -- Encrypted with AES-256-GCM via src/lib/crypto.ts (base64 payload).
+      api_key_enc TEXT,
+      base_url TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS item_links_chunks (
       link_id TEXT NOT NULL REFERENCES links(id),
       source_chunk_id INTEGER REFERENCES item_chunks(id),

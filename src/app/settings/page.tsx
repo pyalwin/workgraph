@@ -8,14 +8,16 @@ import { ConnectorDetailPanel, type SavedConnectorRow } from '@/components/conne
 import { WORKSPACE_PRESETS, type WorkspacePreset } from '@/components/workspace-onboarding';
 import { optionsForSlot } from '@/lib/connectors/preset-mapping';
 import { SettingsAdvancedSection } from '@/components/settings-advanced-section';
+import { AIProvidersSection } from '@/components/ai-providers-section';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
-type Tab = 'profile' | 'connectors' | 'workspaces' | 'advanced';
+type Tab = 'profile' | 'connectors' | 'workspaces' | 'ai' | 'advanced';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'profile', label: 'Profile' },
   { id: 'connectors', label: 'Connectors' },
   { id: 'workspaces', label: 'Workspaces' },
+  { id: 'ai', label: 'AI' },
   { id: 'advanced', label: 'Advanced' },
 ];
 
@@ -59,6 +61,7 @@ export default function SettingsPage() {
         {tab === 'profile' && <ProfileTab />}
         {tab === 'connectors' && <ConnectorsTab />}
         {tab === 'workspaces' && <WorkspacesTab onJumpToConnectors={() => setTab('connectors')} />}
+        {tab === 'ai' && <AIProvidersSection />}
         {tab === 'advanced' && <SettingsAdvancedSection />}
       </div>
     </div>
