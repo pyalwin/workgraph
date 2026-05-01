@@ -1,5 +1,6 @@
+import { generateText } from 'ai';
 import { getDb } from '../db';
-import Anthropic from '@anthropic-ai/sdk';
+import { getModel } from '../ai';
 
 const PROJECT_NAMES: Record<string, string> = {
   INT: 'Integrations',
@@ -63,22 +64,17 @@ function getProjectStats(): ProjectStats[] {
 async function generateRecap(project: ProjectStats): Promise<string> {
   // Try Haiku first, fall back to a simple computed recap
   try {
-    const client = new Anthropic();
-
     const itemList = project.recentItems
       .map(i => `- [${i.source_id}] ${i.title} (${i.status || 'unknown'})${i.summary ? ` — ${i.summary}` : ''}`)
       .join('\n');
 
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      messages: [{
-        role: 'user',
-        content: `Write a 2-3 sentence project recap for "${project.name}" (${project.key}). Stats: ${project.itemCount} total items, ${project.doneCount} done, ${project.activeCount} active, ${project.blockerCount} blockers.\n\nRecent items:\n${itemList}\n\nFocus on: what's the current state, what's being worked on, any blockers or risks. Be concise and direct. No markdown, no bullet points, just prose.`,
-      }],
+    const { text } = await generateText({
+      model: getModel('recap'),
+      maxOutputTokens: 300,
+      prompt: `Write a 2-3 sentence project recap for "${project.name}" (${project.key}). Stats: ${project.itemCount} total items, ${project.doneCount} done, ${project.activeCount} active, ${project.blockerCount} blockers.\n\nRecent items:\n${itemList}\n\nFocus on: what's the current state, what's being worked on, any blockers or risks. Be concise and direct. No markdown, no bullet points, just prose.`,
     });
 
-    return response.content[0]?.type === 'text' ? response.content[0].text.trim() : computeSimpleRecap(project);
+    return text.trim() || computeSimpleRecap(project);
   } catch {
     return computeSimpleRecap(project);
   }

@@ -1,5 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
 import { getDb } from './db';
+import { getModel } from './ai';
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -59,13 +60,10 @@ export async function getOrGenerateSummary(projectKey: string, projectName: stri
 
   // Generate via Claude Haiku
   try {
-    const client = new Anthropic();
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
-      messages: [{
-        role: 'user',
-        content: `You are writing a detailed project health summary for an engineering leadership dashboard. The audience is a VP of Engineering who wants to understand what's happening in this project at a glance.
+    const { text: summary } = await generateText({
+      model: getModel('project-summary'),
+      maxOutputTokens: 500,
+      prompt: `You are writing a detailed project health summary for an engineering leadership dashboard. The audience is a VP of Engineering who wants to understand what's happening in this project at a glance.
 
 Project: ${projectName} (${projectKey})
 
@@ -97,10 +95,8 @@ Rules:
 - Do NOT include a title or heading before the first section
 - Do NOT repeat project name, ticket counts, completion %, or velocity — shown separately in dashboard
 - 150-250 words total`,
-      }],
     });
 
-    const summary = response.content[0].type === 'text' ? response.content[0].text : '';
     storeSummary(projectKey, projectName, summary);
     return summary;
   } catch (e) {

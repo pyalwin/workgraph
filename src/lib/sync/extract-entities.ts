@@ -19,9 +19,11 @@
  *
  * Pipeline position: runs in process.ts between chunking and embeddings.
  */
-import Anthropic from '@anthropic-ai/sdk';
+import { generateObject } from 'ai';
+import { z } from 'zod';
 import { getDb } from '../db';
 import { initSchema } from '../schema';
+import { getModel } from '../ai';
 import { getWorkspaceConfig, seedWorkspaceConfig, type OntologyEntityType } from '../workspace-config';
 
 export type EntityType = string;
@@ -35,57 +37,18 @@ interface ExtractedEntity {
   confidence?: number;
 }
 
-function buildExtractionTool(entityTypes: OntologyEntityType[]) {
-  return {
-    name: 'record_entities',
-    description:
-      'Record all named entities found in the provided text using the workspace-configured ontology. Avoid generic nouns unless they refer to a specific named concept. Include offsets so mentions can be grounded back to the text.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        entities: {
-          type: 'array',
-          description: 'All named entities mentioned in the text',
-          items: {
-            type: 'object',
-            properties: {
-              surface_form: {
-                type: 'string',
-                description: 'The exact substring as it appears in the text',
-              },
-              canonical_form: {
-                type: 'string',
-                description:
-                  'Normalized canonical name for the entity. Use the workspace ontology descriptions to choose a stable canonical form across aliases.',
-              },
-              entity_type: {
-                type: 'string',
-                enum: entityTypes.map((t) => t.id),
-                description: entityTypes
-                  .map((t) => `${t.id} = ${t.description}`)
-                  .join(' '),
-              },
-              start_offset: {
-                type: 'integer',
-                description: 'Character offset where surface_form starts in the text (0-indexed)',
-              },
-              end_offset: {
-                type: 'integer',
-                description: 'Character offset where surface_form ends (exclusive)',
-              },
-              confidence: {
-                type: 'number',
-                description: '0 to 1 — how confident you are in the entity_type classification',
-              },
-            },
-            required: ['surface_form', 'canonical_form', 'entity_type'],
-          },
-        },
-      },
-      required: ['entities'],
-    },
-  };
-}
+const ExtractionSchema = z.object({
+  entities: z.array(
+    z.object({
+      surface_form: z.string().describe('The exact substring as it appears in the text'),
+      canonical_form: z.string().describe('Normalized canonical name for the entity, stable across aliases'),
+      entity_type: z.string().describe('One of the configured workspace ontology entity-type IDs'),
+      start_offset: z.number().int().optional().describe('Character offset where surface_form starts (0-indexed)'),
+      end_offset: z.number().int().optional().describe('Character offset where surface_form ends (exclusive)'),
+      confidence: z.number().min(0).max(1).optional().describe('0–1 — confidence in the entity_type classification'),
+    }),
+  ).describe('All named entities mentioned in the text'),
+});
 
 function buildSystemPrompt(entityTypes: OntologyEntityType[]): string {
   const ontology = entityTypes.map((t) => {
@@ -93,7 +56,7 @@ function buildSystemPrompt(entityTypes: OntologyEntityType[]): string {
     return `- ${t.id}: ${t.description}${examples}`;
   }).join('\n');
 
-  return `You are an entity extraction tool for a configurable work-trace system. Read the provided text and call the record_entities tool with every named entity you find. Use offsets of surface_form so mentions can be grounded back to the text.
+  return `You are an entity extraction tool for a configurable work-trace system. Read the provided text and return every named entity you find. Use offsets of surface_form so mentions can be grounded back to the text.
 
 Workspace ontology:
 ${ontology}
@@ -106,13 +69,7 @@ Guidelines:
 - Skip self-references (Me, I, we, us) and random capitalized words.
 - Skip generic terms ("the API", "the database", "the file") unless context makes them a specific named entity.
 
-Call record_entities exactly once with all entities. Return no other text.`;
-}
-
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!client) client = new Anthropic();
-  return client;
+Return all entities in a single object with shape { entities: [...] }. Allowed entity_type values: ${entityTypes.map((t) => t.id).join(', ')}.`;
 }
 
 async function extractFromText(text: string): Promise<ExtractedEntity[]> {
@@ -125,31 +82,23 @@ async function extractFromText(text: string): Promise<ExtractedEntity[]> {
   const truncated = text.slice(0, 8000);
 
   try {
-    const response = await getClient().messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4000,
+    const { object } = await generateObject({
+      model: getModel('extract'),
+      maxOutputTokens: 4000,
       system: buildSystemPrompt(entityTypes),
-      tools: [buildExtractionTool(entityTypes)],
-      tool_choice: { type: 'tool', name: 'record_entities' },
-      messages: [{ role: 'user', content: truncated }],
+      schema: ExtractionSchema,
+      prompt: truncated,
     });
 
-    const toolUse = response.content.find((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
-    if (!toolUse || toolUse.name !== 'record_entities') return [];
-
-    const input = toolUse.input as { entities: ExtractedEntity[] };
-    const raw = Array.isArray(input?.entities) ? input.entities : [];
-
-    return raw
-      .filter(e => e && typeof e.surface_form === 'string' && typeof e.canonical_form === 'string')
-      .filter(e => allowed.has(e.entity_type))
-      .map(e => ({
+    return object.entities
+      .filter((e) => allowed.has(e.entity_type))
+      .map((e) => ({
         surface_form: e.surface_form.trim(),
         canonical_form: e.canonical_form.trim(),
         entity_type: e.entity_type,
-        start_offset: typeof e.start_offset === 'number' ? e.start_offset : undefined,
-        end_offset: typeof e.end_offset === 'number' ? e.end_offset : undefined,
-        confidence: typeof e.confidence === 'number' ? e.confidence : 0.8,
+        start_offset: e.start_offset,
+        end_offset: e.end_offset,
+        confidence: e.confidence ?? 0.8,
       }));
   } catch (err: any) {
     console.error(`  extract-entities error: ${err.message?.slice(0, 120)}`);

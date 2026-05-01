@@ -7,8 +7,9 @@
  * Sonnet reads the evolution and writes the decision trace. Stored on
  * workstreams.narrative and workstreams.timeline_events (JSON).
  */
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
 import { getDb } from '../db';
+import { getModel } from '../ai';
 import { listWorkstreams } from './assemble';
 import { getWorkspaceConfig } from '../workspace-config';
 
@@ -43,11 +44,6 @@ export interface WorkstreamSummaryPayload {
   timeline_events: TimelineEvent[];
 }
 
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!client) client = new Anthropic();
-  return client;
-}
 
 function loadWSItems(wsId: string): WSItem[] {
   return getDb().prepare(`
@@ -137,13 +133,13 @@ Return ONLY valid JSON, no markdown fences, no commentary.`;
 
 async function callSonnet(prompt: { system: string; user: string }): Promise<WorkstreamSummaryPayload | null> {
   try {
-    const response = await getClient().messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
+    const { text: rawText } = await generateText({
+      model: getModel('narrative'),
+      maxOutputTokens: 4000,
       system: prompt.system,
-      messages: [{ role: 'user', content: prompt.user }],
+      prompt: prompt.user,
     });
-    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    const text = rawText.trim();
     if (!text) return null;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;

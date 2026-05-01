@@ -1,6 +1,7 @@
+import { generateText } from 'ai';
 import { getDb } from '../db';
 import { initSchema } from '../schema';
-import Anthropic from '@anthropic-ai/sdk';
+import { getModel } from '../ai';
 import { getWorkspaceConfig, seedWorkspaceConfig } from '../workspace-config';
 
 export type TraceRole = string | null;
@@ -28,11 +29,6 @@ interface EnrichmentResult {
   goals: string[];
 }
 
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!client) client = new Anthropic();
-  return client;
-}
 
 function buildSystemPrompt(): string {
   const db = getDb();
@@ -98,14 +94,13 @@ async function callHaiku(
   ].filter(Boolean).join('\n\n');
 
   try {
-    const response = await getClient().messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 600,
+    const { text: rawText } = await generateText({
+      model: getModel('enrich'),
+      maxOutputTokens: 600,
       system: systemPrompt,
-      messages: [{ role: 'user', content }],
+      prompt: content,
     });
-
-    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    const text = rawText.trim();
     if (!text) return null;
 
     const jsonMatch = text.match(/\{[\s\S]*\}/);

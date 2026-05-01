@@ -5,16 +5,11 @@
  * returns explicit sections: Context, Decision, Rationale, Outcome,
  * Traceability. Each with strict size caps so the output is uniform.
  */
-import Anthropic from '@anthropic-ai/sdk';
+import { generateText } from 'ai';
 import { getDb } from '../db';
+import { getModel } from '../ai';
 import { getDecisionItems, listDecisions, type DecisionItem, type DecisionSummary } from './extract';
 import { getWorkspaceConfig } from '../workspace-config';
-
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!client) client = new Anthropic();
-  return client;
-}
 
 export interface TraceEntry {
   item_id: string;
@@ -105,13 +100,13 @@ Rules:
 
 async function callSonnet(prompt: { system: string; user: string }): Promise<DecisionStructuredSummary | null> {
   try {
-    const response = await getClient().messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 3000,
+    const { text: rawText } = await generateText({
+      model: getModel('decision'),
+      maxOutputTokens: 3000,
       system: prompt.system,
-      messages: [{ role: 'user', content: prompt.user }],
+      prompt: prompt.user,
     });
-    const text = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '';
+    const text = rawText.trim();
     if (!text) return null;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
