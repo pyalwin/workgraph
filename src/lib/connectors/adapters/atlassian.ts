@@ -159,13 +159,40 @@ export const atlassianConnector: MCPConnector = {
     if (!raw?.key) return null;
     const f = raw.fields ?? {};
     const desc = typeof f.description === 'string' ? f.description : '';
-    const comments: any[] = f.comment?.comments || f.comments || [];
+    const rawComments: any[] = f.comment?.comments || f.comments || [];
+
+    // Normalize comments into the shape chunkJira reads from metadata.comments.
+    // Phase 1.3 fix: ingestion now writes this array — previously the chunker
+    // would never produce per-comment chunks because the field was missing.
+    const comments = rawComments.map((c) => ({
+      id: c.id ?? null,
+      body: typeof c.body === 'string' ? c.body : '',
+      author: c.author?.displayName || c.updateAuthor?.displayName || null,
+      created: c.created || null,
+    }));
+
     const commentText = comments.length
-      ? '\n\n---\n**Comments:**\n\n' + comments.map((c) => {
-          const author = c.author?.displayName || c.updateAuthor?.displayName || 'Unknown';
-          return `**${author}** (${c.created || ''}):\n${typeof c.body === 'string' ? c.body : ''}\n`;
-        }).join('\n')
+      ? '\n\n---\n**Comments:**\n\n' +
+        comments
+          .map((c) => `**${c.author ?? 'Unknown'}** (${c.created ?? ''}):\n${c.body}\n`)
+          .join('\n')
       : '';
+
+    // Phase 1.2 — graph-qualifying metadata. Adds entity_key (project), period
+    // (year/month/day from updated_at preferred, else created_at), and
+    // last_commented_at for the anomaly heuristics.
+    const projectKey: string | null = f.project?.key ?? raw.key.split('-')[0] ?? null;
+    const periodSource = f.updated || f.created || new Date().toISOString();
+    const periodDate = new Date(periodSource);
+    const period = Number.isNaN(periodDate.getTime())
+      ? null
+      : {
+          year: periodDate.getUTCFullYear(),
+          month: periodDate.getUTCMonth() + 1,
+          day: periodDate.getUTCDate(),
+        };
+    const lastCommentedAt =
+      comments.length > 0 ? comments[comments.length - 1]!.created : null;
 
     return {
       source: 'jira',
@@ -178,15 +205,38 @@ export const atlassianConnector: MCPConnector = {
       priority: f.priority?.name?.toLowerCase() || null,
       url: `${resolveBaseUrl({ jiraUrl: undefined }, process.env)}/browse/${raw.key}`,
       metadata: {
+        // Connector-specific fields (existing)
         labels: f.labels || [],
         components: f.components?.map((c: any) => c.name) || [],
         sprint: f.sprint?.name || null,
+        sprint_state: f.sprint?.state || null,
         reporter: f.reporter?.displayName || null,
-        project: f.project?.key || null,
+        project: projectKey,
         parent_key: f.parent?.key || null,
         parent_type: f.parent?.fields?.issuetype?.name || null,
         resolution: f.resolution?.name || null,
+
+        // Comments — chunkJira reads from here (Phase 1.3 bugfix)
+        comments,
         comment_count: comments.length,
+        last_commented_at: lastCommentedAt,
+
+        // Graph-qualifying metadata (Phase 1.2)
+        entity_key: projectKey,
+        period,
+
+        // is_mine / assigned_to_me are populated post-ingest by the alias
+        // resolver (we don't know the auth user at this stage).
+        assignees_raw: [
+          f.assignee?.displayName,
+          f.assignee?.emailAddress,
+          f.assignee?.accountId,
+        ].filter(Boolean),
+        reporters_raw: [
+          f.reporter?.displayName,
+          f.reporter?.emailAddress,
+          f.reporter?.accountId,
+        ].filter(Boolean),
       },
       created_at: f.created || new Date().toISOString(),
       updated_at: f.updated || null,
