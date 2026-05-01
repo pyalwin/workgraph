@@ -10,7 +10,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Powered by Claude](https://img.shields.io/badge/Powered%20by-Claude-D97757?logo=anthropic&logoColor=white)](https://anthropic.com/)
 
-[**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Connectors**](#-connectors) · [**Modules**](#-modules) · [**Contributing**](#-contributing)
+[**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Contributing**](#-contributing)
 
 </div>
 
@@ -32,9 +32,6 @@ This project is **100% open source** under the [MIT License](#-license). Fork it
 - [Tech Stack](#-tech-stack)
 - [Quickstart](#-quickstart)
 - [Configuration](#-configuration)
-- [Connectors](#-connectors)
-- [Modules](#-modules)
-- [CLI Scripts](#-cli-scripts)
 - [Project Structure](#-project-structure)
 - [Data Flow](#-data-flow)
 - [Privacy & Security](#-privacy--security)
@@ -138,71 +135,6 @@ Per-connector OAuth client IDs and secrets are configured in the **Settings → 
 
 ---
 
-## Connectors
-
-| Source | Auth | Adapter |
-|---|---|---|
-| Jira / Confluence | OAuth (Atlassian) | [`atlassian.ts`](src/lib/connectors/adapters/atlassian.ts) |
-| Confluence (standalone) | OAuth | [`confluence.ts`](src/lib/connectors/adapters/confluence.ts) |
-| Notion | OAuth | [`notion.ts`](src/lib/connectors/adapters/notion.ts) |
-| Slack | OAuth | [`slack.ts`](src/lib/connectors/adapters/slack.ts) |
-| GitHub | OAuth | [`github.ts`](src/lib/connectors/adapters/github.ts) |
-| GitLab | OAuth | [`gitlab.ts`](src/lib/connectors/adapters/gitlab.ts) |
-| Linear | OAuth | [`linear.ts`](src/lib/connectors/adapters/linear.ts) |
-| Granola (meetings) | MCP | [`granola.ts`](src/lib/connectors/adapters/granola.ts) |
-| Google Calendar | OAuth | [`gcal.ts`](src/lib/connectors/adapters/gcal.ts) |
-| Google Drive | OAuth | [`gdrive.ts`](src/lib/connectors/adapters/gdrive.ts) |
-| Microsoft Teams | OAuth | [`teams.ts`](src/lib/connectors/adapters/teams.ts) |
-
-Adding a new source means implementing one adapter — see [`src/lib/connectors/types.ts`](src/lib/connectors/types.ts) for the contract.
-
----
-
-## Modules
-
-The dashboard is split into focused modules, each backed by its own routes and queries:
-
-### Overview (`/`)
-At-a-glance summary of recent activity, open decisions, and stale items.
-
-### Knowledge Graph (`/knowledge`)
-Interactive force-directed graph of items and their links. Filter by source, type, goal, or workstream.
-
-### Projects (`/projects`)
-Per-project pages with health snapshots, ticket lists, velocity charts, and Claude Haiku-generated summaries (cached daily, refreshable on demand).
-
-### Metrics (`/metrics`)
-Cross-source velocity, cycle time, deployment frequency, and adoption charts.
-
-### Decisions
-First-class extraction and classification of "decided" vs. "asked-but-not-shipped" moments from threads and meetings.
-
-### Workstreams
-Connected components in the graph, surfaced as a single coherent narrative written by Claude Sonnet.
-
-### Settings (`/settings`)
-Connector management, OAuth flows, sync triggers, and workspace configuration.
-
----
-
-## CLI Scripts
-
-All scripts live in `scripts/` and run via `bun scripts/<name>.ts` (or `tsx scripts/<name>.ts`).
-
-| Script | Purpose |
-|---|---|
-| `init-db.ts` | Create / migrate the schema (idempotent) |
-| `gen-secret.ts` | Generate a `WORKGRAPH_SECRET_KEY` |
-| `sync-jira.ts` · `sync-slack.ts` · `sync-notion.ts` · `sync-github.ts` · `sync-gmail.ts` · `sync-meetings.ts` | Per-source sync |
-| `sync-mcp.ts` | Sync via active MCP tools |
-| `process.ts` | Run the full pipeline (enrich → extract → embed → link → classify) |
-| `run-sync.sh` | Orchestrator that runs all syncs end-to-end |
-| `assemble-reingest.ts` | Rebuild workstreams from current items |
-| `*-validate.ts` | Sanity checks for each pipeline stage |
-| `orphan-diag.ts` | Find items with no cross-references |
-
----
-
 ## Project Structure
 
 ```
@@ -287,7 +219,7 @@ Have an idea? [Open an issue](https://github.com/pyalwin/workgraph/issues/new) o
 
 ### Good first issues
 
-- Adding a new connector — pick a source not yet in [the list](#-connectors), implement the adapter contract.
+- Adding a new connector — implement the adapter contract in [`src/lib/connectors/types.ts`](src/lib/connectors/types.ts).
 - Improving chunking strategies for long documents.
 - Adding tests (the project is currently test-light by design — help us change that).
 - UI polish in any module.
