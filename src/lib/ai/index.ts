@@ -29,14 +29,26 @@ const TASK_MODELS: Record<AITask, string> = {
  * silently to env so the runtime still works.
  */
 function resolveOpenRouterCredentials(): { apiKey?: string; baseURL?: string } {
-  let apiKey: string | undefined = process.env.OPENROUTER_API_KEY;
-  let baseURL: string | undefined = process.env.OPENROUTER_BASE_URL;
+  let apiKey: string | undefined = process.env.OPENROUTER_API_KEY?.trim();
+  let baseURL: string | undefined = process.env.OPENROUTER_BASE_URL?.trim();
+  let source: 'env' | 'db' | 'none' = apiKey ? 'env' : 'none';
   try {
     const stored = getProviderConfig('openrouter');
-    if (stored?.apiKey) apiKey = stored.apiKey;
-    if (stored?.baseUrl) baseURL = stored.baseUrl;
-  } catch {
-    // DB or crypto unavailable — env-only fallback
+    if (stored?.apiKey) {
+      // Trim — pasted keys often have trailing whitespace or newlines that
+      // break the Authorization header.
+      apiKey = stored.apiKey.trim();
+      source = 'db';
+    }
+    if (stored?.baseUrl) baseURL = stored.baseUrl.trim();
+  } catch (err) {
+    // DB or crypto unavailable — env-only fallback. Surface the why so
+    // it doesn't get diagnosed as "Missing Authentication header" later.
+    console.warn(`[ai] getProviderConfig('openrouter') failed:`, (err as Error).message);
+  }
+
+  if (!apiKey) {
+    console.warn(`[ai] No OpenRouter key resolved — source=${source}. Set one in Settings → AI or via OPENROUTER_API_KEY.`);
   }
   return { apiKey, baseURL };
 }
