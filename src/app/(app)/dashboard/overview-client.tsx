@@ -65,12 +65,13 @@ export function OverviewClient({
 }: Props) {
   const { state, setState } = useWorkgraphState();
   const [drawer, setDrawer] = useState<DrawerPayload | null>(null);
-  const role = ROLES[state.role];
+  const role = ROLES[state.role] ?? Object.values(ROLES)[0];
+  const roleLabel = role?.label ?? 'Workspace User';
 
   return (
     <>
       <div className="page">
-        <Greeting role={role.label} meta={`${totalItems} items · ${totalDecisions} decisions · last sync ${lastSeenLabel}`} />
+        <Greeting role={roleLabel} meta={`${totalItems} items · ${totalDecisions} decisions · last sync ${lastSeenLabel}`} />
         <VariationBar
           value={state.variation}
           onChange={(v) => setState({ variation: v })}
