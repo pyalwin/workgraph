@@ -15,6 +15,10 @@ function isCacheStale(generatedAt: string | null): boolean {
   return age > CACHE_TTL_MS;
 }
 
+// Background regeneration registry — prevents two parallel regens for the
+// same project key. Resolves after the AI call writes the cache.
+const inFlight = new Map<string, Promise<string>>();
+
 export async function getOrGenerateSummary(projectKey: string, projectName: string): Promise<string> {
   const db = getDb();
 
@@ -23,9 +27,59 @@ export async function getOrGenerateSummary(projectKey: string, projectName: stri
     'SELECT recap, summary_generated_at FROM project_summaries WHERE project_key = ?'
   ).get(projectKey) as SummaryCache | undefined;
 
+  // Hot cache — return as-is.
   if (cached?.recap && !isCacheStale(cached.summary_generated_at)) {
     return cached.recap;
   }
+
+  // Stale cache — return what we have NOW and refresh in the background.
+  // The user gets an instant page; the next reload sees the fresh value.
+  if (cached?.recap) {
+    void backgroundRegen(projectKey, projectName);
+    return cached.recap;
+  }
+
+  // Cold cache — return a computed fallback immediately and kick off
+  // generation in the background. Avoids a 10-30s blocking AI call on
+  // first project load.
+  void backgroundRegen(projectKey, projectName);
+  return computeQuickFallback(projectKey, projectName);
+}
+
+function computeQuickFallback(projectKey: string, projectName: string): string {
+  const db = getDb();
+  try {
+    const counts = db.prepare(`
+      SELECT
+        COUNT(*) AS total,
+        SUM(CASE WHEN status IN ('done','closed','resolved') THEN 1 ELSE 0 END) AS done
+      FROM work_items
+      WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
+    `).get(projectKey) as { total: number; done: number };
+    const pct = counts.total > 0 ? Math.round((counts.done / counts.total) * 100) : 0;
+    return `**Generating summary…** ${counts.total} tickets tracked (${counts.done} done, ${pct}%). Refresh in a moment for the AI-written health snapshot.`;
+  } catch {
+    return `**Generating summary for ${projectName}…** Refresh in a moment.`;
+  }
+}
+
+async function backgroundRegen(projectKey: string, projectName: string): Promise<string> {
+  const existing = inFlight.get(projectKey);
+  if (existing) return existing;
+  const promise = generateAndStore(projectKey, projectName)
+    .catch((err) => {
+      console.error(`[project-summary] regen failed for ${projectKey}:`, err);
+      return '';
+    })
+    .finally(() => {
+      inFlight.delete(projectKey);
+    });
+  inFlight.set(projectKey, promise);
+  return promise;
+}
+
+async function generateAndStore(projectKey: string, projectName: string): Promise<string> {
+  const db = getDb();
 
   // Gather context for the summary
   const tickets = db.prepare(`
@@ -100,16 +154,17 @@ Rules:
     storeSummary(projectKey, projectName, summary);
     return summary;
   } catch (e) {
-    // If API fails, return cached or fallback
-    return cached?.recap || `${projectName}: ${tickets.length} tickets completed recently.`;
+    // If API fails, return computed fallback
+    return `${projectName}: ${tickets.length} tickets completed recently.`;
   }
 }
 
 export async function forceRegenerateSummary(projectKey: string, projectName: string): Promise<string> {
-  // Clear the timestamp to force regeneration
+  // Skip the cache entirely and run synchronously — the explicit refresh
+  // button is the user opting into the wait.
   const db = getDb();
   db.prepare('UPDATE project_summaries SET summary_generated_at = NULL WHERE project_key = ?').run(projectKey);
-  return getOrGenerateSummary(projectKey, projectName);
+  return generateAndStore(projectKey, projectName);
 }
 
 function storeSummary(projectKey: string, projectName: string, recap: string) {

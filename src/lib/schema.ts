@@ -393,7 +393,27 @@ export function initSchema() {
   migrateWorkspaceConfig();
   migrateConnectorConfigs();
   migrateGoals();
+  createMetadataIndexes();
   createVectorTables();
+}
+
+function createMetadataIndexes() {
+  const db = getDb();
+  // Expression indexes on common JSON paths into work_items.metadata.
+  // Hot-path queries on the project page filter by project / entity_key
+  // and previously full-scanned the table.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_work_items_meta_project
+      ON work_items(json_extract(metadata, '$.project'))
+      WHERE source = 'jira';
+
+    CREATE INDEX IF NOT EXISTS idx_work_items_meta_entity_key
+      ON work_items(json_extract(metadata, '$.entity_key'));
+
+    CREATE INDEX IF NOT EXISTS idx_work_items_meta_is_mine
+      ON work_items(json_extract(metadata, '$.is_mine'))
+      WHERE json_extract(metadata, '$.is_mine') = 1;
+  `);
 }
 
 function migrateGoals() {
