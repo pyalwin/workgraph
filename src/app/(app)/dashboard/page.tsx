@@ -1,6 +1,7 @@
 import { getDb } from '@/lib/db';
 import { initSchema } from '@/lib/schema';
 import { OverviewClient, type Narrative, type PillarSummary, type DigestSnapshot, type FocusCard } from './overview-client';
+import { TrackerSection } from './tracker';
 
 export const dynamic = 'force-dynamic';
 
@@ -238,14 +239,19 @@ export default function OverviewPage() {
   const focus = buildFocus(data.goals, data.recent);
 
   return (
-    <OverviewClient
-      totalItems={data.totalItems}
-      totalDecisions={data.totalDecisions}
-      lastSeenLabel={relWhen(data.lastSeen)}
-      narratives={narratives}
-      pillars={pillars}
-      digest={digest}
-      focus={focus}
-    />
+    <>
+      {/* @ts-expect-error — Server Component returning JSX is fine; React's typing
+          gets cranky when we await Server Components mid-tree. */}
+      <TrackerSection />
+      <OverviewClient
+        totalItems={data.totalItems}
+        totalDecisions={data.totalDecisions}
+        lastSeenLabel={relWhen(data.lastSeen)}
+        narratives={narratives}
+        pillars={pillars}
+        digest={digest}
+        focus={focus}
+      />
+    </>
   );
 }

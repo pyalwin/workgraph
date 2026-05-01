@@ -3435,3 +3435,192 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
     align-items: flex-start;
   }
 }
+
+/* ─── Per-user tracker (Phase 2.5) ─────────────────────────────── */
+
+.tracker {
+  margin: 1.5rem 0 2.5rem;
+}
+
+.tracker-head h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.25rem;
+}
+
+.tracker-sub {
+  color: var(--ink-3, #53504a);
+  font-size: 0.95rem;
+  margin: 0 0 1.5rem;
+}
+
+.tracker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.tracker-card {
+  padding: 1.1rem 1.2rem 1.25rem;
+  background: var(--paper, #fff);
+  border: 1px solid var(--rule, rgba(21, 20, 15, 0.08));
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.tracker-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.tracker-card-head h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-2, #2a2822);
+}
+
+.tracker-card-count {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--ink-4, #7a7670);
+}
+
+.tracker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  font-size: 0.88rem;
+}
+
+.tracker-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  line-height: 1.4;
+  color: var(--ink-2, #2a2822);
+}
+
+.tracker-item-link {
+  display: flex;
+  gap: 0.4rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.tracker-item-key {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--ink-4, #7a7670);
+  flex-shrink: 0;
+}
+
+.tracker-item-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tracker-item-from {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--ink-4, #7a7670);
+}
+
+.tracker-empty {
+  color: var(--ink-4, #7a7670);
+  font-size: 0.85rem;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.tracker-pri {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.1rem 0.2rem;
+  border-radius: 3px;
+  text-transform: uppercase;
+  background: var(--bone-2, #f3efe7);
+  color: var(--ink-3, #53504a);
+}
+
+.tracker-pri-p0 { background: #fee2e2; color: #b91c1c; }
+.tracker-pri-p1 { background: #fef3c7; color: #92400e; }
+.tracker-pri-p2 { background: #dbeafe; color: #1e3a8a; }
+
+/* Goals */
+.tracker-goal {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+}
+
+.tracker-goal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.88rem;
+}
+
+.tracker-goal-pct {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--ink-3, #53504a);
+}
+
+.tracker-goal-bar {
+  height: 4px;
+  background: var(--bone-2, #f3efe7);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.tracker-goal-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #d97757, #f59e0b);
+  border-radius: 999px;
+  transition: width 240ms ease;
+}
+
+.tracker-goal-meta {
+  font-size: 0.75rem;
+  color: var(--ink-4, #7a7670);
+}
+
+/* Anomalies */
+.tracker-anomaly-kind {
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  background: #fef3c7;
+  color: #92400e;
+  white-space: nowrap;
+}
+
+.tracker-anomaly-kind.tracker-anomaly-stale { background: #f3f4f6; color: #4b5563; }
+.tracker-anomaly-kind.tracker-anomaly-churning { background: #fce7f3; color: #9d174d; }
+.tracker-anomaly-kind.tracker-anomaly-deadline_risk { background: #fee2e2; color: #b91c1c; }
+.tracker-anomaly-kind.tracker-anomaly-priority_inversion { background: #ede9fe; color: #5b21b6; }
+.tracker-anomaly-kind.tracker-anomaly-goal_drift { background: #fef3c7; color: #92400e; }
+.tracker-anomaly-kind.tracker-anomaly-owner_gap { background: #f3f4f6; color: #4b5563; }
+.tracker-anomaly-kind.tracker-anomaly-scope_creep { background: #ffedd5; color: #9a3412; }
