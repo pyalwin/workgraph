@@ -1,21 +1,74 @@
+<div align="center">
+
 # WorkGraph
 
-**Local-first work intelligence.** Pulls your tickets, docs, meetings, and chat into a single SQLite graph, cross-references them, and lets you explore the connections — visually, through summaries, and with Claude in the loop.
+### Local-first work intelligence — your tickets, docs, meetings, and chat, unified.
 
-Everything runs on your machine. Your data, your keys, your laptop.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Open Source](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-ff69b4.svg)](https://github.com/pyalwin/workgraph)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/pyalwin/workgraph/pulls)
+[![GitHub last commit](https://img.shields.io/github/last-commit/pyalwin/workgraph)](https://github.com/pyalwin/workgraph/commits/main)
+[![GitHub issues](https://img.shields.io/github/issues/pyalwin/workgraph)](https://github.com/pyalwin/workgraph/issues)
+[![GitHub stars](https://img.shields.io/github/stars/pyalwin/workgraph?style=social)](https://github.com/pyalwin/workgraph/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/pyalwin/workgraph?style=social)](https://github.com/pyalwin/workgraph/network/members)
+
+[![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js&logoColor=white)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
+[![Anthropic Claude](https://img.shields.io/badge/Powered%20by-Claude-D97757?logo=anthropic&logoColor=white)](https://anthropic.com/)
+[![MCP](https://img.shields.io/badge/MCP-supported-7c3aed)](https://modelcontextprotocol.io/)
+[![Bun](https://img.shields.io/badge/Bun-runtime-F9F1E1?logo=bun&logoColor=black)](https://bun.sh/)
+
+[**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Architecture**](#-architecture) · [**Connectors**](#-connectors) · [**Contributing**](#-contributing)
+
+</div>
 
 ---
 
-## What it does
+## Why WorkGraph
 
-You probably ship work that lives across a dozen tools. A Jira ticket, a Notion design doc, a Slack thread debating it, a Granola meeting where the call was made, a GitHub PR that landed it. WorkGraph stitches those scattered artifacts back into the thing they actually were: one piece of work.
+You probably ship work that lives across a dozen tools. A Jira ticket, a Notion design doc, a Slack thread debating it, a Granola meeting where the call was made, a GitHub PR that landed it. The signal is everywhere; the picture is nowhere.
 
-- **Ingest** from Jira, Notion, Slack, GitHub/GitLab, Linear, Granola, Confluence, Google Calendar/Drive, and Teams via OAuth or MCP.
-- **Cross-reference** items by issue keys, URLs, titles, and embeddings — so a meeting transcript automatically links to the ticket it was about.
-- **Classify** items into strategic goals you define.
-- **Summarize** workstreams (clusters of related items) with Claude, surfacing decisions made and decisions still open.
-- **Visualize** the resulting graph as a force-directed network you can pan, zoom, and click through.
-- **Track** project health, velocity, cycle time, and adoption metrics.
+**WorkGraph stitches those scattered artifacts back into the thing they actually were: one piece of work.** Every connector runs against your account. Every byte of data lives on your laptop. Every embedding is computed, stored, and queried locally. The only outbound traffic is to the source APIs you choose and to Anthropic for summarization.
+
+This project is **100% open source** under the [MIT License](#-license). Fork it, run it, extend it, or just read the code to see how it works.
+
+---
+
+## Table of Contents
+
+- [Features](#-features)
+- [Architecture](#-architecture)
+- [Tech Stack](#-tech-stack)
+- [Quickstart](#-quickstart)
+- [Configuration](#-configuration)
+- [Connectors](#-connectors)
+- [Modules](#-modules)
+- [CLI Scripts](#-cli-scripts)
+- [Project Structure](#-project-structure)
+- [Data Flow](#-data-flow)
+- [Privacy & Security](#-privacy--security)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Acknowledgments](#-acknowledgments)
+
+---
+
+## Features
+
+- **Multi-source ingest.** Eleven connectors out of the box: Jira, Confluence, Notion, Slack, GitHub, GitLab, Linear, Granola, Google Calendar, Google Drive, Microsoft Teams.
+- **Cross-referencing.** Items are linked by issue keys, URL matches, title similarity, and vector neighbors — so a meeting transcript automatically connects to the ticket it was about.
+- **Goal classification.** Define strategic goals; items are tagged automatically using keywords plus embeddings.
+- **Workstream summaries.** Connected components in the graph become workstreams, narrated by Claude Sonnet.
+- **Decision extraction.** First-class detection of decisions made vs. decisions still open, pulled from threads and meetings.
+- **Knowledge graph viz.** Pan, zoom, and click through a force-directed network of items and links.
+- **Project pages.** Per-project health snapshots, ticket lists, velocity, and Haiku-generated daily summaries.
+- **Metrics dashboard.** Cross-source velocity, cycle time, deployment frequency, adoption charts.
+- **OAuth + MCP.** Secure OAuth 2.0 flows for SaaS sources, plus Model Context Protocol support for Claude-native tools.
+- **Local-first.** SQLite + sqlite-vec. Encrypted token storage. No analytics, no telemetry, no cloud.
 
 ---
 
@@ -57,26 +110,35 @@ You probably ship work that lives across a dozen tools. A Jira ticket, a Notion 
 
 ---
 
-## Tech stack
+## Tech Stack
 
 | Layer | Choice |
 |---|---|
-| Framework | Next.js 14 (App Router) + React 18 |
-| Language | TypeScript |
-| Storage | SQLite via `better-sqlite3` + `sqlite-vec` for vector search |
-| LLM | Anthropic Claude (`@anthropic-ai/sdk`) |
-| Tool integration | Model Context Protocol (`@modelcontextprotocol/sdk`) |
-| UI | Tailwind CSS + Radix UI primitives |
-| Graph viz | `react-force-graph-2d` |
-| Runtime | Node 20+ / Bun |
+| Framework | [Next.js 14](https://nextjs.org/) (App Router) + [React 18](https://react.dev/) |
+| Language | [TypeScript 5](https://www.typescriptlang.org/) |
+| Storage | [SQLite](https://sqlite.org/) via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) + [`sqlite-vec`](https://github.com/asg017/sqlite-vec) for vector search |
+| LLM | [Anthropic Claude](https://anthropic.com/) (Opus, Sonnet, Haiku) |
+| Tool integration | [Model Context Protocol](https://modelcontextprotocol.io/) |
+| UI | [Tailwind CSS](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/) primitives |
+| Graph viz | [`react-force-graph-2d`](https://github.com/vasturiano/react-force-graph) |
+| Markdown | [`react-markdown`](https://github.com/remarkjs/react-markdown) + [`remark-gfm`](https://github.com/remarkjs/remark-gfm) |
+| Runtime | Node 20+ / [Bun](https://bun.sh/) |
 
 ---
 
 ## Quickstart
 
-### 1. Install
+### Prerequisites
+
+- Node.js 20+ or Bun 1.x
+- An [Anthropic API key](https://console.anthropic.com/)
+- OAuth credentials for whichever sources you want to connect (optional — you can start with just MCP-backed sources)
+
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/pyalwin/workgraph.git
+cd workgraph
 bun install
 # or: npm install
 ```
@@ -86,20 +148,14 @@ bun install
 Create `.env.local` in the project root:
 
 ```bash
-# Claude — required for summaries, classification, decision extraction
+# Required — Claude API for summaries, classification, decision extraction
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Encryption key for stored OAuth tokens — generate one
-WORKGRAPH_SECRET_KEY=$(bun scripts/gen-secret.ts)
+# Required — encryption key for stored OAuth tokens
+WORKGRAPH_SECRET_KEY=<generate with: bun scripts/gen-secret.ts>
 
-# OAuth callback base — match this in your provider apps
+# Required — base URL for OAuth redirects (must match provider apps)
 OAUTH_REDIRECT_BASE_URL=http://localhost:3000
-```
-
-Generate a fresh secret key:
-
-```bash
-bun scripts/gen-secret.ts
 ```
 
 ### 3. Initialize the database
@@ -108,7 +164,7 @@ bun scripts/gen-secret.ts
 bun scripts/init-db.ts
 ```
 
-This is idempotent — safe to re-run any time.
+Idempotent — safe to re-run any time.
 
 ### 4. Start the dev server
 
@@ -116,7 +172,19 @@ This is idempotent — safe to re-run any time.
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), wire up connectors under **Settings**, and run your first sync.
+Open <http://localhost:3000>, wire up connectors under **Settings**, and run your first sync.
+
+---
+
+## Configuration
+
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | Claude API key — used for enrichment, summaries, decisions, classification |
+| `WORKGRAPH_SECRET_KEY` | yes | 32-byte hex key (AES-GCM) for encrypting OAuth tokens at rest |
+| `OAUTH_REDIRECT_BASE_URL` | yes | Public-facing base URL for OAuth callbacks (e.g. `http://localhost:3000`) |
+
+Per-connector OAuth client IDs and secrets are configured in the **Settings → Connectors** UI and stored encrypted in the database.
 
 ---
 
@@ -124,36 +192,50 @@ Open [http://localhost:3000](http://localhost:3000), wire up connectors under **
 
 | Source | Auth | Adapter |
 |---|---|---|
-| Jira / Confluence | OAuth (Atlassian) | `src/lib/connectors/adapters/atlassian.ts` |
-| Notion | OAuth | `notion.ts` |
-| Slack | OAuth | `slack.ts` |
-| GitHub | OAuth | `github.ts` |
-| GitLab | OAuth | `gitlab.ts` |
-| Linear | OAuth | `linear.ts` |
-| Granola (meetings) | MCP | `granola.ts` |
-| Google Calendar | OAuth | `gcal.ts` |
-| Google Drive | OAuth | `gdrive.ts` |
-| Microsoft Teams | OAuth | `teams.ts` |
+| Jira / Confluence | OAuth (Atlassian) | [`atlassian.ts`](src/lib/connectors/adapters/atlassian.ts) |
+| Confluence (standalone) | OAuth | [`confluence.ts`](src/lib/connectors/adapters/confluence.ts) |
+| Notion | OAuth | [`notion.ts`](src/lib/connectors/adapters/notion.ts) |
+| Slack | OAuth | [`slack.ts`](src/lib/connectors/adapters/slack.ts) |
+| GitHub | OAuth | [`github.ts`](src/lib/connectors/adapters/github.ts) |
+| GitLab | OAuth | [`gitlab.ts`](src/lib/connectors/adapters/gitlab.ts) |
+| Linear | OAuth | [`linear.ts`](src/lib/connectors/adapters/linear.ts) |
+| Granola (meetings) | MCP | [`granola.ts`](src/lib/connectors/adapters/granola.ts) |
+| Google Calendar | OAuth | [`gcal.ts`](src/lib/connectors/adapters/gcal.ts) |
+| Google Drive | OAuth | [`gdrive.ts`](src/lib/connectors/adapters/gdrive.ts) |
+| Microsoft Teams | OAuth | [`teams.ts`](src/lib/connectors/adapters/teams.ts) |
 
-Adding a new source means implementing one adapter — see `src/lib/connectors/types.ts` for the contract.
+Adding a new source means implementing one adapter — see [`src/lib/connectors/types.ts`](src/lib/connectors/types.ts) for the contract.
 
 ---
 
 ## Modules
 
-The dashboard is split into a few focused modules, each backed by its own routes and queries:
+The dashboard is split into focused modules, each backed by its own routes and queries:
 
-- **Overview** (`/`) — at-a-glance summary of recent activity, open decisions, and stale items.
-- **Knowledge graph** (`/knowledge`) — interactive force-directed graph of items and their links, with filtering by source, type, and goal.
-- **Projects** (`/projects`) — per-project detail pages with health snapshots, ticket lists, velocity, and Haiku-generated summaries (cached daily).
-- **Metrics** (`/metrics`) — cross-source velocity, cycle time, deployment frequency, and adoption charts.
-- **Decisions** — first-class extraction of "decided" vs. "asked-but-not-shipped" moments from threads and meetings.
-- **Workstreams** — clusters of cross-referenced items, summarized as a single narrative by Claude Sonnet.
-- **Settings** (`/settings`) — connector management, OAuth flows, sync triggers.
+### Overview (`/`)
+At-a-glance summary of recent activity, open decisions, and stale items.
+
+### Knowledge Graph (`/knowledge`)
+Interactive force-directed graph of items and their links. Filter by source, type, goal, or workstream.
+
+### Projects (`/projects`)
+Per-project pages with health snapshots, ticket lists, velocity charts, and Claude Haiku-generated summaries (cached daily, refreshable on demand).
+
+### Metrics (`/metrics`)
+Cross-source velocity, cycle time, deployment frequency, and adoption charts.
+
+### Decisions
+First-class extraction and classification of "decided" vs. "asked-but-not-shipped" moments from threads and meetings.
+
+### Workstreams
+Connected components in the graph, surfaced as a single coherent narrative written by Claude Sonnet.
+
+### Settings (`/settings`)
+Connector management, OAuth flows, sync triggers, and workspace configuration.
 
 ---
 
-## CLI scripts
+## CLI Scripts
 
 All scripts live in `scripts/` and run via `bun scripts/<name>.ts` (or `tsx scripts/<name>.ts`).
 
@@ -161,7 +243,7 @@ All scripts live in `scripts/` and run via `bun scripts/<name>.ts` (or `tsx scri
 |---|---|
 | `init-db.ts` | Create / migrate the schema (idempotent) |
 | `gen-secret.ts` | Generate a `WORKGRAPH_SECRET_KEY` |
-| `sync-jira.ts` / `sync-slack.ts` / `sync-notion.ts` / `sync-github.ts` / `sync-gmail.ts` / `sync-meetings.ts` | Per-source sync |
+| `sync-jira.ts` · `sync-slack.ts` · `sync-notion.ts` · `sync-github.ts` · `sync-gmail.ts` · `sync-meetings.ts` | Per-source sync |
 | `sync-mcp.ts` | Sync via active MCP tools |
 | `process.ts` | Run the full pipeline (enrich → extract → embed → link → classify) |
 | `run-sync.sh` | Orchestrator that runs all syncs end-to-end |
@@ -171,7 +253,7 @@ All scripts live in `scripts/` and run via `bun scripts/<name>.ts` (or `tsx scri
 
 ---
 
-## Project structure
+## Project Structure
 
 ```
 workgraph/
@@ -204,11 +286,11 @@ workgraph/
 
 ---
 
-## How data flows
+## Data Flow
 
 1. **Sync** — A connector adapter fetches new/updated items from a source and writes them to `work_items` (deduped by `(source, source_id)`).
 2. **Enrich** — Claude Haiku adds summaries, tags, and authorship signals.
-3. **Extract entities** — Issue keys, URLs, mentions, and dates are pulled out into a structured form.
+3. **Extract entities** — Issue keys, URLs, mentions, and dates are pulled into a structured form.
 4. **Embed** — Each item (and its chunks) gets a vector embedding stored in `sqlite-vec`.
 5. **Link** — `crossref.ts` builds edges in the `links` table from explicit references (e.g. `PEX-123`), URL matches, title similarity, and vector neighbors.
 6. **Classify** — Items are assigned to user-defined goals using keywords + embeddings.
@@ -219,20 +301,96 @@ Every step is incremental and resumable — re-running any phase only touches wh
 
 ---
 
-## Privacy
+## Privacy & Security
 
-- The database is a local SQLite file under `data/`. It never leaves your machine.
-- OAuth tokens are encrypted at rest with `WORKGRAPH_SECRET_KEY` (AES-GCM via `src/lib/crypto.ts`).
-- Only outbound traffic is to (a) source APIs you've connected and (b) the Anthropic API for summaries and classification.
+- **Local-first by design.** The database is a single SQLite file under `data/`. It never leaves your machine.
+- **Encrypted tokens.** OAuth tokens are encrypted at rest with `WORKGRAPH_SECRET_KEY` (AES-256-GCM via [`src/lib/crypto.ts`](src/lib/crypto.ts)).
+- **No analytics, no telemetry.** This project does not phone home, ever.
+- **Outbound traffic.** Only to (a) source APIs you've explicitly connected and (b) the Anthropic API for summaries and classification.
+- **Open code.** Every line is in this repo — audit it yourself.
 
 ---
 
-## Status
+## Roadmap
 
-WorkGraph is an active personal project — the feature surface moves quickly, and parts of it are still WIP. The core ingest → graph → UI loop is working end-to-end across all listed connectors.
+- [ ] Self-hosted deployment guide (Docker + reverse proxy)
+- [ ] Local embeddings via Ollama (currently optional, becoming default)
+- [ ] Plugin API for community-contributed connectors
+- [ ] Export to Markdown / Obsidian
+- [ ] Mobile-friendly UI
+- [ ] CI / GitHub Actions
+
+Have an idea? [Open an issue](https://github.com/pyalwin/workgraph/issues/new) or [start a discussion](https://github.com/pyalwin/workgraph/discussions).
+
+---
+
+## Contributing
+
+**Contributions are very welcome.** WorkGraph is open source under MIT and built to be hacked on.
+
+### How to contribute
+
+1. **Fork** the repo and create a feature branch (`git checkout -b feat/your-feature`).
+2. **Build something.** Add a connector, fix a bug, improve the UI, write docs.
+3. **Commit** with a clear message (the project follows conventional-ish prefixes like `feat:`, `fix:`, `docs:`, `chore:`).
+4. **Open a pull request** against `main`. Describe what changed and why.
+
+### Good first issues
+
+- Adding a new connector — pick a source not yet in [the list](#-connectors), implement the adapter contract.
+- Improving chunking strategies for long documents.
+- Adding tests (the project is currently test-light by design — help us change that).
+- UI polish in any module.
+
+### Code style
+
+- TypeScript everywhere, strict mode.
+- Prefer small, focused functions over deep abstractions.
+- Server logic in `src/lib/`, UI in `src/components/` and `src/app/`.
+- Run `next lint` before pushing.
+
+### Reporting bugs
+
+Open an [issue](https://github.com/pyalwin/workgraph/issues/new) with:
+- What you expected to happen
+- What actually happened
+- Steps to reproduce
+- Your environment (Node/Bun version, OS)
 
 ---
 
 ## License
 
-Personal project — no license declared. Reach out before reuse.
+This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for the full text.
+
+```
+Copyright (c) 2026 Arun Venkataramanan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction…
+```
+
+You're free to use, copy, modify, merge, publish, distribute, sublicense, and sell copies — for any purpose, commercial or otherwise.
+
+---
+
+## Acknowledgments
+
+Built on the shoulders of giants:
+
+- [Anthropic](https://anthropic.com/) for Claude and the Model Context Protocol.
+- [Vercel](https://vercel.com/) for Next.js.
+- [Alex Garcia](https://github.com/asg017) for `sqlite-vec` — the reason this whole thing fits in a single SQLite file.
+- [Vasco Asturiano](https://github.com/vasturiano) for `react-force-graph`.
+- The maintainers of every package in [`package.json`](package.json).
+
+---
+
+<div align="center">
+
+**If WorkGraph is useful to you, consider [starring the repo](https://github.com/pyalwin/workgraph) — it helps others find it.**
+
+Made with care by [Arun Venkataramanan](https://github.com/pyalwin) · MIT Licensed · Built to be forked
+
+</div>
