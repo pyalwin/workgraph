@@ -13,5 +13,5 @@ export async function POST(_req: Request, props: { params: Promise<{ key: string
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.reason }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, length: result.length });
+  return NextResponse.json({ ok: true, length: result.length, chunks: result.chunks });
 }
