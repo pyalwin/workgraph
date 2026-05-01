@@ -5,21 +5,10 @@
 ### Local-first work intelligence — your tickets, docs, meetings, and chat, unified.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Open Source](https://img.shields.io/badge/Open%20Source-%E2%9D%A4-ff69b4.svg)](https://github.com/pyalwin/workgraph)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/pyalwin/workgraph/pulls)
-[![GitHub last commit](https://img.shields.io/github/last-commit/pyalwin/workgraph)](https://github.com/pyalwin/workgraph/commits/main)
-[![GitHub issues](https://img.shields.io/github/issues/pyalwin/workgraph)](https://github.com/pyalwin/workgraph/issues)
 [![GitHub stars](https://img.shields.io/github/stars/pyalwin/workgraph?style=social)](https://github.com/pyalwin/workgraph/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/pyalwin/workgraph?style=social)](https://github.com/pyalwin/workgraph/network/members)
-
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js&logoColor=white)](https://nextjs.org/)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
-[![Anthropic Claude](https://img.shields.io/badge/Powered%20by-Claude-D97757?logo=anthropic&logoColor=white)](https://anthropic.com/)
-[![MCP](https://img.shields.io/badge/MCP-supported-7c3aed)](https://modelcontextprotocol.io/)
-[![Bun](https://img.shields.io/badge/Bun-runtime-F9F1E1?logo=bun&logoColor=black)](https://bun.sh/)
+[![Powered by Claude](https://img.shields.io/badge/Powered%20by-Claude-D97757?logo=anthropic&logoColor=white)](https://anthropic.com/)
 
 [**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Architecture**](#-architecture) · [**Connectors**](#-connectors) · [**Contributing**](#-contributing)
 
