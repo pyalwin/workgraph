@@ -68,7 +68,11 @@ export function lastSyncedAtByBucket(
 }
 
 export async function runConnector(connector: MCPConnector, opts: RunPipelineOptions): Promise<SyncResult> {
-  const since = opts.since ?? lastSyncedAt(connector.source);
+  // Only honor an explicit since (CLI / "Resync from scratch"). Adapters
+  // compute their own per-bucket incremental via resolveSince — falling back
+  // to a global lastSyncedAt here would over-broadcast that floor to every
+  // bucket and override the per-project incremental high-water mark.
+  const since = opts.since ?? null;
   const limit = opts.limit ?? 20;
   const pageSize = opts.pageSize ?? 100;
   let cursor: string | null = opts.cursor ?? null;

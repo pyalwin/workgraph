@@ -138,8 +138,14 @@ async function main() {
     client = await connectMCP(server);
   }
 
-  const since = flags.since ?? lastSyncedAt(connector.source);
-  console.error(`[sync-mcp] ${connector.label} since=${since ?? 'never'} mode=${flags.fromStdin ? 'stdin' : 'mcp'}`);
+  // Pass through only the explicit --since flag. Adapters compute their own
+  // per-bucket incremental floor; a global lastSyncedAt fallback here would
+  // override that and force every bucket to use the same floor.
+  const since = flags.since ?? null;
+  const lastSeenForLog = lastSyncedAt(connector.source);
+  console.error(
+    `[sync-mcp] ${connector.label} since=${since ?? `(per-bucket; last=${lastSeenForLog ?? 'never'})`} mode=${flags.fromStdin ? 'stdin' : 'mcp'}`,
+  );
 
   try {
     const result = await runConnector(connector, {

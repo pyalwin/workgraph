@@ -45,9 +45,10 @@ export function triggerSync(
   const runner = process.env.WORKGRAPH_SYNC_RUNNER || 'bunx';
   const args = ['tsx', scriptPath, source, `--workspace=${workspaceId}`, '--verbose'];
   if (options.since) {
-    // 'full' is a sentinel meaning "ignore last_synced_at, fetch everything
-    // in the connector's natural window". Pass an old date to bypass clamp.
-    const sinceArg = options.since === 'full' ? '2020-01-01T00:00:00Z' : options.since;
+    // 'full' is the sentinel for "no date floor at all" — adapter drops the
+    // updated >= clause entirely and pulls genuine full history. Any other
+    // value is treated as an ISO date floor.
+    const sinceArg = options.since === 'full' ? 'all' : options.since;
     args.push(`--since=${sinceArg}`);
     args.push('--limit=200');  // bigger page cap for backfills
   }

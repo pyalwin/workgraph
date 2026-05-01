@@ -71,16 +71,17 @@ export const atlassianConnector: MCPConnector = {
 
       let jql: string;
       if (selectedProjects.length === 0) {
-        const r = resolveSince(ctx.options, undefined, BACKFILL_DEFAULT_DATE);
+        const r = resolveSince(ctx.options, undefined, BACKFILL_DEFAULT_DATE, ctx.since);
         jql = r.allTime
           ? `created >= "1900-01-01"${userClause}`  // JQL needs at least one clause
           : `updated >= "${r.date}"${userClause}`;
       } else {
         // Per-project since: projects with existing items get their own MAX(updated_at);
         // projects without existing items honor options.backfillFrom (default 2026-01-01,
-        // 'all' to disable the clamp).
+        // 'all' to disable the clamp). ctx.since (from "Resync from scratch") wins
+        // over both — see resolveSince priority 0.
         const clauses = selectedProjects.map((p) => {
-          const r = resolveSince(ctx.options, ctx.bucketLastSynced[p], BACKFILL_DEFAULT_DATE);
+          const r = resolveSince(ctx.options, ctx.bucketLastSynced[p], BACKFILL_DEFAULT_DATE, ctx.since);
           return r.allTime
             ? `project = "${p}"`
             : `(project = "${p}" AND updated >= "${r.date}")`;

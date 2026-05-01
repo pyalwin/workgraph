@@ -25,7 +25,18 @@ export function resolveSince(
   options: Record<string, unknown> | undefined,
   bucketLastSynced: string | undefined,
   fallback: string = BACKFILL_DEFAULT_DATE,
+  /** CLI/orchestrator override — wins over bucketLastSynced when present. */
+  explicitSince?: string | null | undefined,
 ): SinceResolution {
+  // 0. Explicit `since` from the orchestrator (e.g. "Resync from scratch")
+  //    always wins. 'all' / '*' disables the clause entirely; any other
+  //    string is parsed as a date.
+  if (typeof explicitSince === 'string' && explicitSince.trim()) {
+    const s = explicitSince.trim().toLowerCase();
+    if (s === 'all' || s === '*') return { date: '', allTime: true };
+    return { date: isoToDate(explicitSince.trim()), allTime: false };
+  }
+
   // 1. Per-bucket incremental — only when this bucket has history.
   if (bucketLastSynced) return { date: isoToDate(bucketLastSynced), allTime: false };
 

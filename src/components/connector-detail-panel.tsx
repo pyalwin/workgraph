@@ -547,16 +547,16 @@ export function ConnectorDetailPanel({
 
             <div className="flex items-center justify-between gap-2 mt-3 pt-2 border-t border-black/[0.06]">
               <small className="text-[11px] text-[#888]">
-                Adding new scope (e.g. a new project)? Run a full resync to backfill it.
+                Backfill full history — ignores incremental floor and pulls every ticket the source can return.
               </small>
               <button
                 type="button"
                 className="text-xs text-[#666] hover:text-black"
                 onClick={() => setConfirmFullResync(true)}
                 disabled={syncing || installing || saved?.lastSyncStatus === 'running'}
-                title="Backfill all data from scratch (ignores last sync timestamp)"
+                title="Pulls everything available from the source — overrides per-bucket incremental and the workspace backfill date"
               >
-                Resync from scratch
+                Backfill full history
               </button>
             </div>
           </Section>
@@ -682,15 +682,16 @@ export function ConnectorDetailPanel({
       <ConfirmDialog
         open={confirmFullResync}
         onOpenChange={setConfirmFullResync}
-        title={`Resync ${preset.label} from scratch?`}
+        title={`Backfill ${preset.label} full history?`}
         description={
           <span>
-            Ignores the incremental "last synced" timestamp and re-fetches everything matching your current scope.
-            Use this after adding a new project/repo/channel to scope, or if the data looks incomplete.
-            It does <strong>not</strong> wipe existing items — duplicates are deduplicated by id, and changed items are versioned.
+            Pulls every item the source returns, ignoring both the per-bucket incremental floor and the workspace backfill date.
+            Use this when data looks incomplete (e.g. tickets older than the default 2026-01-01 backfill horizon are missing).
+            It does <strong>not</strong> wipe existing items — duplicates are deduped by id, and changed items are versioned.
+            Larger sources (thousands of items) can take several minutes.
           </span>
         }
-        confirmLabel="Run full resync"
+        confirmLabel="Backfill full history"
         busyLabel="Starting…"
         busy={syncing}
         onConfirm={async () => { await sync('full'); setConfirmFullResync(false); }}
