@@ -235,21 +235,6 @@ body[data-density="spacious"] .agenda-item { padding: 20px 0; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-/* Role pill */
-.role-pill {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 10px 5px 8px; border-radius: 999px;
-  background: var(--paper); border: 1px solid var(--rule);
-  font-size: 11.5px; color: var(--ink-2); cursor: pointer;
-  font-family: var(--mono); letter-spacing: 0.01em;
-  transition: background 0.12s, border-color 0.12s;
-}
-.role-pill:hover { background: var(--bone-2); border-color: var(--ink-5); }
-.role-pill-label { color: var(--ink); font-weight: 500; text-transform: lowercase; }
-.role-pill-sep { color: var(--ink-5); }
-.role-pill-src { color: var(--ink-3); text-transform: uppercase; font-size: 10.5px; }
-.role-pill-caret { color: var(--ink-4); font-size: 9px; margin-left: 2px; }
-
 /* ———————————— PAGE ———————————— */
 .page { max-width: 1180px; margin: 0 auto; padding: 36px 32px 80px; }
 .empty-state {

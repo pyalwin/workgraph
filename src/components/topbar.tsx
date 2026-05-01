@@ -10,10 +10,7 @@ const fallbackMenu = [
 
 export function Topbar() {
   const pathname = usePathname();
-  const { state, setState, workspaces, activeWorkspace } = useWorkgraphState();
-  const roles = activeWorkspace.ui?.roles?.length ? activeWorkspace.ui.roles : ROLES_FALLBACK;
-  const role = roles.find((r) => r.id === state.role) ?? roles[0];
-  const source = role?.primarySource ?? state.source;
+  const { setState, workspaces, activeWorkspace } = useWorkgraphState();
   const modules = activeWorkspace.modules || {};
   const navItems = activeWorkspace.ui?.menu?.length ? activeWorkspace.ui.menu : fallbackMenu;
   const enabledWorkspaces = workspaces.filter((w) => w.enabled !== false);
@@ -55,12 +52,6 @@ export function Topbar() {
           <span>{searchPlaceholder}</span>
           <kbd>⌘K</kbd>
         </div>
-        <Link href="/settings?tab=profile" className="role-pill" title="Change role / source">
-          <span className="role-pill-label">{role?.label ?? 'workspace'}</span>
-          <span className="role-pill-sep">·</span>
-          <span className="role-pill-src">{source}</span>
-          <span className="role-pill-caret">▾</span>
-        </Link>
         <NavAuth />
       </div>
     </header>
@@ -112,7 +103,3 @@ export const ROLES: Record<string, { id: string; label: string; subtitle: string
 };
 
 export const ROLE_ORDER = ['eng_ic', 'eng_mgr', 'pm', 'sales', 'cs', 'support', 'specialist'];
-
-const ROLES_FALLBACK = [
-  { id: 'eng_mgr', label: 'Engineering Manager', primarySource: 'Jira' },
-];
