@@ -2379,3 +2379,42 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   .config-step { grid-template-columns: 34px minmax(0, 1fr); }
   .config-step-actions { grid-column: 2; flex-wrap: wrap; }
 }
+
+/* ———————————— AUTH (WorkOS AuthKit) ———————————— */
+.nav-auth {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 8px;
+}
+.nav-auth-user {
+  font-size: 12px;
+  color: var(--ink-2);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nav-auth-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+.nav-auth-btn:hover {
+  background: var(--bone-2);
+  border-color: var(--ink-5);
+  color: var(--ink);
+}
+.nav-auth-loading {
+  font-size: 12px;
+  color: var(--ink-4);
+}

@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useWorkgraphState } from '@/components/workgraph-state';
+import { NavAuth } from '@/components/nav-auth';
 
 const fallbackMenu = [
   { id: 'overview', label: 'Overview', href: '/', module: 'overview' },
@@ -72,6 +73,7 @@ export function Topbar() {
           <span className="role-pill-src">{source}</span>
           <span className="role-pill-caret">▾</span>
         </Link>
+        <NavAuth />
       </div>
     </header>
   );
