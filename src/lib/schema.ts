@@ -426,6 +426,14 @@ function migrateGoals() {
   if (!have.has('target_at'))        db.exec("ALTER TABLE goals ADD COLUMN target_at TEXT");
   if (!have.has('ai_confidence'))    db.exec("ALTER TABLE goals ADD COLUMN ai_confidence REAL");
   if (!have.has('derived_from'))     db.exec("ALTER TABLE goals ADD COLUMN derived_from TEXT NOT NULL DEFAULT 'manual'");
+  // OKR support — see docs/processes/jira-tracker.md Phase 6.
+  if (!have.has('kind'))             db.exec("ALTER TABLE goals ADD COLUMN kind TEXT NOT NULL DEFAULT 'goal'");  // 'goal' | 'objective' | 'key_result'
+  if (!have.has('parent_id'))        db.exec("ALTER TABLE goals ADD COLUMN parent_id TEXT");                     // key_result.parent_id → objective.id
+  if (!have.has('project_key'))      db.exec("ALTER TABLE goals ADD COLUMN project_key TEXT");                   // anchors AI-generated OKRs to their project
+
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_goals_kind ON goals(kind)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals(parent_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_goals_project ON goals(project_key)`);
 }
 
 function migrateWorkItems() {
@@ -524,7 +532,11 @@ export function seedConfig() {
 export function migrateProjectSummaries() {
   const db = getDb();
   const cols = db.prepare("PRAGMA table_info(project_summaries)").all() as { name: string }[];
-  if (!cols.find(c => c.name === 'summary_generated_at')) {
+  const have = new Set(cols.map(c => c.name));
+  if (!have.has('summary_generated_at')) {
     db.exec("ALTER TABLE project_summaries ADD COLUMN summary_generated_at TEXT");
   }
+  // README — stable, descriptive document. Separate from `recap` (status-y).
+  if (!have.has('readme'))                db.exec("ALTER TABLE project_summaries ADD COLUMN readme TEXT");
+  if (!have.has('readme_generated_at'))   db.exec("ALTER TABLE project_summaries ADD COLUMN readme_generated_at TEXT");
 }

@@ -90,6 +90,7 @@ export interface ProjectDetail {
   tickets: ProjectTicket[];
   anomalies?: ProjectAnomaly[];
   actionItems?: ProjectActionItem[];
+  readme?: { content: string | null; generatedAt: string | null };
 }
 
 export interface ProjectSummaryCard {

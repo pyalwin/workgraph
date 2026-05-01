@@ -39,6 +39,10 @@ export const goals = sqliteTable('goals', {
   targetAt: text('target_at'),
   aiConfidence: real('ai_confidence'),
   derivedFrom: text('derived_from').notNull().default('manual'),
+  // OKR support
+  kind: text('kind').notNull().default('goal'),           // 'goal' | 'objective' | 'key_result'
+  parentId: text('parent_id'),                            // key_result.parent_id → objective.id
+  projectKey: text('project_key'),                        // anchors AI-generated OKRs to their project
 });
 
 export const projects = sqliteTable('projects', {
@@ -288,6 +292,9 @@ export const projectSummaries = sqliteTable('project_summaries', {
   updatedAt: text('updated_at').default(sql`(datetime('now'))`),
   // Added by migrateProjectSummaries()
   summaryGeneratedAt: text('summary_generated_at'),
+  // README — stable, descriptive document, separate from `recap` (status-y)
+  readme: text('readme'),
+  readmeGeneratedAt: text('readme_generated_at'),
 });
 
 // ─────── chunks + embeddings ──────────────────────────────────────────────

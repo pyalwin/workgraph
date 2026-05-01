@@ -3,6 +3,8 @@ import { initSchema, migrateProjectSummaries } from '@/lib/schema';
 import { getDb } from '@/lib/db';
 import { getProjectDetail } from '@/lib/project-queries';
 import { getOrGenerateSummary } from '@/lib/project-summary';
+import { getProjectReadme } from '@/lib/sync/project-readme';
+import { inngest } from '@/inngest/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,6 +102,7 @@ export async function GET(req: NextRequest, props: { params: Promise<{ key: stri
   const detail = getProjectDetail(projectKey, period) as ReturnType<typeof getProjectDetail> & {
     anomalies?: ProjectAnomaly[];
     actionItems?: ProjectActionItem[];
+    readme?: { content: string | null; generatedAt: string | null };
   };
 
   // Generate or fetch cached summary
@@ -109,6 +112,16 @@ export async function GET(req: NextRequest, props: { params: Promise<{ key: stri
   // Phase 2.6 — anomalies + action items for this project
   detail.anomalies = getProjectAnomalies(projectKey);
   detail.actionItems = getProjectActionItems(projectKey);
+
+  // README — stable descriptive doc. If missing, kick off generation in the
+  // background; the next reload will see it.
+  const readme = getProjectReadme(projectKey);
+  if (!readme.readme) {
+    inngest
+      .send({ name: 'workgraph/project.readme.refresh', data: { projectKey } })
+      .catch(() => { /* swallow — best-effort */ });
+  }
+  detail.readme = { content: readme.readme, generatedAt: readme.generatedAt };
 
   return NextResponse.json(detail);
 }

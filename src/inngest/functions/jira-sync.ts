@@ -203,6 +203,35 @@ export const jiraSyncWorkspace = inngest.createFunction(
       );
     }
 
-    return { workspaceId, slot, enriched, projectsRefreshed: projectKeys.length };
+    // Generate README for projects that don't have one yet. Stable, so we
+    // don't auto-refresh — only seed missing ones. User can trigger
+    // regeneration manually via the project page.
+    const readmeNeedingProjects = await step.run('list-projects-without-readme', () => {
+      const db = getDb();
+      return projectKeys.filter((projectKey) => {
+        const row = db
+          .prepare(`SELECT readme IS NOT NULL AS has FROM project_summaries WHERE project_key = ?`)
+          .get(projectKey) as { has: number } | undefined;
+        return !row?.has;
+      });
+    });
+
+    if (readmeNeedingProjects.length > 0) {
+      await step.sendEvent(
+        'fan-out-project-readmes',
+        readmeNeedingProjects.map((projectKey) => ({
+          name: 'workgraph/project.readme.refresh',
+          data: { projectKey },
+        })),
+      );
+    }
+
+    return {
+      workspaceId,
+      slot,
+      enriched,
+      projectsRefreshed: projectKeys.length,
+      readmesSeeded: readmeNeedingProjects.length,
+    };
   },
 );

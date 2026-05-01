@@ -3915,3 +3915,73 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
     padding: 1.5rem;
   }
 }
+
+/* Project README (Phase 5 — descriptive doc) */
+.detail-readme {
+  margin-top: 1.5rem;
+  border: 1px solid rgba(21, 20, 15, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(6px);
+}
+.detail-readme-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.85rem 1.1rem;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--ink-2, #2a2822);
+  text-align: left;
+}
+.detail-readme-toggle:hover {
+  background: rgba(21, 20, 15, 0.03);
+}
+.detail-readme-arrow {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  color: var(--ink-4, #7a7670);
+  width: 12px;
+}
+.detail-readme-meta {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  color: var(--ink-4, #7a7670);
+}
+.detail-readme-regen {
+  margin-left: auto;
+  padding: 0.3rem 0.7rem;
+  background: var(--bone-2, #f3efe7);
+  border: 1px solid rgba(21, 20, 15, 0.08);
+  border-radius: 5px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: var(--ink-2, #2a2822);
+}
+.detail-readme-regen:hover { background: var(--bone, #faf8f3); border-color: rgba(21, 20, 15, 0.18); }
+.detail-readme-regen:disabled { opacity: 0.5; cursor: wait; }
+.detail-readme-body {
+  padding: 0 1.5rem 1.25rem;
+  border-top: 1px solid rgba(21, 20, 15, 0.05);
+}
+.detail-readme-body p { color: var(--ink-2, #2a2822); }
+.detail-readme-body h2 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: var(--ink, #15140f);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.detail-readme-empty {
+  margin: 0.85rem 0;
+  color: var(--ink-4, #7a7670);
+  font-size: 0.88rem;
+}

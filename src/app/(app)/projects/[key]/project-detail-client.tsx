@@ -22,6 +22,8 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
   const [data, setData] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingReadme, setRefreshingReadme] = useState(false);
+  const [readmeOpen, setReadmeOpen] = useState(false);
   const [openItemId, setOpenItemId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -46,6 +48,19 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
       // ignore
     }
     setRefreshing(false);
+  };
+
+  const handleRefreshReadme = async () => {
+    setRefreshingReadme(true);
+    try {
+      await fetch(`/api/projects/${projectKey}/refresh-readme`, { method: 'POST' });
+      // Re-fetch the page to pick up the new README
+      await fetchData();
+      setReadmeOpen(true);
+    } catch {
+      // ignore
+    }
+    setRefreshingReadme(false);
   };
 
   if (loading && !data) {
@@ -100,6 +115,43 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
             No AI summary yet — refresh to generate one from the latest signals.
           </p>
         )}
+
+        {/* README — stable description of the project itself */}
+        <div className="detail-readme">
+          <button
+            type="button"
+            className="detail-readme-toggle"
+            onClick={() => setReadmeOpen((v) => !v)}
+            aria-expanded={readmeOpen}
+          >
+            <span className="detail-readme-arrow">{readmeOpen ? '▾' : '▸'}</span>
+            <span>About this project</span>
+            {d.readme?.generatedAt && (
+              <span className="detail-readme-meta">
+                generated {new Date(d.readme.generatedAt).toLocaleDateString()}
+              </span>
+            )}
+            <button
+              type="button"
+              className="detail-readme-regen"
+              onClick={(e) => { e.stopPropagation(); handleRefreshReadme(); }}
+              disabled={refreshingReadme}
+            >
+              {refreshingReadme ? 'Regenerating…' : 'Regenerate'}
+            </button>
+          </button>
+          {readmeOpen && (
+            <div className="detail-readme-body">
+              {d.readme?.content ? (
+                <Markdown>{d.readme.content}</Markdown>
+              ) : (
+                <p className="detail-readme-empty">
+                  No README yet — generating in the background. Reload in a few seconds, or click Regenerate to force a refresh.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
       </header>
 
       <div className="detail-body">

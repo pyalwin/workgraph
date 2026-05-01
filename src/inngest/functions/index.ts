@@ -7,6 +7,7 @@ import { jiraSyncTick, jiraSyncWorkspace } from './jira-sync';
 import { anomalyScan } from './anomalies';
 import { projectSummaryRegen } from './project-summary';
 import { projectActionsRefresh } from './project-actions';
+import { projectReadmeRefresh } from './project-readme';
 
 export const functions = [
   heartbeat,
@@ -15,4 +16,5 @@ export const functions = [
   anomalyScan,
   projectSummaryRegen,
   projectActionsRefresh,
+  projectReadmeRefresh,
 ];
