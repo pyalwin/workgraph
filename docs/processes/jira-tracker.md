@@ -24,33 +24,35 @@ authenticated with.
 
 ## Where this runs
 
-WorkGraph ships with two database adapters and two deployment modes. The application code is identical across both — only the persistence layer and runtime topology differ.
+WorkGraph runs in two deployment modes — same code, same SQL dialect, different ownership of the runtime.
 
 | | Self-hosted (open source) | Cloud (managed by us) |
 |---|---|---|
 | **App** | Vercel/Fly/Render deployment in user's account, or `bun dev` on a laptop | Our Vercel project |
-| **Database** | **SQLite + sqlite-vec** — single file, zero infra | **Supabase** — Postgres 15 + pgvector + Row-Level Security |
-| **Database file** | `data/workgraph.db` on disk, the user's responsibility | Per-tenant logical isolation via RLS policies; pooled connections via PgBouncer |
-| **Background work** | Inngest functions hit user's `/api/inngest` endpoint; user's Inngest account | Our Inngest account; events fan out to per-tenant function invocations in our deployment |
+| **Database** | **SQLite + sqlite-vec** — single file, zero infra | **Turso** — libSQL (SQLite-compatible) with native vector support, one DB per tenant |
+| **Database location** | `data/workgraph.db` on disk, the user's responsibility | Per-tenant Turso database, edge-replicated, isolation is physical |
+| **Background work** | Inngest functions hit user's `/api/inngest` endpoint; user's Inngest account | Our Inngest account; events fan out to per-tenant function invocations |
 | **AI provider** | User's key, user's cost | Tenant brings their own key, OR pays metered for our pooled key |
 | **Auth** | User's WorkOS tenant | Our WorkOS tenant + SSO |
 | **Encryption secret** | User's `WORKGRAPH_SECRET_KEY` (env) | Derived per-tenant from a master key in our KMS |
-| **We can read user data** | **No** — we have no connection to it | Yes, but only the data they upload; AI inputs/outputs encrypted at rest |
+| **We can read user data** | **No** — we have no connection to it | Only what's in their tenant DB; AI inputs/outputs encrypted at rest |
 
-**Why SQLite for self-host?** It's the lowest possible barrier. One file, no separate database server, no Docker, no provisioning. `bun dev` and you're in. `sqlite-vec` covers the vector workload up to comfortable single-user / small-team sizes.
+**Why SQLite for self-host?** Lowest possible barrier — one file, no database server, no Docker, no provisioning. `bun dev` and you're in. `sqlite-vec` covers the vector workload comfortably at single-user / small-team scale.
 
-**Why Supabase for cloud?**
+**Why Turso for cloud?**
 
-- Postgres 15 + pgvector — proven for the workload, plenty of headroom
-- Row-Level Security gives us per-tenant isolation without per-tenant schemas (cheaper to operate)
-- First-class Vercel integration (zero-config connection pooling)
-- Realtime subscriptions if we ever want live UI without polling
-- Storage for any file artifacts (meeting attachments, exported reports)
-- Generous free tier so the cloud's free trial costs us little
+- **Same SQL dialect as the OSS version.** libSQL is a SQLite fork. The cross-ref query, the `vec_chunks_text MATCH` calls, the schema migrations — all run unchanged. **One database adapter for both modes.** No double-testing, no dialect drift.
+- **Per-tenant database, not shared.** Each customer gets their own Turso DB. Isolation is physical, not enforced by Row-Level Security policies. A bug in our app code can't leak across tenants because there's no shared database to leak from.
+- **Edge-replicated reads.** Turso replicates each DB to multiple regions. Reads come from the nearest replica; writes go to the primary. Sub-50ms latency from anywhere on Vercel's edge network.
+- **Cost shape matches the workload.** Pricing scales with DB count, which matches "many customers with modest data" exactly.
+- **First-class Vercel integration.** HTTP-based driver runs in node and edge runtimes.
+- **Embedded replicas.** Optional — pull a local read replica into the Vercel function for sub-millisecond reads. Useful for the dashboard load path.
 
-We considered **Neon** (great Postgres-only option) and **Turso** (SQLite at the edge, would let us reuse the SQLite adapter). Both viable; Supabase wins on RLS + Vercel integration for our shape.
+**Why not Supabase / Postgres + pgvector?** Supabase is great when you want one big shared Postgres with RLS multi-tenancy, full-text search, realtime, and bundled auth/storage. We don't need most of that — we already use AuthKit for auth, we have no storage requirement, and we'd rather have physical per-tenant isolation than RLS-policy-based isolation. The deal-breaker is dialect drift: Supabase uses pgvector with `<->` distance operators, IVFFlat/HNSW indexes, and JSONB everywhere. The OSS version uses `sqlite-vec` with `MATCH` syntax. We'd be writing every query twice. With Turso, we don't.
 
-**One codebase, two adapters.** `src/lib/db.ts` becomes a thin facade. `src/lib/db/sqlite.ts` and `src/lib/db/supabase.ts` implement a common `DbAdapter` interface. Drizzle ORM unifies the SQL on both sides. Everything above the adapter is unchanged.
+**Why not Neon?** Same dialect-drift problem. Beautiful product, wrong shape for us.
+
+**One codebase, one adapter.** `src/lib/db.ts` opens either a local SQLite file (self-host) or a Turso connection (cloud) based on `DATABASE_URL`. Same Drizzle queries above. Same migrations. The only files that branch are connection-init and per-tenant routing.
 
 We never read user data on the self-hosted side. Inngest Cloud, in either mode, sees event names and signed payloads — never row-level data.
 

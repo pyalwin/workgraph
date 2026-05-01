@@ -30,7 +30,7 @@ You have two choices — same code, same features, different ownership of the ru
 
 ### Cloud (coming soon)
 
-A hosted, managed instance backed by **Supabase** (Postgres + pgvector with Row-Level Security per tenant). We run the app, you sign in, your data lives in an isolated tenant. Zero setup, free trial, paid tier for teams.
+A hosted, managed instance backed by **Turso** — libSQL (SQLite-compatible) with native vector search, one database per tenant, edge-replicated for low-latency reads. We run the app, you sign in, your data lives in your own physically isolated tenant database. Zero setup, free trial, paid tier for teams.
 
 > **Status:** waitlist. [Sign up here](https://github.com/pyalwin/workgraph/issues/new?title=Cloud+waitlist&body=Add+me+to+the+cloud+waitlist) — we'll email when it opens.
 
@@ -42,7 +42,7 @@ Clone, deploy, own everything. Your code, your database, your AI key, your data 
 - **Vercel** — push to your own Vercel project, behind your auth.
 - **Docker** — `docker compose up`.
 
-Same codebase as the cloud version. The only difference is the database adapter (SQLite for self-host, Supabase for cloud) and who runs the Inngest workers.
+Same codebase, same SQL queries as the cloud version — Turso is libSQL, which is a SQLite fork. The only thing that changes between modes is the connection string and who runs the Inngest workers.
 
 See [**Quickstart**](#-quickstart) below.
 
@@ -220,10 +220,10 @@ Every step is incremental and resumable — re-running any phase only touches wh
 
 **Cloud mode** (coming soon)
 
-- **Per-tenant isolation.** Each tenant gets its own database with row-level encryption keyed off `WORKGRAPH_SECRET_KEY` derived per tenant.
-- **Same OSS code.** The hosted offering runs the exact same codebase as the self-hosted version. No proprietary fork.
+- **Per-tenant database.** Each customer gets their own Turso database — isolation is physical, not policy-based. There is no shared database across tenants. A bug in our app cannot leak data across customers because there's no shared store to leak from.
+- **Same OSS code.** The hosted offering runs the exact same codebase as the self-hosted version. No proprietary fork. Anything we run, you can run yourself.
 - **Bring your own AI key.** Your AI provider key is stored encrypted; we charge for the infra, not for inference. Or use the included pooled key with metered billing.
-- **Open audit.** Anything we run, you can run yourself. If you stop trusting us, you take your data and self-host.
+- **Open audit.** If you stop trusting us, you can `turso db dump` your tenant DB and rehost it on the OSS version with no data loss.
 
 ---
 
