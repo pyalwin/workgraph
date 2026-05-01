@@ -256,6 +256,46 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
               </ul>
             </section>
           )}
+
+          {d.anomalies && d.anomalies.length > 0 && (
+            <section className="detail-section">
+              <h4>Anomalies — {d.anomalies.length} open</h4>
+              <ul className="proj-anomalies">
+                {d.anomalies.map((a) => (
+                  <li key={a.id}>
+                    <span className={`tracker-anomaly-kind tracker-anomaly-${a.kind}`}>
+                      {a.kind.replace(/_/g, ' ')}
+                    </span>
+                    <span className="proj-anomaly-text">{a.explanation ?? a.scope}</span>
+                    <span className="proj-anomaly-sev">{Math.round(a.severity * 100)}%</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {d.actionItems && d.actionItems.length > 0 && (
+            <section className="detail-section">
+              <h4>Action items — {d.actionItems.length} open</h4>
+              <ul className="proj-actions">
+                {d.actionItems.map((a) => (
+                  <li key={a.id}>
+                    <span className={`tracker-pri tracker-pri-${(a.user_priority ?? a.ai_priority ?? 'p3').toLowerCase()}`}>
+                      {(a.user_priority ?? a.ai_priority ?? 'p3').toLowerCase()}
+                    </span>
+                    <span className="proj-action-text">
+                      {a.text}
+                      <span className="proj-action-from">
+                        — {a.source_id}
+                        {a.assignee ? ` · ${a.assignee}` : ''}
+                        {a.due_at ? ` · due ${new Date(a.due_at).toLocaleDateString()}` : ''}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
 
         <aside className="detail-side">

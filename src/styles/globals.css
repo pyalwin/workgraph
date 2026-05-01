@@ -3624,3 +3624,40 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
 .tracker-anomaly-kind.tracker-anomaly-goal_drift { background: #fef3c7; color: #92400e; }
 .tracker-anomaly-kind.tracker-anomaly-owner_gap { background: #f3f4f6; color: #4b5563; }
 .tracker-anomaly-kind.tracker-anomaly-scope_creep { background: #ffedd5; color: #9a3412; }
+
+/* ─── Project page — anomalies + action items (Phase 2.6) ────── */
+.proj-anomalies, .proj-actions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.proj-anomalies li, .proj-actions li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--paper, #fff);
+  border: 1px solid var(--rule, rgba(21, 20, 15, 0.06));
+  border-radius: 6px;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+.proj-anomaly-text, .proj-action-text {
+  flex: 1;
+  color: var(--ink-2, #2a2822);
+}
+.proj-action-from {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--ink-4, #7a7670);
+}
+.proj-anomaly-sev {
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--ink-4, #7a7670);
+}

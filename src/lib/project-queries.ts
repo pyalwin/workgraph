@@ -60,12 +60,36 @@ export interface CodeActivity {
   repo_count: number;
 }
 
+export interface ProjectAnomaly {
+  id: string;
+  scope: string;
+  kind: string;
+  severity: number;
+  explanation: string | null;
+  evidence_item_ids: string[];
+  detected_at: string;
+}
+
+export interface ProjectActionItem {
+  id: string;
+  source_item_id: string;
+  source_id: string;
+  source_title: string;
+  text: string;
+  assignee: string | null;
+  ai_priority: string | null;
+  user_priority: string | null;
+  due_at: string | null;
+}
+
 export interface ProjectDetail {
   project: { key: string; name: string; total_tickets: number; total_prs: number };
   health: ProjectHealth;
   velocity_weekly: VelocityWeek[];
   code_activity: CodeActivity;
   tickets: ProjectTicket[];
+  anomalies?: ProjectAnomaly[];
+  actionItems?: ProjectActionItem[];
 }
 
 export interface ProjectSummaryCard {
