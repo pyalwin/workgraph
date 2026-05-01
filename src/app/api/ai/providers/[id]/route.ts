@@ -4,7 +4,7 @@ import { isCryptoConfigured } from '@/lib/crypto';
 
 export const dynamic = 'force-dynamic';
 
-const SUPPORTED_PROVIDERS = new Set(['anthropic']);
+const SUPPORTED_PROVIDERS = new Set(['openrouter']);
 
 function unsupported(id: string) {
   return NextResponse.json(

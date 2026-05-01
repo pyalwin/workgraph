@@ -20,11 +20,12 @@ interface ProviderDef {
 
 const SUPPORTED_PROVIDERS: ProviderDef[] = [
   {
-    id: 'anthropic',
-    label: 'Anthropic Claude',
-    envVar: 'ANTHROPIC_API_KEY',
-    helpUrl: 'https://console.anthropic.com/settings/keys',
-    helpText: 'Default provider — used for all enrichment, summaries, and decisions.',
+    id: 'openrouter',
+    label: 'OpenRouter',
+    envVar: 'OPENROUTER_API_KEY',
+    helpUrl: 'https://openrouter.ai/keys',
+    helpText:
+      'Default provider — routes all enrichment, summaries, and decisions through OpenRouter (default model: minimax/minimax-m2.7).',
     supportsBaseUrl: true,
   },
 ];

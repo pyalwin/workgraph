@@ -20,7 +20,7 @@
 
 You probably ship work that lives across a dozen tools. A Jira ticket, a Notion design doc, a Slack thread debating it, a Granola meeting where the call was made, a GitHub PR that landed it. The signal is everywhere; the picture is nowhere.
 
-**WorkGraph stitches those scattered artifacts back into the thing they actually were: one piece of work.** Every connector runs against your account. Every byte of data lives on your laptop. Every embedding is computed, stored, and queried locally. The only outbound traffic is to the source APIs you choose and to Anthropic for summarization.
+**WorkGraph stitches those scattered artifacts back into the thing they actually were: one piece of work.** Every connector runs against your account. Every byte of data lives on your laptop. Every embedding is computed, stored, and queried locally. The only outbound traffic is to the source APIs you choose and to your configured AI provider for summarization.
 
 ---
 
@@ -61,7 +61,7 @@ You probably ship work that lives across a dozen tools. A Jira ticket, a Notion 
 | Framework | [Next.js 14](https://nextjs.org/) (App Router) + [React 18](https://react.dev/) |
 | Language | [TypeScript 5](https://www.typescriptlang.org/) |
 | Storage | [SQLite](https://sqlite.org/) via [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) + [`sqlite-vec`](https://github.com/asg017/sqlite-vec) for vector search |
-| LLM | [Anthropic Claude](https://anthropic.com/) (Opus, Sonnet, Haiku) |
+| LLM | [OpenRouter](https://openrouter.ai/) (default model: `minimax/minimax-m2.7`) via [Vercel AI SDK](https://ai-sdk.dev/) |
 | Tool integration | [Model Context Protocol](https://modelcontextprotocol.io/) |
 | UI | [Tailwind CSS](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/) primitives |
 | Graph viz | [`react-force-graph-2d`](https://github.com/vasturiano/react-force-graph) |
@@ -75,7 +75,7 @@ You probably ship work that lives across a dozen tools. A Jira ticket, a Notion 
 ### Prerequisites
 
 - Node.js 20+ or Bun 1.x
-- An [Anthropic API key](https://console.anthropic.com/)
+- An [OpenRouter API key](https://openrouter.ai/keys) (or whichever AI SDK provider you wire in)
 - OAuth credentials for whichever sources you want to connect (optional — you can start with just MCP-backed sources)
 
 ### 1. Clone and install
@@ -92,10 +92,12 @@ bun install
 Create `.env.local` in the project root:
 
 ```bash
-# Required — Claude API for summaries, classification, decision extraction
-ANTHROPIC_API_KEY=sk-ant-...
+# Required — AI provider key for summaries, classification, decision extraction.
+# Default provider is OpenRouter (model: minimax/minimax-m2.7). You can also
+# set this in Settings → AI; values saved there take precedence over env.
+OPENROUTER_API_KEY=sk-or-...
 
-# Required — encryption key for stored OAuth tokens
+# Required — encryption key for stored OAuth tokens and AI provider keys
 WORKGRAPH_SECRET_KEY=<generate with: bun scripts/gen-secret.ts>
 
 # Required — base URL for OAuth redirects (must match provider apps)
@@ -124,9 +126,11 @@ Open <http://localhost:3000>, wire up connectors under **Settings**, and run you
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | yes | Claude API key — used for enrichment, summaries, decisions, classification |
-| `WORKGRAPH_SECRET_KEY` | yes | 32-byte hex key (AES-GCM) for encrypting OAuth tokens at rest |
+| `OPENROUTER_API_KEY` | yes¹ | OpenRouter key — default provider, used for enrichment, summaries, decisions, classification (model: `minimax/minimax-m2.7`) |
+| `WORKGRAPH_SECRET_KEY` | yes | 32-byte hex key (AES-GCM) for encrypting OAuth tokens and stored AI provider keys |
 | `OAUTH_REDIRECT_BASE_URL` | yes | Public-facing base URL for OAuth callbacks (e.g. `http://localhost:3000`) |
+
+¹ Optional if you save the key in **Settings → AI** instead — the runtime checks the database first, then falls back to env.
 
 Per-connector OAuth client IDs and secrets are configured in the **Settings → Connectors** UI and stored encrypted in the database.
 
@@ -185,7 +189,7 @@ Every step is incremental and resumable — re-running any phase only touches wh
 - **Local-first by design.** The database is a single SQLite file under `data/`. It never leaves your machine.
 - **Encrypted tokens.** OAuth tokens are encrypted at rest with `WORKGRAPH_SECRET_KEY` (AES-256-GCM via [`src/lib/crypto.ts`](src/lib/crypto.ts)).
 - **No analytics, no telemetry.** This project does not phone home, ever.
-- **Outbound traffic.** Only to (a) source APIs you've explicitly connected and (b) the Anthropic API for summaries and classification.
+- **Outbound traffic.** Only to (a) source APIs you've explicitly connected and (b) your configured AI provider (OpenRouter by default) for summaries and classification.
 - **Open code.** Every line is in this repo — audit it yourself.
 
 ---

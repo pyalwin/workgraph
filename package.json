@@ -15,8 +15,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.73",
     "@modelcontextprotocol/sdk": "^1.0.4",
+    "@openrouter/ai-sdk-provider": "^2.9.0",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-popover": "^1.1.15",
     "@radix-ui/react-progress": "^1.1.8",
