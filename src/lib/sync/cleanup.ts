@@ -162,6 +162,24 @@ export function cleanupSourceData(source: string): CleanupResult {
     // Step 5: work_items themselves.
     const r = db.prepare('DELETE FROM work_items WHERE source = ?').run(source);
     result.itemsDeleted = r.changes;
+
+    // Step 6: clear cached last-sync counters on every connector config that
+    // points at this source. Without this, the connector tile keeps showing
+    // "1917 items · 5d ago" even after a cleanup. Source data is global so
+    // we reset across all workspaces using this source.
+    if (tableExists('workspace_connector_configs')) {
+      db.prepare(`
+        UPDATE workspace_connector_configs
+        SET last_sync_items = 0,
+            last_sync_completed_at = NULL,
+            last_sync_started_at = NULL,
+            last_sync_status = NULL,
+            last_sync_error = NULL,
+            last_sync_log = NULL,
+            updated_at = datetime('now')
+        WHERE source = ?
+      `).run(source);
+    }
   });
 
   tx();
