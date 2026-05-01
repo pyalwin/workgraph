@@ -477,6 +477,19 @@ export const aiProviderConfigs = sqliteTable('ai_provider_configs', {
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
 });
 
+// ─────── system / Inngest heartbeat ───────────────────────────────────────
+
+export const systemHealth = sqliteTable(
+  'system_health',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    kind: text('kind').notNull(),
+    detail: text('detail'),
+    ranAt: text('ran_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (t) => [index('idx_system_health_ran').on(t.ranAt)],
+);
+
 // Convenience: every table re-exported as `schema` for `drizzle({ schema })`.
 export const schema = {
   goals,
@@ -505,4 +518,5 @@ export const schema = {
   entityMentions,
   itemLinksChunks,
   aiProviderConfigs,
+  systemHealth,
 };

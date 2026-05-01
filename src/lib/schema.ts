@@ -265,6 +265,16 @@ export function initSchema() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Inngest heartbeat / pulse log. One row per scheduled tick. Trims
+    -- itself to the last 1000 rows on each insert to bound disk use.
+    CREATE TABLE IF NOT EXISTS system_health (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,            -- 'heartbeat' | 'jira.sync.tick' | …
+      detail TEXT,                   -- short JSON payload for debugging
+      ran_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_system_health_ran ON system_health(ran_at);
+
     CREATE TABLE IF NOT EXISTS item_links_chunks (
       link_id TEXT NOT NULL REFERENCES links(id),
       source_chunk_id INTEGER REFERENCES item_chunks(id),

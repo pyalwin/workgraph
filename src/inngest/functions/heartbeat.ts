@@ -1,0 +1,53 @@
+import { sql } from 'drizzle-orm';
+import { initSchema } from '@/lib/schema';
+import { getDrizzle } from '@/lib/db/client';
+import { systemHealth } from '@/lib/db/schema';
+import { inngest } from '../client';
+
+/**
+ * Heartbeat — fires every 5 minutes and writes one row to system_health.
+ * Phase 0 sanity check: confirms the scheduling loop, the serve endpoint,
+ * and the Drizzle write path all line up end-to-end.
+ *
+ * Also responds to a manual `workgraph/heartbeat.tick` event so we can
+ * trigger it on demand from the Inngest dev UI.
+ */
+export const heartbeat = inngest.createFunction(
+  {
+    id: 'heartbeat',
+    name: 'Workgraph heartbeat',
+    triggers: [
+      { cron: '*/5 * * * *' },
+      { event: 'workgraph/heartbeat.tick' },
+    ],
+  },
+  async ({ event, step }) => {
+    const insertedId = await step.run('record-heartbeat', () => {
+      initSchema();
+      const db = getDrizzle();
+
+      const result = db
+        .insert(systemHealth)
+        .values({
+          kind: 'heartbeat',
+          detail: JSON.stringify({
+            trigger: event.name === 'workgraph/heartbeat.tick' ? 'manual' : 'cron',
+            node: process.version,
+          }),
+        })
+        .returning({ id: systemHealth.id })
+        .all();
+
+      // Bound the table — keep the last 1000 rows.
+      db.run(
+        sql`DELETE FROM system_health WHERE id IN (
+          SELECT id FROM system_health ORDER BY id DESC LIMIT -1 OFFSET 1000
+        )`,
+      );
+
+      return result[0]?.id ?? null;
+    });
+
+    return { ok: true, insertedId };
+  },
+);
