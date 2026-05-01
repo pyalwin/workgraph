@@ -389,8 +389,9 @@ function SourceCardsArt() {
 }
 
 /* Step 2 — Stitch.
- * Two specific items (a meeting note + a Jira ticket) being linked
- * because both reference ACME-247. Shows the actual matching mechanism. */
+ * A meeting note and a ticket linked because they share a topic
+ * ("v2 schema"). Shows the actual matching mechanism without faking
+ * a project-specific issue key. */
 function LinkArt() {
   return (
     <svg viewBox="0 0 240 200" className="landing-step-svg" aria-hidden="true">
@@ -398,13 +399,13 @@ function LinkArt() {
       <g transform="translate(8 12)">
         <rect width="106" height="62" rx="5" className="source-card" />
         <text x="8" y="14" className="source-card-tag">
-          MEETING · 5/01
+          MEETING · APR 12
         </text>
         <line x1="8" y1="26" x2="92" y2="26" className="source-card-line" />
-        <line x1="8" y1="34" x2="48" y2="34" className="source-card-line" />
-        <text x="52" y="38" className="source-card-key">
-          ACME-247
+        <text x="8" y="38" className="source-card-key">
+          v2 schema
         </text>
+        <line x1="46" y1="34" x2="92" y2="34" className="source-card-line" />
         <line x1="8" y1="48" x2="86" y2="48" className="source-card-line" />
       </g>
 
@@ -412,11 +413,14 @@ function LinkArt() {
       <g transform="translate(126 124)">
         <rect width="106" height="62" rx="5" className="source-card" />
         <text x="8" y="14" className="source-card-tag accent">
-          ACME-247
+          TICKET
         </text>
-        <line x1="8" y1="26" x2="92" y2="26" className="source-card-line" />
-        <line x1="8" y1="34" x2="80" y2="34" className="source-card-line" />
-        <line x1="8" y1="48" x2="64" y2="48" className="source-card-line" />
+        <text x="8" y="30" className="source-card-key">
+          v2 schema
+        </text>
+        <line x1="46" y1="26" x2="80" y2="26" className="source-card-line" />
+        <line x1="8" y1="40" x2="92" y2="40" className="source-card-line" />
+        <line x1="8" y1="50" x2="64" y2="50" className="source-card-line" />
       </g>
 
       {/* Connecting curve — meeting → ticket */}
@@ -425,15 +429,14 @@ function LinkArt() {
         className="link-curve"
         fill="none"
       />
-      {/* Small endpoints */}
       <circle cx="96" cy="80" r="3" className="link-endpoint" />
       <circle cx="152" cy="138" r="3" className="link-endpoint accent" />
 
       {/* Floating signal label */}
       <g transform="translate(96 102)">
-        <rect width="64" height="18" rx="9" className="link-pill" />
-        <text x="32" y="12" className="link-pill-text">
-          issue key match
+        <rect width="68" height="18" rx="9" className="link-pill" />
+        <text x="34" y="12" className="link-pill-text">
+          topic match · 0.92
         </text>
       </g>
     </svg>
