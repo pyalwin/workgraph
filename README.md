@@ -22,8 +22,6 @@ You probably ship work that lives across a dozen tools. A Jira ticket, a Notion 
 
 **WorkGraph stitches those scattered artifacts back into the thing they actually were: one piece of work.** Every connector runs against your account. Every byte of data lives on your laptop. Every embedding is computed, stored, and queried locally. The only outbound traffic is to the source APIs you choose and to Anthropic for summarization.
 
-This project is **100% open source** under the [MIT License](#-license). Fork it, run it, extend it, or just read the code to see how it works.
-
 ---
 
 ## Table of Contents
