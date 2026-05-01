@@ -33,7 +33,7 @@ export default async function LandingPage() {
       <section className="landing-hero">
         <div className="landing-hero-text">
           <p className="landing-eyebrow">
-            <span className="landing-pill-dot" /> Open source · MIT licensed · v0.1
+            <span className="landing-pill-dot" /> Open source · v0.1
           </p>
           <h1 className="landing-title">
             Your work, finally
@@ -157,7 +157,7 @@ export default async function LandingPage() {
           WorkGraph
         </span>
         <span className="landing-foot-meta">
-          MIT licensed ·{' '}
+          Built by{' '}
           <a href="https://github.com/pyalwin" target="_blank" rel="noopener noreferrer">
             Arun Venkataramanan
           </a>{' '}
