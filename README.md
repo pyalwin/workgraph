@@ -20,7 +20,31 @@
 
 You probably ship work that lives across a dozen tools. A Jira ticket, a Notion design doc, a Slack thread debating it, a Granola meeting where the call was made, a GitHub PR that landed it. The signal is everywhere; the picture is nowhere.
 
-**WorkGraph stitches those scattered artifacts back into the thing they actually were: one piece of work.** Every connector runs against your account. Every byte of data lives on your laptop. Every embedding is computed, stored, and queried locally. The only outbound traffic is to the source APIs you choose and to your configured AI provider for summarization.
+**WorkGraph stitches those scattered artifacts back into the thing they actually were: one piece of work.**
+
+---
+
+## How to use it
+
+You have two choices — same code, same features, different ownership of the runtime.
+
+### Cloud (coming soon)
+
+A hosted, managed instance backed by **Supabase** (Postgres + pgvector with Row-Level Security per tenant). We run the app, you sign in, your data lives in an isolated tenant. Zero setup, free trial, paid tier for teams.
+
+> **Status:** waitlist. [Sign up here](https://github.com/pyalwin/workgraph/issues/new?title=Cloud+waitlist&body=Add+me+to+the+cloud+waitlist) — we'll email when it opens.
+
+### Self-host (available now)
+
+Clone, deploy, own everything. Your code, your database, your AI key, your data — never touches our infrastructure. Recommended for security-sensitive teams and anyone who'd rather pay for infra than for SaaS.
+
+- **Local** — `bun dev` on your laptop. Database is a single **SQLite file** (`data/workgraph.db`) with `sqlite-vec` for embeddings. Zero external services.
+- **Vercel** — push to your own Vercel project, behind your auth.
+- **Docker** — `docker compose up`.
+
+Same codebase as the cloud version. The only difference is the database adapter (SQLite for self-host, Supabase for cloud) and who runs the Inngest workers.
+
+See [**Quickstart**](#-quickstart) below.
 
 ---
 
@@ -186,11 +210,20 @@ Every step is incremental and resumable — re-running any phase only touches wh
 
 ## Privacy & Security
 
-- **Local-first by design.** The database is a single SQLite file under `data/`. It never leaves your machine.
+**Self-hosted mode** (today)
+
+- **Local-first by design.** Your database is yours — SQLite on disk for single-tenant installs, Postgres in your cloud account for team deployments. The application never makes a connection to any database we operate.
 - **Encrypted tokens.** OAuth tokens are encrypted at rest with `WORKGRAPH_SECRET_KEY` (AES-256-GCM via [`src/lib/crypto.ts`](src/lib/crypto.ts)).
 - **No analytics, no telemetry.** This project does not phone home, ever.
-- **Outbound traffic.** Only to (a) source APIs you've explicitly connected and (b) your configured AI provider (OpenRouter by default) for summaries and classification.
+- **Outbound traffic.** Only to (a) the source APIs you've connected and (b) your configured AI provider (OpenRouter by default).
 - **Open code.** Every line is in this repo — audit it yourself.
+
+**Cloud mode** (coming soon)
+
+- **Per-tenant isolation.** Each tenant gets its own database with row-level encryption keyed off `WORKGRAPH_SECRET_KEY` derived per tenant.
+- **Same OSS code.** The hosted offering runs the exact same codebase as the self-hosted version. No proprietary fork.
+- **Bring your own AI key.** Your AI provider key is stored encrypted; we charge for the infra, not for inference. Or use the included pooled key with metered billing.
+- **Open audit.** Anything we run, you can run yourself. If you stop trusting us, you take your data and self-host.
 
 ---
 

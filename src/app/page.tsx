@@ -42,8 +42,8 @@ export default async function LandingPage() {
           </h1>
           <p className="landing-lede">
             WorkGraph stitches scattered tickets, docs, meetings, and chat back into the
-            thing they actually were — one piece of work. Local-first. Bring your own AI.
-            Yours to fork.
+            thing they actually were — one piece of work. Open source. Bring your own AI.
+            Use it as a managed cloud or self-host.
           </p>
           <div className="landing-cta-row">
             <Link href={ctaHref} className="landing-cta-primary">
@@ -51,12 +51,12 @@ export default async function LandingPage() {
               <span aria-hidden="true">→</span>
             </Link>
             <a
-              href="https://github.com/pyalwin/workgraph#quickstart"
+              href="https://github.com/pyalwin/workgraph#how-to-use-it"
               className="landing-cta-secondary"
               target="_blank"
               rel="noopener noreferrer"
             >
-              Read the quickstart
+              Self-host instead →
             </a>
           </div>
         </div>

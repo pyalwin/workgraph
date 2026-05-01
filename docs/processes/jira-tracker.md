@@ -10,15 +10,51 @@
 For each JIRA project a user wants to track, WorkGraph runs a recurring
 pipeline that:
 
-1. Pulls all relevant issues into local SQLite
+1. Pulls all relevant issues into the workspace's database
 2. Enriches every issue into a graph-quality node (AI summary + characteristic metadata)
 3. Synthesizes a project-level health view (summary + dashboard metrics)
 4. Extracts action items, measurable goals, and per-user trackers
 5. Flags anomalies — stale work, scope creep, priority inversions, missed deadlines
 
-Everything is local-first. The AI calls go to whichever provider is configured
-in Settings → AI (OpenRouter by default). Source data goes only to the JIRA
-host the user authenticated with.
+The AI calls go to whichever provider is configured in Settings → AI
+(OpenRouter by default). Source data goes only to the JIRA host the user
+authenticated with.
+
+---
+
+## Where this runs
+
+WorkGraph ships with two database adapters and two deployment modes. The application code is identical across both — only the persistence layer and runtime topology differ.
+
+| | Self-hosted (open source) | Cloud (managed by us) |
+|---|---|---|
+| **App** | Vercel/Fly/Render deployment in user's account, or `bun dev` on a laptop | Our Vercel project |
+| **Database** | **SQLite + sqlite-vec** — single file, zero infra | **Supabase** — Postgres 15 + pgvector + Row-Level Security |
+| **Database file** | `data/workgraph.db` on disk, the user's responsibility | Per-tenant logical isolation via RLS policies; pooled connections via PgBouncer |
+| **Background work** | Inngest functions hit user's `/api/inngest` endpoint; user's Inngest account | Our Inngest account; events fan out to per-tenant function invocations in our deployment |
+| **AI provider** | User's key, user's cost | Tenant brings their own key, OR pays metered for our pooled key |
+| **Auth** | User's WorkOS tenant | Our WorkOS tenant + SSO |
+| **Encryption secret** | User's `WORKGRAPH_SECRET_KEY` (env) | Derived per-tenant from a master key in our KMS |
+| **We can read user data** | **No** — we have no connection to it | Yes, but only the data they upload; AI inputs/outputs encrypted at rest |
+
+**Why SQLite for self-host?** It's the lowest possible barrier. One file, no separate database server, no Docker, no provisioning. `bun dev` and you're in. `sqlite-vec` covers the vector workload up to comfortable single-user / small-team sizes.
+
+**Why Supabase for cloud?**
+
+- Postgres 15 + pgvector — proven for the workload, plenty of headroom
+- Row-Level Security gives us per-tenant isolation without per-tenant schemas (cheaper to operate)
+- First-class Vercel integration (zero-config connection pooling)
+- Realtime subscriptions if we ever want live UI without polling
+- Storage for any file artifacts (meeting attachments, exported reports)
+- Generous free tier so the cloud's free trial costs us little
+
+We considered **Neon** (great Postgres-only option) and **Turso** (SQLite at the edge, would let us reuse the SQLite adapter). Both viable; Supabase wins on RLS + Vercel integration for our shape.
+
+**One codebase, two adapters.** `src/lib/db.ts` becomes a thin facade. `src/lib/db/sqlite.ts` and `src/lib/db/supabase.ts` implement a common `DbAdapter` interface. Drizzle ORM unifies the SQL on both sides. Everything above the adapter is unchanged.
+
+We never read user data on the self-hosted side. Inngest Cloud, in either mode, sees event names and signed payloads — never row-level data.
+
+---
 
 ---
 
