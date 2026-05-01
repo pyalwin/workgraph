@@ -4,7 +4,9 @@ import { isCryptoConfigured } from '@/lib/crypto';
 
 export const dynamic = 'force-dynamic';
 
-const SUPPORTED_PROVIDERS = new Set(['openrouter']);
+// Migrating from 'openrouter' → 'gateway'; keep openrouter accepted for one
+// release so an old client doesn't crash before the user re-saves.
+const SUPPORTED_PROVIDERS = new Set(['gateway', 'openrouter']);
 
 function unsupported(id: string) {
   return NextResponse.json(

@@ -1,4 +1,4 @@
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import { createGateway } from '@ai-sdk/gateway';
 import { getProviderConfig } from './config-store';
 
 export type AITask =
@@ -21,40 +21,40 @@ const TASK_MODELS: Record<AITask, string> = {
 };
 
 /**
- * Resolve credentials for the active AI provider.
+ * Resolve credentials for the Vercel AI Gateway — a managed router that
+ * fronts OpenAI / Anthropic / Google / Mistral / etc. behind one endpoint
+ * and one key (`vck_...`).
  *
- * Lookup order: stored config (Settings → AI tab) → process env. Stored values
- * win so a user can rotate keys via the UI without restarting the daemon.
- * If the DB or crypto helper is unavailable (fresh install), we fall back
- * silently to env so the runtime still works.
+ * Lookup order: stored config (Settings → AI tab) → process env. Stored
+ * values win so a key can be rotated via the UI without restarting.
+ * Trims to defend against trailing-newline paste artifacts that turn
+ * `Bearer vck_…\n` into a malformed Authorization header.
  */
-function resolveOpenRouterCredentials(): { apiKey?: string; baseURL?: string } {
-  let apiKey: string | undefined = process.env.OPENROUTER_API_KEY?.trim();
-  let baseURL: string | undefined = process.env.OPENROUTER_BASE_URL?.trim();
+function resolveGatewayCredentials(): { apiKey?: string; baseURL?: string } {
+  let apiKey: string | undefined = process.env.AI_GATEWAY_API_KEY?.trim();
+  let baseURL: string | undefined = process.env.AI_GATEWAY_BASE_URL?.trim();
   let source: 'env' | 'db' | 'none' = apiKey ? 'env' : 'none';
   try {
-    const stored = getProviderConfig('openrouter');
+    const stored = getProviderConfig('gateway');
     if (stored?.apiKey) {
-      // Trim — pasted keys often have trailing whitespace or newlines that
-      // break the Authorization header.
       apiKey = stored.apiKey.trim();
       source = 'db';
     }
     if (stored?.baseUrl) baseURL = stored.baseUrl.trim();
   } catch (err) {
-    // DB or crypto unavailable — env-only fallback. Surface the why so
-    // it doesn't get diagnosed as "Missing Authentication header" later.
-    console.warn(`[ai] getProviderConfig('openrouter') failed:`, (err as Error).message);
+    console.warn(`[ai] getProviderConfig('gateway') failed:`, (err as Error).message);
   }
 
   if (!apiKey) {
-    console.warn(`[ai] No OpenRouter key resolved — source=${source}. Set one in Settings → AI or via OPENROUTER_API_KEY.`);
+    console.warn(
+      `[ai] No Vercel AI Gateway key resolved (source=${source}). Set AI_GATEWAY_API_KEY or use Settings → AI.`,
+    );
   }
   return { apiKey, baseURL };
 }
 
 export function getModel(task: AITask) {
-  const { apiKey, baseURL } = resolveOpenRouterCredentials();
-  const provider = createOpenRouter({ apiKey, baseURL });
+  const { apiKey, baseURL } = resolveGatewayCredentials();
+  const provider = createGateway({ apiKey, baseURL });
   return provider(TASK_MODELS[task]);
 }

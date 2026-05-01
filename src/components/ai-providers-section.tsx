@@ -20,12 +20,12 @@ interface ProviderDef {
 
 const SUPPORTED_PROVIDERS: ProviderDef[] = [
   {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    envVar: 'OPENROUTER_API_KEY',
-    helpUrl: 'https://openrouter.ai/keys',
+    id: 'gateway',
+    label: 'Vercel AI Gateway',
+    envVar: 'AI_GATEWAY_API_KEY',
+    helpUrl: 'https://vercel.com/dashboard/ai/api-keys',
     helpText:
-      'Default provider — routes all enrichment, summaries, and decisions through OpenRouter (default model: google/gemini-2.5-flash-lite).',
+      'Default provider — routes all enrichment, summaries, and decisions through the Vercel AI Gateway (default model: google/gemini-2.5-flash-lite). Key starts with vck_.',
     supportsBaseUrl: true,
   },
 ];

@@ -1,4 +1,12 @@
-import { getProviderConfig } from '../src/lib/ai/config-store';
+import { config } from 'dotenv';
+import { join } from 'path';
+
+config({ path: join(process.cwd(), '.env.local') });
+config({ path: join(process.cwd(), '.env') });
+
+import('../src/lib/ai/config-store').then(({ getProviderConfig }) => run(getProviderConfig));
+
+function run(getProviderConfig: typeof import('../src/lib/ai/config-store').getProviderConfig) {
 
 const cfg = getProviderConfig('openrouter');
 console.log(
@@ -13,3 +21,4 @@ console.log(
     : null,
 );
 console.log('env OPENROUTER_API_KEY len:', process.env.OPENROUTER_API_KEY?.length ?? 'undefined');
+}
