@@ -14,7 +14,12 @@ import { getDb } from '../db';
 import { initSchema } from '../schema';
 import { getModel } from '../ai';
 
-const TICKET_LIMIT = 80;
+// Generous — Gemini 2.5 Flash Lite has a 1M context window. Per-ticket
+// lines are ~30-80 tokens, so 300 tickets is ~10-25k tokens of input,
+// well under the practical budget. The point of the README is "what is
+// this project" — needs to see most/all of the work to extract themes
+// accurately.
+const TICKET_LIMIT = 300;
 const ENTITY_LIMIT = 30;
 
 interface ReadmeContext {
@@ -70,10 +75,14 @@ function gatherContext(projectKey: string): ReadmeContext | null {
       item_type: string;
     }>;
 
+  // Compact format — title + status. Use AI summary when present; otherwise
+  // omit the body entirely. Per-ticket overhead drops from ~250 chars to
+  // ~80 chars when there's no summary, letting us include 3-4× more tickets
+  // in the same token budget.
   const ticketLines = tickets.map((t) => {
     const status = (t.status ?? 'unknown').padEnd(8);
-    const blurb = t.summary ?? '';
-    return `[${status}] ${t.source_id} (${t.item_type}): ${t.title}${blurb ? ` — ${blurb.slice(0, 200)}` : ''}`;
+    const blurb = t.summary ? ` — ${t.summary.slice(0, 180)}` : '';
+    return `[${status}] ${t.source_id} (${t.item_type}): ${t.title}${blurb}`;
   });
 
   // Top entities by mention count, scoped to this project

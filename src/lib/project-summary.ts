@@ -72,85 +72,171 @@ function computeQuickFallback(projectKey: string, projectName: string): string {
   }
 }
 
+// Generous limits — Gemini 2.5 Flash Lite has a 1M context window so we can
+// afford to ground the AI in the full project. A compact ticket line is
+// 30-80 tokens; 250 lines = ~10-20k input tokens, well under budget.
+const RECAP_DONE_LIMIT = 200;
+const RECAP_ACTIVE_LIMIT = 100;
+
 export async function generateAndStore(projectKey: string, projectName: string): Promise<string> {
   const db = getDb();
 
-  // Gather context for the summary
-  const tickets = db.prepare(`
-    SELECT source_id, title, status, body FROM work_items
-    WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
+  // Pull both done AND active tickets so the recap can speak to "in progress"
+  // and "watch" with real grounding. The schema uses both `metadata.project`
+  // (legacy) and `metadata.entity_key` (new) — match either so older items
+  // aren't silently dropped.
+  const projectFilter = `(json_extract(metadata, '$.project') = ? OR json_extract(metadata, '$.entity_key') = ?)`;
+
+  const doneTickets = db.prepare(`
+    SELECT source_id, title, status, summary, body, updated_at
+    FROM work_items
+    WHERE source = 'jira' AND ${projectFilter}
       AND status IN ('done', 'closed', 'resolved')
-    ORDER BY updated_at DESC
-    LIMIT 30
-  `).all(projectKey) as { source_id: string; title: string; status: string; body: string | null }[];
+    ORDER BY COALESCE(updated_at, created_at) DESC
+    LIMIT ${RECAP_DONE_LIMIT}
+  `).all(projectKey, projectKey) as Array<{
+    source_id: string;
+    title: string;
+    status: string;
+    summary: string | null;
+    body: string | null;
+    updated_at: string | null;
+  }>;
 
-  // Find linked PRs for these tickets
-  const allPRs = db.prepare(`
-    SELECT source_id, title FROM work_items WHERE source = 'github'
-  `).all() as { source_id: string; title: string }[];
+  const activeTickets = db.prepare(`
+    SELECT source_id, title, status, summary, priority,
+           json_extract(metadata, '$.last_commented_at') AS last_at
+    FROM work_items
+    WHERE source = 'jira' AND ${projectFilter}
+      AND status IN ('active', 'open', 'in_progress', 'to_do')
+    ORDER BY COALESCE(updated_at, created_at) DESC
+    LIMIT ${RECAP_ACTIVE_LIMIT}
+  `).all(projectKey, projectKey) as Array<{
+    source_id: string;
+    title: string;
+    status: string;
+    summary: string | null;
+    priority: string | null;
+    last_at: string | null;
+  }>;
 
-  const ticketSummaries = tickets.map(t => {
-    const linkedPRs = allPRs.filter(pr => {
-      const text = pr.title + ' ' + pr.source_id;
-      return text.includes(t.source_id);
-    });
-    const prList = linkedPRs.length > 0
-      ? linkedPRs.map(pr => `  - PR: ${pr.title}`).join('\n')
-      : '';
-    return `${t.source_id}: ${t.title}${prList ? '\n' + prList : ''}`;
-  }).join('\n');
-
-  if (tickets.length === 0) {
-    const fallback = `No recently completed tickets for ${projectName}.`;
+  if (doneTickets.length === 0 && activeTickets.length === 0) {
+    const fallback = `No tickets in scope for ${projectName} yet.`;
     storeSummary(projectKey, projectName, fallback);
     return fallback;
   }
 
-  // Generate via Claude Haiku
+  // Status breakdown — tells the AI the volume context.
+  const statusBreakdown = db.prepare(`
+    SELECT status, COUNT(*) AS c
+    FROM work_items
+    WHERE source = 'jira' AND ${projectFilter}
+    GROUP BY status
+    ORDER BY c DESC
+  `).all(projectKey, projectKey) as Array<{ status: string | null; c: number }>;
+
+  // Top entity themes for context (what the project is about)
+  const themes = db.prepare(`
+    SELECT e.canonical_form, COUNT(DISTINCT em.item_id) AS c
+    FROM entities e
+    JOIN entity_mentions em ON em.entity_id = e.id
+    JOIN work_items wi ON wi.id = em.item_id
+    WHERE e.entity_type IN ('theme', 'capability')
+      AND wi.source = 'jira' AND ${projectFilter}
+    GROUP BY e.id
+    ORDER BY c DESC
+    LIMIT 15
+  `).all(projectKey, projectKey) as Array<{ canonical_form: string; c: number }>;
+
+  // Linked PRs — find via cross-references in the links table (cheaper than
+  // the loop-and-substring scan we used to do).
+  const linkedPrs = db.prepare(`
+    SELECT pr.title, t.source_id AS ticket_key
+    FROM work_items pr
+    JOIN links l ON (l.source_item_id = pr.id OR l.target_item_id = pr.id)
+    JOIN work_items t ON (t.id = l.source_item_id OR t.id = l.target_item_id)
+    WHERE pr.source = 'github'
+      AND t.source = 'jira' AND ${projectFilter}
+      AND t.status IN ('done', 'closed', 'resolved')
+      AND t.id != pr.id
+    LIMIT 200
+  `).all(projectKey, projectKey) as Array<{ title: string; ticket_key: string }>;
+
+  const prsByTicket = new Map<string, string[]>();
+  for (const pr of linkedPrs) {
+    const arr = prsByTicket.get(pr.ticket_key) ?? [];
+    arr.push(pr.title);
+    prsByTicket.set(pr.ticket_key, arr);
+  }
+
+  function ticketLine(t: { source_id: string; title: string; summary: string | null; body?: string | null }) {
+    const blurb = t.summary
+      ? ` — ${t.summary.slice(0, 200)}`
+      : t.body
+        ? ` — ${t.body.replace(/\s+/g, ' ').slice(0, 160)}`
+        : '';
+    return `${t.source_id}: ${t.title}${blurb}`;
+  }
+
+  const doneLines = doneTickets.map((t) => {
+    const prs = prsByTicket.get(t.source_id) ?? [];
+    const prSuffix = prs.length > 0 ? `\n    PRs: ${prs.slice(0, 3).join(' · ')}` : '';
+    return `  ${ticketLine(t)}${prSuffix}`;
+  }).join('\n');
+
+  const activeLines = activeTickets.map((t) => {
+    const pri = t.priority ? `[${t.priority.toUpperCase()}] ` : '';
+    return `  ${pri}${ticketLine(t)}`;
+  }).join('\n');
+
+  const statusLine = statusBreakdown
+    .filter((s) => s.status)
+    .map((s) => `${s.status}: ${s.c}`)
+    .join(' · ');
+  const themeLine = themes.map((t) => `${t.canonical_form} (${t.c})`).join(', ') || '(none extracted yet)';
+
+  // Generate
   try {
     const { text: summary } = await generateText({
       model: getModel('project-summary'),
-      maxOutputTokens: 500,
-      prompt: `You are writing a detailed project health summary for an engineering leadership dashboard. The audience is a VP of Engineering who wants to understand what's happening in this project at a glance.
+      maxOutputTokens: 800,
+      prompt: `You are writing a detailed project health summary for an engineering leadership dashboard. Audience: VP of Engineering who wants to understand what's happening in this project at a glance.
 
 Project: ${projectName} (${projectKey})
+Status breakdown: ${statusLine || '(none)'}
+Top themes: ${themeLine}
 
-Recent completed tickets and their linked PRs:
-${ticketSummaries}
+═══════════════════════════════════════
+Recently completed (${doneTickets.length} of ${doneTickets.length} shown):
+${doneLines || '  (none)'}
+═══════════════════════════════════════
+In progress (${activeTickets.length} shown):
+${activeLines || '  (none)'}
+═══════════════════════════════════════
 
-Write a rich, descriptive summary using EXACTLY this structure. Each section MUST be its own paragraph separated by a blank line:
+Write a summary using EXACTLY this structure. Each section MUST be its own paragraph separated by a blank line:
 
-**What shipped:** Use bullet points to list 3-5 key deliverables. Each bullet should name the feature and briefly explain what it does or why it matters. Group related items.
+**What shipped:** Bullet points listing 4-6 key deliverables. Group related items into themes ("Auth & SSO: …", "Catalog: …"). Each bullet names the feature in bold and briefly explains what it does or why it matters. Reference specific tickets sparingly — only when calling out a notable individual deliverable.
 
-**In progress:** 1-2 sentences about active work — what's being built next.
+**In progress:** 2-3 sentences naming the major work-streams active right now. Pull from the "In progress" list above. Be specific about WHAT is being built (capabilities, surfaces, integrations), not just project codes.
 
-**Watch:** 1-2 sentences flagging risks — repeated bug fixes (instability), stale areas, or bottlenecks.
-
-Example format:
-**What shipped:**
-- **Feature name** — what it does and why it matters
-- **Another feature** — brief explanation
-- **Bug fix area** — what was fixed and the impact
-
-**In progress:** Description of active work.
-
-**Watch:** Any risks or areas needing attention.
+**Watch:** 1-2 sentences flagging real risks visible in the data: repeated bugs (instability), areas with high churn but no shipped output, blockers, deadline pressure. If nothing concerning is genuinely visible, say so honestly.
 
 Rules:
-- Each section header (**What shipped:**, **In progress:**, **Watch:**) must start on its own line with a blank line before it
-- Use bullet points (- ) for the shipped section, not prose paragraphs
-- Bold the feature/item name in each bullet with **name**
+- Section headers (**What shipped:**, **In progress:**, **Watch:**) on their own lines with a blank line before each
+- Use bullet points (- ) for the shipped section
+- Bold the feature/item name with **name**
 - Do NOT include a title or heading before the first section
-- Do NOT repeat project name, ticket counts, completion %, or velocity — shown separately in dashboard
-- 150-250 words total`,
+- Do NOT repeat project name, ticket counts, completion %, or velocity — those are shown separately
+- 200-350 words total
+- Be specific. "Improved performance" is bad; "p95 invoice ingestion latency reduced from 12s to 3s" is good.`,
     });
 
     storeSummary(projectKey, projectName, summary);
     return summary;
   } catch (e) {
-    // Surface to dev-server stderr so the failure is debuggable.
     console.error(`[project-summary] AI call failed for ${projectKey}:`, (e as Error).message);
-    return `${projectName}: ${tickets.length} tickets completed recently.`;
+    return `${projectName}: ${doneTickets.length} tickets completed recently.`;
   }
 }
 
