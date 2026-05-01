@@ -10,7 +10,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-14-black?logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Powered by Claude](https://img.shields.io/badge/Powered%20by-Claude-D97757?logo=anthropic&logoColor=white)](https://anthropic.com/)
 
-[**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Contributing**](#-contributing)
+[**Quickstart**](#-quickstart) · [**Features**](#-features) · [**Contributing**](CONTRIBUTING.md) · [**License**](LICENSE)
 
 </div>
 
@@ -34,9 +34,8 @@ You probably ship work that lives across a dozen tools. A Jira ticket, a Notion 
 - [Data Flow](#-data-flow)
 - [Privacy & Security](#-privacy--security)
 - [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
 - [Acknowledgments](#-acknowledgments)
+
 
 ---
 
@@ -201,57 +200,6 @@ Every step is incremental and resumable — re-running any phase only touches wh
 - [ ] CI / GitHub Actions
 
 Have an idea? [Open an issue](https://github.com/pyalwin/workgraph/issues/new) or [start a discussion](https://github.com/pyalwin/workgraph/discussions).
-
----
-
-## Contributing
-
-**Contributions are very welcome.** WorkGraph is open source under MIT and built to be hacked on.
-
-### How to contribute
-
-1. **Fork** the repo and create a feature branch (`git checkout -b feat/your-feature`).
-2. **Build something.** Add a connector, fix a bug, improve the UI, write docs.
-3. **Commit** with a clear message (the project follows conventional-ish prefixes like `feat:`, `fix:`, `docs:`, `chore:`).
-4. **Open a pull request** against `main`. Describe what changed and why.
-
-### Good first issues
-
-- Adding a new connector — implement the adapter contract in [`src/lib/connectors/types.ts`](src/lib/connectors/types.ts).
-- Improving chunking strategies for long documents.
-- Adding tests (the project is currently test-light by design — help us change that).
-- UI polish in any module.
-
-### Code style
-
-- TypeScript everywhere, strict mode.
-- Prefer small, focused functions over deep abstractions.
-- Server logic in `src/lib/`, UI in `src/components/` and `src/app/`.
-- Run `next lint` before pushing.
-
-### Reporting bugs
-
-Open an [issue](https://github.com/pyalwin/workgraph/issues/new) with:
-- What you expected to happen
-- What actually happened
-- Steps to reproduce
-- Your environment (Node/Bun version, OS)
-
----
-
-## License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for the full text.
-
-```
-Copyright (c) 2026 Arun Venkataramanan
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction…
-```
-
-You're free to use, copy, modify, merge, publish, distribute, sublicense, and sell copies — for any purpose, commercial or otherwise.
 
 ---
 
