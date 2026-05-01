@@ -175,7 +175,7 @@ workgraph/
 2. **Enrich** — Claude Haiku adds summaries, tags, and authorship signals.
 3. **Extract entities** — Issue keys, URLs, mentions, and dates are pulled into a structured form.
 4. **Embed** — Each item (and its chunks) gets a vector embedding stored in `sqlite-vec`.
-5. **Link** — `crossref.ts` builds edges in the `links` table from explicit references (e.g. `PEX-123`), URL matches, title similarity, and vector neighbors.
+5. **Link** — `crossref.ts` builds edges in the `links` table from explicit references (e.g. `ACME-247`), URL matches, title similarity, and vector neighbors.
 6. **Classify** — Items are assigned to user-defined goals using keywords + embeddings.
 7. **Assemble** — Connected components become workstreams; Claude Sonnet writes a narrative for each.
 8. **Surface** — The UI queries this graph for the overview, knowledge view, project pages, and metrics.

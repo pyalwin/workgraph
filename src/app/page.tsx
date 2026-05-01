@@ -94,7 +94,7 @@ export default async function LandingPage() {
         <ol className="landing-steps">
           <li className="landing-step">
             <div className="landing-step-art" aria-hidden="true">
-              <ScatterArt />
+              <SourceCardsArt />
             </div>
             <div className="landing-step-body">
               <span className="landing-step-num">01 · Connect</span>
@@ -117,7 +117,7 @@ export default async function LandingPage() {
 
           <li className="landing-step landing-step-reverse">
             <div className="landing-step-art" aria-hidden="true">
-              <StitchArt />
+              <LinkArt />
             </div>
             <div className="landing-step-body">
               <span className="landing-step-num">02 · Stitch</span>
@@ -138,7 +138,7 @@ export default async function LandingPage() {
 
           <li className="landing-step">
             <div className="landing-step-art" aria-hidden="true">
-              <SurfaceArt />
+              <NarrativeArt />
             </div>
             <div className="landing-step-body">
               <span className="landing-step-num">03 · Surface</span>
@@ -225,21 +225,16 @@ export default async function LandingPage() {
 
       {/* ─── Final CTA ──────────────────────── */}
       <section className="landing-final">
-        <div className="landing-final-art" aria-hidden="true">
-          <GraphArt density="sparse" />
-        </div>
-        <div className="landing-final-text">
-          <p className="landing-section-eyebrow">Ready when you are</p>
-          <h2>Ship the truth, not the chase.</h2>
-          <p>
-            Stop reconstructing context across a dozen tabs. Run WorkGraph on your machine
-            and see the work as it actually moves.
-          </p>
-          <Link href={ctaHref} className="landing-cta-primary landing-cta-final">
-            {ctaLabel}
-            <span aria-hidden="true">→</span>
-          </Link>
-        </div>
+        <p className="landing-section-eyebrow">Ready when you are</p>
+        <h2>Ship the truth, not the chase.</h2>
+        <p>
+          Stop reconstructing context across a dozen tabs. Run WorkGraph on your machine
+          and see the work as it actually moves.
+        </p>
+        <Link href={ctaHref} className="landing-cta-primary landing-cta-final">
+          {ctaLabel}
+          <span aria-hidden="true">→</span>
+        </Link>
       </section>
 
       <footer className="landing-foot">
@@ -360,109 +355,140 @@ function GraphArt({ density = 'rich' }: GraphProps) {
   );
 }
 
-/* Step 1 — scattered nodes, no connections yet. */
-function ScatterArt() {
-  const dots = [
-    { x: 30, y: 40, r: 6 },
-    { x: 110, y: 25, r: 5 },
-    { x: 170, y: 70, r: 4 },
-    { x: 60, y: 100, r: 5 },
-    { x: 130, y: 140, r: 6 },
-    { x: 30, y: 160, r: 4 },
-    { x: 200, y: 130, r: 5 },
-    { x: 100, y: 180, r: 5 },
-    { x: 175, y: 175, r: 4 },
-    { x: 50, y: 60, r: 4 },
+/* Step 1 — Connect.
+ * Loose stack of source "cards" — each has a tag and a few text lines.
+ * Conveys "individual feeds", not yet connected. */
+function SourceCardsArt() {
+  const cards = [
+    { x: 12, y: 18, rot: -4, tag: 'JIRA', accent: true },
+    { x: 96, y: 6, rot: 3, tag: 'NOTION' },
+    { x: 156, y: 60, rot: -2, tag: 'SLACK' },
+    { x: 28, y: 94, rot: 2, tag: 'GITHUB' },
+    { x: 110, y: 122, rot: -3, tag: 'GRANOLA' },
   ];
   return (
-    <svg viewBox="0 0 230 200" className="landing-step-svg" aria-hidden="true">
-      {dots.map((d, i) => (
-        <circle key={i} cx={d.x} cy={d.y} r={d.r} className="step-dot" />
+    <svg viewBox="0 0 240 200" className="landing-step-svg" aria-hidden="true">
+      {cards.map((c, i) => (
+        <g key={i} transform={`translate(${c.x} ${c.y}) rotate(${c.rot})`}>
+          <rect
+            width="72"
+            height="56"
+            rx="5"
+            className={`source-card ${c.accent ? 'accent' : ''}`}
+          />
+          <text x="8" y="14" className="source-card-tag">
+            {c.tag}
+          </text>
+          <line x1="8" y1="26" x2="60" y2="26" className="source-card-line" />
+          <line x1="8" y1="34" x2="48" y2="34" className="source-card-line" />
+          <line x1="8" y1="42" x2="56" y2="42" className="source-card-line" />
+        </g>
       ))}
     </svg>
   );
 }
 
-/* Step 2 — clusters being linked. */
-function StitchArt() {
-  const nodes = [
-    { x: 40, y: 50, r: 5 },
-    { x: 90, y: 30, r: 4 },
-    { x: 80, y: 90, r: 5 },
-    { x: 160, y: 60, r: 5, accent: true },
-    { x: 200, y: 110, r: 4 },
-    { x: 150, y: 140, r: 5 },
-    { x: 60, y: 160, r: 5 },
-    { x: 110, y: 180, r: 4 },
-    { x: 190, y: 175, r: 5 },
-  ];
-  const edges: Array<[number, number]> = [
-    [0, 1], [0, 2], [1, 2],
-    [3, 4], [3, 5], [4, 5],
-    [6, 7], [7, 8],
-    [2, 3], [5, 7], [4, 8],
-  ];
+/* Step 2 — Stitch.
+ * Two specific items (a meeting note + a Jira ticket) being linked
+ * because both reference ACME-247. Shows the actual matching mechanism. */
+function LinkArt() {
   return (
-    <svg viewBox="0 0 230 220" className="landing-step-svg" aria-hidden="true">
-      {edges.map(([a, b], i) => (
-        <line
-          key={i}
-          x1={nodes[a].x}
-          y1={nodes[a].y}
-          x2={nodes[b].x}
-          y2={nodes[b].y}
-          className="step-edge"
-        />
-      ))}
-      {nodes.map((n, i) => (
-        <circle
-          key={i}
-          cx={n.x}
-          cy={n.y}
-          r={n.r}
-          className={`step-dot ${n.accent ? 'accent' : ''}`}
-        />
-      ))}
-    </svg>
-  );
-}
-
-/* Step 3 — full graph with one node highlighted, surfacing context. */
-function SurfaceArt() {
-  return (
-    <svg viewBox="0 0 230 220" className="landing-step-svg" aria-hidden="true">
-      <defs>
-        <radialGradient id="surfaceHalo" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#d97757" stopOpacity="0.25" />
-          <stop offset="100%" stopColor="#d97757" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <g className="step-edge-group">
-        <line x1="40" y1="50" x2="90" y2="30" />
-        <line x1="40" y1="50" x2="80" y2="90" />
-        <line x1="80" y1="90" x2="120" y2="105" />
-        <line x1="120" y1="105" x2="160" y2="60" />
-        <line x1="120" y1="105" x2="200" y2="110" />
-        <line x1="120" y1="105" x2="150" y2="140" />
-        <line x1="60" y1="160" x2="80" y2="90" />
-        <line x1="60" y1="160" x2="110" y2="180" />
-        <line x1="190" y1="175" x2="150" y2="140" />
+    <svg viewBox="0 0 240 200" className="landing-step-svg" aria-hidden="true">
+      {/* Top card — meeting */}
+      <g transform="translate(8 12)">
+        <rect width="106" height="62" rx="5" className="source-card" />
+        <text x="8" y="14" className="source-card-tag">
+          MEETING · 5/01
+        </text>
+        <line x1="8" y1="26" x2="92" y2="26" className="source-card-line" />
+        <line x1="8" y1="34" x2="48" y2="34" className="source-card-line" />
+        <text x="52" y="38" className="source-card-key">
+          ACME-247
+        </text>
+        <line x1="8" y1="48" x2="86" y2="48" className="source-card-line" />
       </g>
-      <circle cx="120" cy="105" r="32" fill="url(#surfaceHalo)" />
-      {[
-        { x: 40, y: 50, r: 5 },
-        { x: 90, y: 30, r: 4 },
-        { x: 80, y: 90, r: 5 },
-        { x: 160, y: 60, r: 5 },
-        { x: 200, y: 110, r: 4 },
-        { x: 150, y: 140, r: 4 },
-        { x: 60, y: 160, r: 5 },
-        { x: 110, y: 180, r: 4 },
-        { x: 190, y: 175, r: 4 },
-      ].map((n, i) => (
-        <circle key={i} cx={n.x} cy={n.y} r={n.r} className="step-dot" />
-      ))}
-      <circle cx="120" cy="105" r="9" className="step-dot accent" />
+
+      {/* Bottom card — ticket */}
+      <g transform="translate(126 124)">
+        <rect width="106" height="62" rx="5" className="source-card" />
+        <text x="8" y="14" className="source-card-tag accent">
+          ACME-247
+        </text>
+        <line x1="8" y1="26" x2="92" y2="26" className="source-card-line" />
+        <line x1="8" y1="34" x2="80" y2="34" className="source-card-line" />
+        <line x1="8" y1="48" x2="64" y2="48" className="source-card-line" />
+      </g>
+
+      {/* Connecting curve — meeting → ticket */}
+      <path
+        d="M 96 80 C 130 90, 130 130, 152 138"
+        className="link-curve"
+        fill="none"
+      />
+      {/* Small endpoints */}
+      <circle cx="96" cy="80" r="3" className="link-endpoint" />
+      <circle cx="152" cy="138" r="3" className="link-endpoint accent" />
+
+      {/* Floating signal label */}
+      <g transform="translate(96 102)">
+        <rect width="64" height="18" rx="9" className="link-pill" />
+        <text x="32" y="12" className="link-pill-text">
+          issue key match
+        </text>
+      </g>
+    </svg>
+  );
+}
+
+/* Step 3 — Surface.
+ * A single rendered "workstream summary" card — the AI-narrated output.
+ * Shows: source chips, heading, paragraph lines, decision badge. */
+function NarrativeArt() {
+  return (
+    <svg viewBox="0 0 260 200" className="landing-step-svg" aria-hidden="true">
+      <rect x="10" y="10" width="240" height="180" rx="8" className="narrative-card" />
+
+      {/* Top meta row: chips + decision badge */}
+      <g transform="translate(22 26)">
+        <rect width="44" height="14" rx="3" className="narrative-chip" />
+        <text x="22" y="10" className="narrative-chip-text">
+          jira
+        </text>
+        <rect x="50" width="48" height="14" rx="3" className="narrative-chip" />
+        <text x="74" y="10" className="narrative-chip-text">
+          slack
+        </text>
+        <rect x="104" width="56" height="14" rx="3" className="narrative-chip" />
+        <text x="132" y="10" className="narrative-chip-text">
+          notion
+        </text>
+
+        <rect x="190" width="38" height="14" rx="7" className="narrative-badge accent" />
+        <text x="209" y="10" className="narrative-badge-text">
+          shipped
+        </text>
+      </g>
+
+      {/* Heading */}
+      <line x1="22" y1="64" x2="178" y2="64" className="narrative-h" />
+      <line x1="22" y1="74" x2="138" y2="74" className="narrative-h" />
+
+      {/* Body paragraph lines */}
+      <line x1="22" y1="98" x2="226" y2="98" className="narrative-p" />
+      <line x1="22" y1="110" x2="218" y2="110" className="narrative-p" />
+      <line x1="22" y1="122" x2="200" y2="122" className="narrative-p" />
+      <line x1="22" y1="134" x2="170" y2="134" className="narrative-p" />
+
+      {/* Footer: timeline dots */}
+      <g transform="translate(22 160)">
+        <circle cx="0" cy="6" r="3" className="narrative-tick" />
+        <line x1="6" y1="6" x2="46" y2="6" className="narrative-tick-line" />
+        <circle cx="52" cy="6" r="3" className="narrative-tick" />
+        <line x1="58" y1="6" x2="98" y2="6" className="narrative-tick-line" />
+        <circle cx="104" cy="6" r="3" className="narrative-tick accent" />
+        <line x1="110" y1="6" x2="150" y2="6" className="narrative-tick-line" />
+        <circle cx="156" cy="6" r="3" className="narrative-tick" />
+      </g>
     </svg>
   );
 }

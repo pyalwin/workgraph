@@ -2844,6 +2844,129 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   stroke-width: 1;
 }
 
+/* Source cards (Step 1) + Link cards (Step 2) */
+.landing-step-svg .source-card {
+  fill: rgba(255, 255, 255, 0.85);
+  stroke: rgba(21, 20, 15, 0.14);
+  stroke-width: 1;
+}
+
+.landing-step-svg .source-card.accent {
+  stroke: rgba(217, 119, 87, 0.45);
+}
+
+.landing-step-svg .source-card-tag {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  fill: var(--ink-3, #53504a);
+}
+
+.landing-step-svg .source-card-tag.accent {
+  fill: #b04929;
+}
+
+.landing-step-svg .source-card-line {
+  stroke: var(--ink-5, #a4a09a);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+.landing-step-svg .source-card-key {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 7px;
+  font-weight: 600;
+  fill: #b04929;
+}
+
+/* Link curve + pill (Step 2) */
+.landing-step-svg .link-curve {
+  stroke: #d97757;
+  stroke-width: 1.4;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+
+.landing-step-svg .link-endpoint {
+  fill: var(--ink-2, #2a2822);
+}
+
+.landing-step-svg .link-endpoint.accent {
+  fill: #d97757;
+}
+
+.landing-step-svg .link-pill {
+  fill: #fff;
+  stroke: rgba(217, 119, 87, 0.35);
+  stroke-width: 1;
+}
+
+.landing-step-svg .link-pill-text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 7px;
+  fill: #b04929;
+  text-anchor: middle;
+}
+
+/* Narrative card (Step 3) */
+.landing-step-svg .narrative-card {
+  fill: rgba(255, 255, 255, 0.92);
+  stroke: rgba(21, 20, 15, 0.12);
+  stroke-width: 1;
+}
+
+.landing-step-svg .narrative-chip {
+  fill: var(--bone-2, #f3efe7);
+  stroke: rgba(21, 20, 15, 0.07);
+  stroke-width: 0.5;
+}
+
+.landing-step-svg .narrative-chip-text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 6.5px;
+  fill: var(--ink-3, #53504a);
+  text-anchor: middle;
+}
+
+.landing-step-svg .narrative-badge {
+  fill: rgba(217, 119, 87, 0.18);
+}
+
+.landing-step-svg .narrative-badge-text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 6.5px;
+  font-weight: 600;
+  fill: #b04929;
+  text-anchor: middle;
+}
+
+.landing-step-svg .narrative-h {
+  stroke: var(--ink-2, #2a2822);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+}
+
+.landing-step-svg .narrative-p {
+  stroke: var(--ink-5, #a4a09a);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.landing-step-svg .narrative-tick {
+  fill: var(--ink-5, #a4a09a);
+}
+
+.landing-step-svg .narrative-tick.accent {
+  fill: #d97757;
+}
+
+.landing-step-svg .narrative-tick-line {
+  stroke: rgba(21, 20, 15, 0.12);
+  stroke-width: 1;
+}
+
 .landing-step-num {
   display: inline-block;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -3055,15 +3178,12 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
 .landing-final {
   position: relative;
   z-index: 1;
-  max-width: 1000px;
+  max-width: 760px;
   margin: 0 auto 6rem;
   padding: 4rem 3rem;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr);
-  gap: 3rem;
-  align-items: center;
+  text-align: center;
   background:
-    radial-gradient(ellipse 80% 60% at 80% 50%, rgba(217, 119, 87, 0.08), transparent 70%),
+    radial-gradient(ellipse 80% 60% at 50% 50%, rgba(217, 119, 87, 0.08), transparent 70%),
     rgba(255, 255, 255, 0.5);
   border: 1px solid rgba(21, 20, 15, 0.08);
   border-radius: 16px;
@@ -3071,12 +3191,11 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   overflow: hidden;
 }
 
-.landing-final-text {
-  position: relative;
-  z-index: 1;
+.landing-final .landing-section-eyebrow {
+  margin-bottom: 0.85rem;
 }
 
-.landing-final-text h2 {
+.landing-final h2 {
   font-size: clamp(1.85rem, 3.4vw, 2.6rem);
   line-height: 1.1;
   letter-spacing: -0.025em;
@@ -3084,22 +3203,12 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
   margin: 0 0 0.85rem;
 }
 
-.landing-final-text p {
+.landing-final p {
   font-size: 1.05rem;
   line-height: 1.6;
   color: var(--ink-3, #53504a);
-  max-width: 480px;
-  margin: 0 0 2rem;
-}
-
-.landing-final-art {
-  display: grid;
-  place-items: center;
-  opacity: 0.85;
-}
-
-.landing-final-art .landing-graph-svg {
-  max-width: 280px;
+  max-width: 520px;
+  margin: 0 auto 2rem;
 }
 
 .landing-cta-final {
@@ -3204,13 +3313,8 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
     min-height: 180px;
   }
   .landing-final {
-    grid-template-columns: 1fr;
     padding: 3rem 1.75rem;
     margin: 0 1.5rem 4rem;
-    text-align: left;
-  }
-  .landing-final-art {
-    display: none;
   }
   .landing-foot {
     padding: 2rem 1.5rem 2.5rem;
