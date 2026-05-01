@@ -4,7 +4,8 @@ import { WorkspaceModuleGuard } from '@/components/workspace-module-guard';
 
 export const dynamic = 'force-dynamic';
 
-export default function ProjectDetailPage({ params }: { params: { key: string } }) {
+export default async function ProjectDetailPage(props: { params: Promise<{ key: string }> }) {
+  const params = await props.params;
   initSchema();
   migrateProjectSummaries();
 

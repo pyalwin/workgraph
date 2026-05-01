@@ -5,7 +5,8 @@ import { getUserMetrics } from '@/lib/otti-queries';
 
 export const dynamic = 'force-dynamic';
 
-export function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   initSchema();
   initOttiModule();
 

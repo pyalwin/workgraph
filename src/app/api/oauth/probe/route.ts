@@ -35,7 +35,11 @@ export async function GET(req: Request) {
   const dcr = getRegisteredClient(source, `${process.env.OAUTH_REDIRECT_BASE_URL || ''}/api/oauth/callback`);
 
   // Try multiple variants — sometimes the right answer is just a different header.
-  const targetUrl = overrideUrl || provider.mcpServerUrl;
+  const targetUrlCandidate = overrideUrl || provider.mcpServerUrl;
+  if (!targetUrlCandidate) {
+    return NextResponse.json({ ok: false, error: `No probe URL: provide ?url=… or configure mcpServerUrl for ${source}` }, { status: 400 });
+  }
+  const targetUrl: string = targetUrlCandidate;
   const variants: Array<{ name: string; headers: Record<string, string> }> = [
     { name: 'Bearer (default)', headers: { Authorization: `${token.tokenType} ${token.accessToken}`, Accept: 'application/json, text/event-stream' } },
     { name: 'Bearer + lowercase', headers: { authorization: `Bearer ${token.accessToken}`, accept: 'text/event-stream' } },

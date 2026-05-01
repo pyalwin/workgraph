@@ -20,7 +20,8 @@ function cryptoMissing() {
   );
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const id = params.id;
   if (!SUPPORTED_PROVIDERS.has(id)) return unsupported(id);
   if (!isCryptoConfigured()) return cryptoMissing();
@@ -48,7 +49,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ ok: true });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const id = params.id;
   if (!SUPPORTED_PROVIDERS.has(id)) return unsupported(id);
   if (!isCryptoConfigured()) return cryptoMissing();

@@ -10,7 +10,8 @@ const PROJECT_NAMES: Record<string, string> = {
   INT: 'Integrations',
 };
 
-export async function POST(req: NextRequest, { params }: { params: { key: string } }) {
+export async function POST(req: NextRequest, props: { params: Promise<{ key: string }> }) {
+  const params = await props.params;
   initSchema();
   migrateProjectSummaries();
 
