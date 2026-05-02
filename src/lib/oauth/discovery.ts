@@ -95,7 +95,7 @@ export async function registerClient(
 
   // Note: saveRegisteredClient throws if WORKGRAPH_SECRET_KEY isn't set.
   // We let that bubble — it's the most actionable error a user can see.
-  return saveRegisteredClient({
+  return await saveRegisteredClient({
     source: provider.source,
     redirectUri,
     clientId: data.client_id,
@@ -120,7 +120,7 @@ export async function resolveDcrClient(
   provider: OAuthProvider,
   redirectUri: string,
 ): Promise<DcrAttemptResult> {
-  const cached = getRegisteredClient(provider.source, redirectUri);
+  const cached = await getRegisteredClient(provider.source, redirectUri);
   if (cached) return { client: cached, reason: null };
 
   if (!provider.metadataUrl) {

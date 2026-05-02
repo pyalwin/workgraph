@@ -1,5 +1,12 @@
-import { getDb } from '../db';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { embed, TEXT_MODEL, type EmbeddingModel } from './ollama';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 export const MODEL_BY_CHUNK_TYPE: Record<string, EmbeddingModel> = {
   notion_section: TEXT_MODEL,
@@ -28,43 +35,44 @@ export interface EmbedResult {
   failed: number;
 }
 
+/** Pack a Float32Array into a Uint8Array suitable for INSERT into chunk_vectors.embedding. */
+function packVector(vec: number[]): Uint8Array {
+  const f32 = new Float32Array(vec);
+  return new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+}
+
 export async function embedChunkIds(
   chunkIds: number[],
   opts: { concurrency?: number; force?: boolean } = {},
 ): Promise<EmbedResult> {
-  const db = getDb();
+  await ensureInit();
+  const db = getLibsqlDb();
   const force = opts.force ?? false;
   const concurrency = Math.max(1, opts.concurrency ?? 4);
   const result: EmbedResult = { embedded: 0, skipped: 0, failed: 0 };
   if (chunkIds.length === 0) return result;
 
-  const getChunk = db.prepare(
-    'SELECT id, item_id, chunk_type, chunk_text FROM item_chunks WHERE id = ?',
-  );
-  const checkExisting = db.prepare(
-    'SELECT 1 FROM chunk_embeddings_meta WHERE chunk_id = ? AND model = ?',
-  );
-  const deleteVec = db.prepare('DELETE FROM vec_chunks_text WHERE chunk_id = ?');
-  const insertVec = db.prepare(
-    'INSERT INTO vec_chunks_text(chunk_id, embedding) VALUES (?, ?)',
-  );
-  const upsertMeta = db.prepare(`
-    INSERT INTO chunk_embeddings_meta (chunk_id, model, dim, created_at)
+  const getChunkSql = 'SELECT id, item_id, chunk_type, chunk_text FROM item_chunks WHERE id = ?';
+  const checkExistingSql = 'SELECT 1 AS hit FROM chunk_embeddings_meta WHERE chunk_id = ? AND model = ?';
+  const upsertVecSql = `INSERT INTO chunk_vectors (chunk_id, embedding, dim) VALUES (?, ?, ?)
+    ON CONFLICT(chunk_id) DO UPDATE SET embedding = excluded.embedding, dim = excluded.dim, created_at = datetime('now')`;
+  const upsertMetaSql = `INSERT INTO chunk_embeddings_meta (chunk_id, model, dim, created_at)
     VALUES (?, ?, ?, datetime('now'))
-    ON CONFLICT(chunk_id, model) DO UPDATE
-      SET dim = excluded.dim, created_at = excluded.created_at
-  `);
+    ON CONFLICT(chunk_id, model) DO UPDATE SET dim = excluded.dim, created_at = excluded.created_at`;
 
   const pending: ChunkRow[] = [];
   for (const id of chunkIds) {
-    const row = getChunk.get(id) as ChunkRow | undefined;
+    const row = await db.prepare(getChunkSql).get<ChunkRow>(id);
     if (!row) continue;
     const model = MODEL_BY_CHUNK_TYPE[row.chunk_type] ?? TEXT_MODEL;
-    if (!force && checkExisting.get(row.id, model)) {
-      result.skipped++;
-    } else {
-      pending.push(row);
+    if (!force) {
+      const hit = await db.prepare(checkExistingSql).get(row.id, model);
+      if (hit) {
+        result.skipped++;
+        continue;
+      }
     }
+    pending.push(row);
   }
 
   for (let i = 0; i < pending.length; i += concurrency) {
@@ -77,27 +85,23 @@ export async function embedChunkIds(
       }),
     );
 
-    const persist = db.transaction(() => {
-      for (const s of settled) {
-        if (s.status !== 'fulfilled') {
-          console.error(`  embed FAIL: ${s.reason?.message ?? s.reason}`);
-          result.failed++;
-          continue;
-        }
-        const { chunk, model, vec } = s.value;
-        try {
-          const idBig = BigInt(chunk.id);
-          deleteVec.run(idBig);
-          insertVec.run(idBig, JSON.stringify(vec));
-          upsertMeta.run(idBig, model, vec.length);
-          result.embedded++;
-        } catch (err: any) {
-          console.error(`  embed-store FAIL chunk ${chunk.id}: ${err.message}`);
-          result.failed++;
-        }
+    for (const s of settled) {
+      if (s.status !== 'fulfilled') {
+        console.error(`  embed FAIL: ${s.reason?.message ?? s.reason}`);
+        result.failed++;
+        continue;
       }
-    });
-    persist();
+      const { chunk, model, vec } = s.value;
+      try {
+        const blob = packVector(vec);
+        await db.prepare(upsertVecSql).run(chunk.id, blob, vec.length);
+        await db.prepare(upsertMetaSql).run(chunk.id, model, vec.length);
+        result.embedded++;
+      } catch (err: any) {
+        console.error(`  embed-store FAIL chunk ${chunk.id}: ${err.message}`);
+        result.failed++;
+      }
+    }
   }
 
   return result;
@@ -106,15 +110,18 @@ export async function embedChunkIds(
 export async function embedAllPending(
   opts: { limit?: number; concurrency?: number } = {},
 ): Promise<EmbedResult> {
-  const db = getDb();
+  await ensureInit();
+  const db = getLibsqlDb();
   const limit = opts.limit ?? 5000;
-  const rows = db.prepare(`
-    SELECT ic.id FROM item_chunks ic
-    LEFT JOIN chunk_embeddings_meta m ON m.chunk_id = ic.id
-    WHERE m.chunk_id IS NULL
-    ORDER BY ic.id ASC
-    LIMIT ?
-  `).all(limit) as { id: number }[];
+  const rows = await db
+    .prepare(
+      `SELECT ic.id FROM item_chunks ic
+       LEFT JOIN chunk_embeddings_meta m ON m.chunk_id = ic.id
+       WHERE m.chunk_id IS NULL
+       ORDER BY ic.id ASC
+       LIMIT ?`,
+    )
+    .all<{ id: number }>(limit);
   return embedChunkIds(rows.map(r => r.id), { concurrency: opts.concurrency });
 }
 
@@ -126,48 +133,15 @@ export interface ChunkSearchHit {
   distance: number;
 }
 
-export async function searchChunks(query: string, k: number = 10): Promise<ChunkSearchHit[]> {
-  const db = getDb();
-  const qvec = await embed(query, TEXT_MODEL);
-  const rows = db.prepare(`
-    SELECT v.chunk_id, v.distance, ic.item_id, ic.chunk_type, ic.chunk_text
-    FROM vec_chunks_text v
-    JOIN item_chunks ic ON ic.id = v.chunk_id
-    WHERE v.embedding MATCH ? AND v.k = ?
-    ORDER BY v.distance ASC
-  `).all(JSON.stringify(qvec), k) as Array<{
-    chunk_id: number | bigint;
-    distance: number;
-    item_id: string;
-    chunk_type: string;
-    chunk_text: string;
-  }>;
-  return rows.map(r => ({
-    chunk_id: Number(r.chunk_id),
-    item_id: r.item_id,
-    chunk_type: r.chunk_type,
-    chunk_text: r.chunk_text,
-    distance: r.distance,
-  }));
+/** Float32Array → unpacked plain array for cosine math when libSQL vector
+ *  functions aren't available (file-mode dev without the extension). */
+function unpackVector(buf: Uint8Array | ArrayBuffer): Float32Array {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  return new Float32Array(u8.buffer, u8.byteOffset, u8.byteLength / 4);
 }
 
-/**
- * Semantic similarity between two chunks via vec0 distance — returns cosine-like
- * score in [0, 1] where 1 is identical. sqlite-vec returns L2 distance by default;
- * we normalize via 1/(1+d) for a bounded score.
- */
-export async function similarity(chunkIdA: number, chunkIdB: number): Promise<number | null> {
-  const db = getDb();
-  // Fetch both vectors
-  const row = db.prepare(`
-    SELECT
-      (SELECT embedding FROM vec_chunks_text WHERE chunk_id = ?) AS a,
-      (SELECT embedding FROM vec_chunks_text WHERE chunk_id = ?) AS b
-  `).get(BigInt(chunkIdA), BigInt(chunkIdB)) as { a?: Buffer; b?: Buffer } | undefined;
-  if (!row?.a || !row?.b) return null;
-  // Decode and compute cosine
-  const a = new Float32Array(row.a.buffer, row.a.byteOffset, row.a.byteLength / 4);
-  const b = new Float32Array(row.b.buffer, row.b.byteOffset, row.b.byteLength / 4);
+function cosineDistance(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return 1;
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
@@ -175,5 +149,88 @@ export async function similarity(chunkIdA: number, chunkIdB: number): Promise<nu
     nb += b[i] * b[i];
   }
   const denom = Math.sqrt(na) * Math.sqrt(nb);
-  return denom === 0 ? 0 : dot / denom;
+  if (denom === 0) return 1;
+  // libSQL's vector_distance_cos returns 1 - cosine_similarity; mirror that.
+  return 1 - dot / denom;
+}
+
+export async function searchChunks(query: string, k: number = 10): Promise<ChunkSearchHit[]> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  const qvec = await embed(query, TEXT_MODEL);
+
+  // Try libSQL native vector_distance_cos first — works on Turso and on
+  // newer libsql file mode. Falls back to in-process cosine when the
+  // function is unavailable (e.g. older libsql build in dev).
+  const queryLiteral = JSON.stringify(qvec);
+  try {
+    const rows = await db
+      .prepare(
+        `SELECT cv.chunk_id, ic.item_id, ic.chunk_type, ic.chunk_text,
+                vector_distance_cos(cv.embedding, vector(?)) AS distance
+         FROM chunk_vectors cv
+         JOIN item_chunks ic ON ic.id = cv.chunk_id
+         ORDER BY distance ASC
+         LIMIT ?`,
+      )
+      .all<{
+        chunk_id: number | bigint;
+        distance: number;
+        item_id: string;
+        chunk_type: string;
+        chunk_text: string;
+      }>(queryLiteral, k);
+    return rows.map(r => ({
+      chunk_id: Number(r.chunk_id),
+      item_id: r.item_id,
+      chunk_type: r.chunk_type,
+      chunk_text: r.chunk_text,
+      distance: r.distance,
+    }));
+  } catch {
+    // Fallback: load all vectors and cosine-rank in process. Bounded by
+    // chunk_vectors row count; fine for dev installs (<10k items).
+    const rows = await db
+      .prepare(
+        `SELECT cv.chunk_id, cv.embedding, ic.item_id, ic.chunk_type, ic.chunk_text
+         FROM chunk_vectors cv
+         JOIN item_chunks ic ON ic.id = cv.chunk_id`,
+      )
+      .all<{
+        chunk_id: number | bigint;
+        embedding: Uint8Array | ArrayBuffer;
+        item_id: string;
+        chunk_type: string;
+        chunk_text: string;
+      }>();
+    const q = new Float32Array(qvec);
+    const scored = rows.map((r) => ({
+      chunk_id: Number(r.chunk_id),
+      item_id: r.item_id,
+      chunk_type: r.chunk_type,
+      chunk_text: r.chunk_text,
+      distance: cosineDistance(q, unpackVector(r.embedding)),
+    }));
+    scored.sort((a, b) => a.distance - b.distance);
+    return scored.slice(0, k);
+  }
+}
+
+/**
+ * Semantic similarity between two chunks via stored vectors. Returns a
+ * cosine score in [0, 1] where 1 is identical (1 - cosine_distance).
+ */
+export async function similarity(chunkIdA: number, chunkIdB: number): Promise<number | null> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  const a = await db
+    .prepare(`SELECT embedding FROM chunk_vectors WHERE chunk_id = ?`)
+    .get<{ embedding: Uint8Array | ArrayBuffer }>(chunkIdA);
+  const b = await db
+    .prepare(`SELECT embedding FROM chunk_vectors WHERE chunk_id = ?`)
+    .get<{ embedding: Uint8Array | ArrayBuffer }>(chunkIdB);
+  if (!a?.embedding || !b?.embedding) return null;
+  const va = unpackVector(a.embedding);
+  const vb = unpackVector(b.embedding);
+  return 1 - cosineDistance(va, vb);
 }

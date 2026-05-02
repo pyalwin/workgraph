@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getConnectorConfig, upsertConnectorConfig } from '@/lib/connectors/config-store';
 import { getConnector } from '@/lib/connectors/registry';
 
@@ -18,7 +18,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; slot: string }> },
 ) {
   try {
-    initSchema();
+    await ensureSchemaAsync();
     const { id: workspaceId, slot } = await params;
     const decodedSlot = decodeURIComponent(slot);
     const url = new URL(req.url);
@@ -26,7 +26,7 @@ export async function POST(
     const body = await req.json().catch(() => ({}));
     const listName = body.listName || listFromQuery;
 
-    const cfg = getConnectorConfig(workspaceId, decodedSlot);
+    const cfg = await getConnectorConfig(workspaceId, decodedSlot);
     if (!cfg) {
       return NextResponse.json({ ok: false, error: 'Unknown connector' }, { status: 404 });
     }
@@ -53,7 +53,14 @@ export async function POST(
 
     let discovered;
     try {
-      discovered = await connector.discover(client, target, process.env);
+      // Pass saved options so adapters that need user-provided context
+      // (e.g. github needs username + orgs to enumerate repos) can read them.
+      discovered = await connector.discover(
+        client,
+        target,
+        process.env,
+        cfg.config.options ?? {},
+      );
     } finally {
       await client.close();
     }
@@ -65,7 +72,7 @@ export async function POST(
     discoveredMap[target] = discovered;
     nextOptions.discovered = discoveredMap;
 
-    upsertConnectorConfig({
+    await upsertConnectorConfig({
       workspaceId,
       slot: cfg.slot,
       source: cfg.source,

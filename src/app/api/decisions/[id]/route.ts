@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
-import { getDb } from '@/lib/db';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getDecisionItems, listDecisions } from '@/lib/decision/extract';
 
 export const dynamic = 'force-dynamic';
@@ -9,12 +8,13 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  initSchema();
+  await ensureSchemaAsync();
   const { id } = await params;
-  const d = listDecisions().find(x => x.id === id);
+  const list = await listDecisions();
+  const d = list.find(x => x.id === id);
   if (!d) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const items = getDecisionItems(id);
+  const items = await getDecisionItems(id);
   return NextResponse.json({
     decision: {
       ...d,

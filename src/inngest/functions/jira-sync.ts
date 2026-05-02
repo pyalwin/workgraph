@@ -1,79 +1,86 @@
 /**
- * Phase 1.1 — scheduled JIRA sync orchestrator.
+ * Scheduled JIRA sync orchestrator — fully durable inside Inngest.
  *
  * Two functions:
- *   - jira.sync.tick    — cron every 30 min; lists enabled JIRA connectors
+ *   - jira.sync.tick    — cron every 6 hours; lists enabled JIRA connectors
  *                         across all workspaces and fans out one event per.
- *   - jira.sync.workspace — event-triggered; triggers the actual MCP sync
- *                         via the existing orchestrator subprocess, polls
- *                         until completion, then runs the rich enrichment
- *                         pass over modified items.
+ *   - jira.sync.workspace — event-triggered; runs the MCP sync inline as an
+ *                         Inngest step (no subprocess, no polling), then
+ *                         runs enrichment + project fan-outs.
  */
-import { initSchema } from '@/lib/schema';
-import { getDb } from '@/lib/db';
-import { triggerSync } from '@/lib/connectors/sync-orchestrator';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
+import { runConnectorSync } from '@/lib/connectors/sync-runner';
+import { reapStaleSyncs } from '@/lib/connectors/config-store';
 import { recomputeIsMineForSource } from '@/lib/sync/identity';
 import { enrichItemFully } from '@/lib/sync/enrich-rich';
 import { inngest } from '../client';
 
-const SYNC_TIMEOUT_MS = 10 * 60 * 1000; // 10 min hard cap
 const ENRICH_BATCH = 25;
 
-interface JiraConfigRow {
+interface ConnectorConfigRow {
   workspaceId: string;
   slot: string;
   source: string;
-  config: string; // JSON
-  lastSyncCompletedAt: string | null;
-  lastSyncStatus: string | null;
 }
 
-function listEnabledJiraConnectors(): JiraConfigRow[] {
-  initSchema();
-  const db = getDb();
-  return db
+async function listEnabledConnectors(): Promise<ConnectorConfigRow[]> {
+  await ensureSchemaAsync();
+  const db = getLibsqlDb();
+  return await db
     .prepare(
-      `SELECT workspace_id AS workspaceId, slot, source, config,
-              last_sync_completed_at AS lastSyncCompletedAt,
-              last_sync_status AS lastSyncStatus
+      `SELECT workspace_id AS workspaceId, slot, source
        FROM workspace_connector_configs
-       WHERE source = 'jira' AND status != 'skipped'`,
+       WHERE status != 'skipped'`,
     )
-    .all() as JiraConfigRow[];
+    .all<ConnectorConfigRow>();
 }
 
-// ─── jira.sync.tick — every 30 min ────────────────────────────────────────
+// ─── connector.sync.tick — every 6 hours, all connectors ───────────────────
 
 export const jiraSyncTick = inngest.createFunction(
   {
-    id: 'jira-sync-tick',
-    name: 'JIRA · scheduled sync tick',
+    id: 'connector-sync-tick',
+    name: 'Connectors · scheduled sync tick',
     triggers: [
-      { cron: '*/30 * * * *' },
+      { cron: '0 */6 * * *' },
       { event: 'workgraph/jira.sync.tick' },
+      { event: 'workgraph/connector.sync.tick' },
     ],
   },
   async ({ step }) => {
-    const configs = await step.run('list-enabled-connectors', () => {
-      return listEnabledJiraConnectors().map((c) => ({
-        workspaceId: c.workspaceId,
-        slot: c.slot,
-      }));
-    });
+    const reaped = await step.run('reap-stale-syncs', () => reapStaleSyncs());
+
+    const configs = await step.run('list-enabled-connectors', () => listEnabledConnectors());
 
     if (configs.length === 0) {
-      return { fanOut: 0 };
+      return { fanOut: 0, reaped };
     }
 
-    await step.sendEvent(
-      'fan-out-per-workspace',
-      configs.map((c) => ({
-        name: 'workgraph/jira.sync.workspace',
-        data: c,
-      })),
-    );
+    const events: Array<{ name: string; data: any }> = [];
+    for (const c of configs) {
+      if (c.source === 'jira') {
+        events.push({
+          name: 'workgraph/jira.sync.workspace',
+          data: { workspaceId: c.workspaceId, slot: c.slot, source: c.source, since: null },
+        });
+      } else {
+        events.push({
+          name: 'workgraph/connector.sync.workspace',
+          data: { workspaceId: c.workspaceId, slot: c.slot, source: c.source, since: null },
+        });
+      }
+      if (c.source === 'github') {
+        events.push({
+          name: 'workgraph/github.trails.refresh',
+          data: { workspaceId: c.workspaceId, slot: c.slot, since: null },
+        });
+      }
+    }
 
-    return { fanOut: configs.length };
+    await step.sendEvent('fan-out-per-workspace', events);
+
+    return { fanOut: events.length, reaped };
   },
 );
 
@@ -84,65 +91,40 @@ export const jiraSyncWorkspace = inngest.createFunction(
     id: 'jira-sync-workspace',
     name: 'JIRA · sync + enrich for one workspace',
     triggers: [{ event: 'workgraph/jira.sync.workspace' }],
-    // One per workspace+slot at a time — avoids racing the orchestrator's
-    // in-flight map and keeps log files coherent.
     concurrency: { key: 'event.data.workspaceId + "::" + event.data.slot', limit: 1 },
   },
   async ({ event, step }) => {
-    const data = event.data as { workspaceId: string; slot: string };
+    const data = event.data as {
+      workspaceId: string;
+      slot: string;
+      since?: string | null;
+    };
     const workspaceId = data.workspaceId;
     const slot = data.slot;
+    const since = data.since ?? null;
 
-    // 1. Trigger the existing MCP-driven sync (fire-and-forget subprocess).
-    const triggered = await step.run('trigger-sync', () => {
-      return triggerSync(workspaceId, slot, 'jira');
+    const syncResult = await step.run('run-sync', async () => {
+      const result = await runConnectorSync(workspaceId, slot, 'jira', { since });
+      return {
+        ok: result.ok,
+        itemsSynced: result.itemsSynced,
+        itemsUpdated: result.itemsUpdated,
+        itemsSkipped: result.itemsSkipped,
+        errors: result.errors,
+      };
     });
 
-    if (!triggered.ok && !triggered.alreadyRunning) {
-      throw new Error(`triggerSync returned not-ok: ${triggered.error ?? 'unknown'}`);
+    if (!syncResult.ok) {
+      console.warn(
+        `[jira-sync] ${workspaceId}/${slot} completed with ${syncResult.errors.length} error(s):`,
+        syncResult.errors.slice(0, 5),
+      );
     }
 
-    // 2. Poll until the sync writes a completion timestamp newer than the
-    //    one we observed before kickoff. Cap at SYNC_TIMEOUT_MS.
-    const startedAt = await step.run('snapshot-prev-completion', () => {
-      const db = getDb();
-      const row = db
-        .prepare(
-          `SELECT last_sync_completed_at AS at FROM workspace_connector_configs
-           WHERE workspace_id = ? AND slot = ?`,
-        )
-        .get(workspaceId, slot) as { at: string | null } | undefined;
-      return row?.at ?? null;
-    });
-
-    const start = Date.now();
-    let completed = false;
-    while (Date.now() - start < SYNC_TIMEOUT_MS) {
-      await step.sleep('wait-30s', '30s');
-      const status = await step.run(`poll-${Math.floor((Date.now() - start) / 30000)}`, () => {
-        const db = getDb();
-        return db
-          .prepare(
-            `SELECT last_sync_completed_at AS at, last_sync_status AS status
-             FROM workspace_connector_configs WHERE workspace_id = ? AND slot = ?`,
-          )
-          .get(workspaceId, slot) as { at: string | null; status: string | null } | undefined;
-      });
-      if (status?.at && status.at !== startedAt && status.status !== 'running') {
-        completed = true;
-        break;
-      }
-    }
-
-    if (!completed) {
-      throw new Error(`Sync did not complete within ${SYNC_TIMEOUT_MS / 1000}s`);
-    }
-
-    // 3. Run the rich enrichment pass over items modified since last enrich.
     const enriched = await step.run('enrich-changed-items', async () => {
-      initSchema();
-      const db = getDb();
-      const rows = db
+      await ensureSchemaAsync();
+      const db = getLibsqlDb();
+      const rows = await db
         .prepare(
           `SELECT id FROM work_items
            WHERE source = 'jira'
@@ -150,7 +132,7 @@ export const jiraSyncWorkspace = inngest.createFunction(
            ORDER BY COALESCE(updated_at, created_at) DESC
            LIMIT ?`,
         )
-        .all(ENRICH_BATCH) as { id: string }[];
+        .all<{ id: string }>(ENRICH_BATCH);
 
       let ok = 0;
       let failed = 0;
@@ -162,35 +144,28 @@ export const jiraSyncWorkspace = inngest.createFunction(
       return { ok, failed, total: rows.length };
     });
 
-    // 4. Recompute is_mine for the workspace's auth user (if we have aliases
-    //    seeded). If no aliases exist, this is a no-op.
-    await step.run('recompute-is-mine', () => {
-      // Pull the first auth_user that has any alias in this workspace.
-      const db = getDb();
-      const row = db
+    await step.run('recompute-is-mine', async () => {
+      const db = getLibsqlDb();
+      const row = await db
         .prepare(
           `SELECT auth_user_id FROM workspace_user_aliases
            WHERE workspace_id = ? LIMIT 1`,
         )
-        .get(workspaceId) as { auth_user_id: string } | undefined;
+        .get<{ auth_user_id: string }>(workspaceId);
       if (!row) return { skipped: 'no-aliases' };
       return recomputeIsMineForSource(workspaceId, row.auth_user_id, 'jira');
     });
 
-    // 5. Fan out one project-action-items refresh per project. The function
-    //    runs project-level (not per-ticket) action item synthesis to avoid
-    //    duplicating the same logical action across siblings.
-    const projectKeys = await step.run('list-distinct-projects', () => {
-      const db = getDb();
-      return (
-        db
-          .prepare(
-            `SELECT DISTINCT json_extract(metadata, '$.entity_key') AS k
-             FROM work_items
-             WHERE source='jira' AND json_extract(metadata, '$.entity_key') IS NOT NULL`,
-          )
-          .all() as { k: string }[]
-      ).map((r) => r.k);
+    const projectKeys = await step.run('list-distinct-projects', async () => {
+      const db = getLibsqlDb();
+      const rows = await db
+        .prepare(
+          `SELECT DISTINCT json_extract(metadata, '$.entity_key') AS k
+           FROM work_items
+           WHERE source='jira' AND json_extract(metadata, '$.entity_key') IS NOT NULL`,
+        )
+        .all<{ k: string }>();
+      return rows.map((r) => r.k);
     });
 
     if (projectKeys.length > 0) {
@@ -203,17 +178,16 @@ export const jiraSyncWorkspace = inngest.createFunction(
       );
     }
 
-    // Generate README for projects that don't have one yet. Stable, so we
-    // don't auto-refresh — only seed missing ones. User can trigger
-    // regeneration manually via the project page.
-    const readmeNeedingProjects = await step.run('list-projects-without-readme', () => {
-      const db = getDb();
-      return projectKeys.filter((projectKey) => {
-        const row = db
+    const readmeNeedingProjects = await step.run('list-projects-without-readme', async () => {
+      const db = getLibsqlDb();
+      const out: string[] = [];
+      for (const projectKey of projectKeys) {
+        const row = await db
           .prepare(`SELECT readme IS NOT NULL AS has FROM project_summaries WHERE project_key = ?`)
-          .get(projectKey) as { has: number } | undefined;
-        return !row?.has;
-      });
+          .get<{ has: number }>(projectKey);
+        if (!row?.has) out.push(projectKey);
+      }
+      return out;
     });
 
     if (readmeNeedingProjects.length > 0) {
@@ -226,25 +200,23 @@ export const jiraSyncWorkspace = inngest.createFunction(
       );
     }
 
-    // OKRs — only seed for projects that already have a README AND have
-    // no AI-generated OKRs yet. Projects whose README was just seeded above
-    // will get their OKRs on the NEXT sync (or via the auto-seed in the
-    // GET /api/projects/[key] handler when the user opens the project page).
-    const okrNeedingProjects = await step.run('list-projects-needing-okrs', () => {
-      const db = getDb();
-      return projectKeys.filter((projectKey) => {
-        const hasReadme = db
+    const okrNeedingProjects = await step.run('list-projects-needing-okrs', async () => {
+      const db = getLibsqlDb();
+      const out: string[] = [];
+      for (const projectKey of projectKeys) {
+        const hasReadme = await db
           .prepare(`SELECT readme IS NOT NULL AS has FROM project_summaries WHERE project_key = ?`)
-          .get(projectKey) as { has: number } | undefined;
-        if (!hasReadme?.has) return false;
-        const hasOkrs = db
+          .get<{ has: number }>(projectKey);
+        if (!hasReadme?.has) continue;
+        const hasOkrs = await db
           .prepare(
             `SELECT COUNT(*) AS c FROM goals
              WHERE project_key = ? AND kind='objective' AND derived_from='ai_okr' AND status='active'`,
           )
-          .get(projectKey) as { c: number };
-        return hasOkrs.c === 0;
-      });
+          .get<{ c: number }>(projectKey);
+        if (hasOkrs && hasOkrs.c === 0) out.push(projectKey);
+      }
+      return out;
     });
 
     if (okrNeedingProjects.length > 0) {
@@ -257,13 +229,42 @@ export const jiraSyncWorkspace = inngest.createFunction(
       );
     }
 
+    const githubSlots = await step.run('list-github-slots', async () => {
+      const db = getLibsqlDb();
+      const rows = await db
+        .prepare(
+          `SELECT slot FROM workspace_connector_configs
+           WHERE workspace_id = ? AND source = 'github' AND status != 'skipped'`,
+        )
+        .all<{ slot: string }>(workspaceId);
+      return rows.map((r) => r.slot);
+    });
+    if (githubSlots.length > 0) {
+      await step.sendEvent(
+        'fan-out-github-trails',
+        githubSlots.map((githubSlot) => ({
+          name: 'workgraph/github.trails.refresh',
+          data: { workspaceId, slot: githubSlot, since: null },
+        })),
+      );
+    }
+
+    if (syncResult.itemsSynced > 0 || syncResult.itemsUpdated > 0) {
+      await step.sendEvent('fan-out-chunk-embed-jira', {
+        name: 'workgraph/chunk-embed.run',
+        data: { from: 'jira-sync', workspaceId, slot },
+      });
+    }
+
     return {
       workspaceId,
       slot,
+      sync: syncResult,
       enriched,
       projectsRefreshed: projectKeys.length,
       readmesSeeded: readmeNeedingProjects.length,
       okrsSeeded: okrNeedingProjects.length,
+      trailsFannedOut: githubSlots.length,
     };
   },
 );

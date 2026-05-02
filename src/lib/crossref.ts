@@ -16,9 +16,10 @@
  *   - Items sharing the same author
  *   - Items whose chunks are vec0-near any chunk of the source item
  */
-import { getDb } from './db';
+import { ensureSchemaAsync } from './db/init-schema-async';
+import { getLibsqlDb } from './db/libsql';
 import { v4 as uuid } from 'uuid';
-import { getWorkspaceConfig } from './workspace-config';
+import { getWorkspaceConfigCached } from './workspace-config';
 
 const JIRA_KEY_REGEX = /[A-Z][A-Z0-9]+-\d+/g;
 const MENTION_REGEX  = /@[\w.-]+/g;
@@ -36,14 +37,20 @@ const WEIGHTS = {
   topics:    0.10,
 };
 
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
+
 function isSupporting(source: string): boolean {
-  const config = getWorkspaceConfig();
+  const config = getWorkspaceConfigCached();
   const sourceKind = config.sources[source]?.kind ?? source;
   return config.linking.supportingSourceKinds.includes(sourceKind);
 }
 
 function sourceKind(source: string): string {
-  return getWorkspaceConfig().sources[source]?.kind ?? source;
+  return getWorkspaceConfigCached().sources[source]?.kind ?? source;
 }
 
 export function extractEntities(text: string) {
@@ -90,22 +97,41 @@ function determineLinkType(
   return 'related';
 }
 
-function upsertLink(
+async function upsertLink(
   sourceItemId: string,
   targetItemId: string,
   linkType: string,
   confidence: number,
-): string | null {
-  const db = getDb();
-  const existing = db.prepare(
-    'SELECT id, link_type, confidence FROM links WHERE source_item_id = ? AND target_item_id = ?',
-  ).get(sourceItemId, targetItemId) as { id: string; link_type: string; confidence: number } | undefined;
+): Promise<string | null> {
+  const db = getLibsqlDb();
+  // Look up BOTH orientations. createLinksForItem runs per-item, so the same
+  // logical edge gets visited as (A,B) on one pass and (B,A) on another;
+  // without checking the reverse we end up with two rows for one edge. The
+  // links graph is undirected at the storage layer — the source/target
+  // ordering is just whichever item triggered the write. Asymmetric inverse
+  // pairs (executes/executed_by) are still the same edge and collapse here.
+  const existing = await db
+    .prepare(
+      `SELECT id, source_item_id, target_item_id, link_type, confidence
+       FROM links
+       WHERE (source_item_id = ? AND target_item_id = ?)
+          OR (source_item_id = ? AND target_item_id = ?)
+       ORDER BY confidence DESC LIMIT 1`,
+    )
+    .get<{ id: string; source_item_id: string; target_item_id: string; link_type: string; confidence: number }>(
+      sourceItemId,
+      targetItemId,
+      targetItemId,
+      sourceItemId,
+    );
 
   if (!existing) {
     const id = uuid();
-    db.prepare(
-      'INSERT INTO links (id, source_item_id, target_item_id, link_type, confidence) VALUES (?, ?, ?, ?, ?)',
-    ).run(id, sourceItemId, targetItemId, linkType, confidence);
+    await db
+      .prepare(
+        'INSERT INTO links (id, source_item_id, target_item_id, link_type, confidence) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(id, sourceItemId, targetItemId, linkType, confidence);
     return id;
   }
 
@@ -114,30 +140,33 @@ function upsertLink(
   if (existing.link_type === 'mentions' && linkType !== 'mentions') newType = linkType;
   if (confidence > existing.confidence) newConfidence = confidence;
   if (newType !== existing.link_type || newConfidence !== existing.confidence) {
-    db.prepare('UPDATE links SET link_type = ?, confidence = ? WHERE id = ?').run(newType, newConfidence, existing.id);
+    await db
+      .prepare('UPDATE links SET link_type = ?, confidence = ? WHERE id = ?')
+      .run(newType, newConfidence, existing.id);
   }
   return existing.id;
 }
 
-function recordChunkEvidence(linkId: string, signals: ChunkEvidence[]) {
+async function recordChunkEvidence(linkId: string, signals: ChunkEvidence[]): Promise<void> {
   if (!linkId || signals.length === 0) return;
-  const db = getDb();
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO item_links_chunks (link_id, source_chunk_id, target_chunk_id, signal, score)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  const tx = db.transaction(() => {
-    for (const s of signals) {
-      insert.run(
+  const db = getLibsqlDb();
+  // Sequential async — original wrapped these in db.transaction(); libsql
+  // doesn't translate that pattern, but each row is an independent INSERT OR
+  // REPLACE so atomicity-across-the-loop wasn't required here.
+  for (const s of signals) {
+    await db
+      .prepare(
+        `INSERT OR REPLACE INTO item_links_chunks (link_id, source_chunk_id, target_chunk_id, signal, score)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
         linkId,
-        s.sourceChunkId === null ? null : BigInt(s.sourceChunkId),
-        s.targetChunkId === null ? null : BigInt(s.targetChunkId),
+        s.sourceChunkId === null ? null : s.sourceChunkId,
+        s.targetChunkId === null ? null : s.targetChunkId,
         s.signal,
         s.score,
       );
-    }
-  });
-  tx();
+  }
 }
 
 interface ChunkEvidence {
@@ -149,15 +178,19 @@ interface ChunkEvidence {
 
 // ──────────── candidate finding ────────────
 
-function getItem(itemId: string): WorkItemRow | null {
-  return getDb().prepare(`
-    SELECT id, source, source_id, item_type, title, body, author, created_at, metadata
-    FROM work_items WHERE id = ?
-  `).get(itemId) as WorkItemRow | null;
+async function getItem(itemId: string): Promise<WorkItemRow | null> {
+  const db = getLibsqlDb();
+  const row = await db
+    .prepare(
+      `SELECT id, source, source_id, item_type, title, body, author, created_at, metadata
+       FROM work_items WHERE id = ?`,
+    )
+    .get<WorkItemRow>(itemId);
+  return row ?? null;
 }
 
-function findCandidates(item: WorkItemRow): string[] {
-  const db = getDb();
+async function findCandidates(item: WorkItemRow): Promise<string[]> {
+  const db = getLibsqlDb();
   const ids = new Set<string>();
   const itemText = `${item.title || ''}\n${item.body || ''}`;
 
@@ -174,9 +207,11 @@ function findCandidates(item: WorkItemRow): string[] {
     const refs = connector.idDetection.findReferences(itemText);
     if (refs.length === 0) continue;
     const placeholders = refs.map(() => '?').join(',');
-    const rows = db.prepare(
-      `SELECT id FROM work_items WHERE id != ? AND source = ? AND source_id IN (${placeholders})`,
-    ).all(item.id, connector.source, ...refs) as { id: string }[];
+    const rows = await db
+      .prepare(
+        `SELECT id FROM work_items WHERE id != ? AND source = ? AND source_id IN (${placeholders})`,
+      )
+      .all<{ id: string }>(item.id, connector.source, ...refs);
     for (const r of rows) ids.add(r.id);
   }
 
@@ -185,67 +220,83 @@ function findCandidates(item: WorkItemRow): string[] {
   // contains it. LIKE scan capped at 2× the time window.
   const selfConnector = listConnectors().find((c) => c.source === item.source);
   if (selfConnector?.idDetection && !item.source_id.startsWith('project:') && !item.source_id.startsWith('repo:') && !item.source_id.startsWith('release:')) {
-    const reverseRows = db.prepare(`
-      SELECT id FROM work_items
-      WHERE id != ?
-        AND (title LIKE '%' || ? || '%' OR body LIKE '%' || ? || '%')
-        AND datetime(created_at) BETWEEN datetime(?, '-${WINDOW_DAYS * 2} days') AND datetime(?, '+${WINDOW_DAYS} days')
-    `).all(item.id, item.source_id, item.source_id, item.created_at, item.created_at) as { id: string }[];
+    const reverseRows = await db
+      .prepare(
+        `SELECT id FROM work_items
+         WHERE id != ?
+           AND (title LIKE '%' || ? || '%' OR body LIKE '%' || ? || '%')
+           AND datetime(created_at) BETWEEN datetime(?, '-${WINDOW_DAYS * 2} days') AND datetime(?, '+${WINDOW_DAYS} days')`,
+      )
+      .all<{ id: string }>(item.id, item.source_id, item.source_id, item.created_at, item.created_at);
     for (const r of reverseRows) ids.add(r.id);
   }
 
   // Time window
   const created = item.created_at;
-  const timeRows = db.prepare(`
-    SELECT id FROM work_items
-    WHERE id != ?
-      AND datetime(created_at) BETWEEN datetime(?, '-${WINDOW_DAYS} days') AND datetime(?, '+${WINDOW_DAYS} days')
-  `).all(item.id, created, created) as { id: string }[];
+  const timeRows = await db
+    .prepare(
+      `SELECT id FROM work_items
+       WHERE id != ?
+         AND datetime(created_at) BETWEEN datetime(?, '-${WINDOW_DAYS} days') AND datetime(?, '+${WINDOW_DAYS} days')`,
+    )
+    .all<{ id: string }>(item.id, created, created);
   for (const r of timeRows) ids.add(r.id);
 
   // Shared typed entities from the configurable ontology.
-  const entityRows = db.prepare(`
-    SELECT DISTINCT emb.item_id AS id
-    FROM entity_mentions ema
-    JOIN entity_mentions emb ON emb.entity_id = ema.entity_id AND emb.item_id != ema.item_id
-    WHERE ema.item_id = ?
-  `).all(item.id) as { id: string }[];
+  const entityRows = await db
+    .prepare(
+      `SELECT DISTINCT emb.item_id AS id
+       FROM entity_mentions ema
+       JOIN entity_mentions emb ON emb.entity_id = ema.entity_id AND emb.item_id != ema.item_id
+       WHERE ema.item_id = ?`,
+    )
+    .all<{ id: string }>(item.id);
   for (const r of entityRows) ids.add(r.id);
 
   // Legacy fallback while old rows and enrichment tags still exist.
-  const legacyEntityRows = db.prepare(`
-    SELECT DISTINCT wb.id
-    FROM item_tags ita
-    JOIN item_tags itb ON itb.tag_id = ita.tag_id AND itb.item_id != ita.item_id
-    JOIN tags t ON t.id = ita.tag_id AND t.category = 'entity'
-    JOIN work_items wb ON wb.id = itb.item_id
-    WHERE ita.item_id = ?
-  `).all(item.id) as { id: string }[];
+  const legacyEntityRows = await db
+    .prepare(
+      `SELECT DISTINCT wb.id
+       FROM item_tags ita
+       JOIN item_tags itb ON itb.tag_id = ita.tag_id AND itb.item_id != ita.item_id
+       JOIN tags t ON t.id = ita.tag_id AND t.category = 'entity'
+       JOIN work_items wb ON wb.id = itb.item_id
+       WHERE ita.item_id = ?`,
+    )
+    .all<{ id: string }>(item.id);
   for (const r of legacyEntityRows) ids.add(r.id);
 
   // Shared author (normalized)
   if (item.author && item.author.trim()) {
-    const authRows = db.prepare(`
-      SELECT id FROM work_items WHERE id != ? AND LOWER(author) = LOWER(?)
-    `).all(item.id, item.author) as { id: string }[];
+    const authRows = await db
+      .prepare(
+        `SELECT id FROM work_items WHERE id != ? AND LOWER(author) = LOWER(?)`,
+      )
+      .all<{ id: string }>(item.id, item.author);
     for (const r of authRows) ids.add(r.id);
   }
 
-  // Embedding neighbors: for each chunk of this item, fetch its vector and find top-K nearest
-  const chunkRows = db.prepare('SELECT id FROM item_chunks WHERE item_id = ?').all(item.id) as { id: number }[];
-  const matchStmt = db.prepare(`
-    SELECT ic.item_id
-    FROM vec_chunks_text v
-    JOIN item_chunks ic ON ic.id = v.chunk_id
-    WHERE v.embedding MATCH ?
-      AND v.k = ?
-      AND ic.item_id != ?
-  `);
+  // Embedding neighbors: for each chunk of this item, fetch its vector and find top-K nearest.
+  // sqlite-vec's MATCH syntax is local-only — Wave 7 swaps this to libSQL native
+  // vector_distance_cos. Until then it fails silently on Turso (try/catch below)
+  // and on libsql even in dev (extension not loaded), reducing candidate quality.
+  const chunkRows = await db
+    .prepare('SELECT id FROM item_chunks WHERE item_id = ?')
+    .all<{ id: number }>(item.id);
   for (const chunk of chunkRows) {
-    const vec = loadEmbeddingVector(chunk.id);
+    const vec = await loadEmbeddingVector(chunk.id);
     if (!vec) continue;
     try {
-      const rows = matchStmt.all(JSON.stringify(Array.from(vec)), CHUNK_TOP_K + 1, item.id) as Array<{ item_id: string }>;
+      const rows = await db
+        .prepare(
+          `SELECT ic.item_id
+           FROM vec_chunks_text v
+           JOIN item_chunks ic ON ic.id = v.chunk_id
+           WHERE v.embedding MATCH ?
+             AND v.k = ?
+             AND ic.item_id != ?`,
+        )
+        .all<{ item_id: string }>(JSON.stringify(Array.from(vec)), CHUNK_TOP_K + 1, item.id);
       for (const r of rows) ids.add(r.item_id);
     } catch {
       // fall back silently — other candidate paths will still contribute
@@ -257,16 +308,30 @@ function findCandidates(item: WorkItemRow): string[] {
 
 // ──────────── pairwise signals ────────────
 
-function loadItemChunks(itemId: string): Array<{ id: number; chunk_type: string; chunk_text: string }> {
-  return getDb().prepare(`
-    SELECT id, chunk_type, chunk_text FROM item_chunks WHERE item_id = ? ORDER BY position ASC
-  `).all(itemId) as any[];
+async function loadItemChunks(itemId: string): Promise<Array<{ id: number; chunk_type: string; chunk_text: string }>> {
+  const db = getLibsqlDb();
+  return db
+    .prepare(
+      `SELECT id, chunk_type, chunk_text FROM item_chunks WHERE item_id = ? ORDER BY position ASC`,
+    )
+    .all<{ id: number; chunk_type: string; chunk_text: string }>(itemId);
 }
 
-function loadEmbeddingVector(chunkId: number): Float32Array | null {
-  const row = getDb().prepare(`SELECT embedding FROM vec_chunks_text WHERE chunk_id = ?`).get(BigInt(chunkId)) as { embedding?: Buffer } | undefined;
-  if (!row?.embedding) return null;
-  return new Float32Array(row.embedding.buffer, row.embedding.byteOffset, row.embedding.byteLength / 4);
+async function loadEmbeddingVector(chunkId: number): Promise<Float32Array | null> {
+  const db = getLibsqlDb();
+  try {
+    const row = await db
+      .prepare(`SELECT embedding FROM vec_chunks_text WHERE chunk_id = ?`)
+      .get<{ embedding?: ArrayBuffer | Uint8Array }>(chunkId);
+    if (!row?.embedding) return null;
+    const buf = row.embedding instanceof Uint8Array
+      ? row.embedding
+      : new Uint8Array(row.embedding as ArrayBuffer);
+    return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
+  } catch {
+    // vec_chunks_text doesn't exist on Turso — Wave 7 migrates this layer.
+    return null;
+  }
 }
 
 function cosineBuf(a: Float32Array, b: Float32Array): number {
@@ -282,13 +347,13 @@ function cosineBuf(a: Float32Array, b: Float32Array): number {
 }
 
 /** Build a regex that matches a literal source_id as a whole token, not as a
- *  prefix of a longer one. Without this, PEX-94 falsely matches inside PEX-948. */
+ *  prefix of a longer one. Without this, ALPHA-94 falsely matches inside ALPHA-948. */
 function escapeForRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 function mentionsId(haystack: string, id: string): boolean {
   // \b before, then the literal id, then a non-{letter,digit,-} (or end-of-string)
-  // boundary so PEX-948 doesn't match "PEX-94".
+  // boundary so ALPHA-948 doesn't match "ALPHA-94".
   const re = new RegExp(`(^|[^A-Za-z0-9-])${escapeForRegex(id)}(?![A-Za-z0-9-])`);
   return re.test(haystack);
 }
@@ -297,8 +362,8 @@ function scoreExplicit(a: WorkItemRow, b: WorkItemRow): { score: number; note?: 
   const aText = `${a.title}\n${a.body || ''}`;
   const bText = `${b.title}\n${b.body || ''}`;
 
-  // Does A mention B's tracker/source ID? Use whole-token match so PEX-94
-  // doesn't false-positive against PEX-948.
+  // Does A mention B's tracker/source ID? Use whole-token match so ALPHA-94
+  // doesn't false-positive against ALPHA-948.
   if (sourceKind(b.source) === 'tracker' && mentionsId(aText, b.source_id)) return { score: 1.0, note: `mentions ${b.source_id}` };
   if (sourceKind(a.source) === 'tracker' && mentionsId(bText, a.source_id)) return { score: 1.0, note: `mentions ${a.source_id}` };
 
@@ -358,17 +423,20 @@ function scoreStructural(a: WorkItemRow, b: WorkItemRow): { score: number; note?
   return { score: 0 };
 }
 
-function scoreEntities(aId: string, bId: string): { score: number; shared: string[] } {
-  const config = getWorkspaceConfig();
-  const rows = getDb().prepare(`
-    SELECT e.canonical_form, e.entity_type, COUNT(DISTINCT emg.item_id) AS global_count
-    FROM entity_mentions ema
-    JOIN entity_mentions emb ON emb.entity_id = ema.entity_id AND emb.item_id = ?
-    JOIN entities e ON e.id = ema.entity_id
-    LEFT JOIN entity_mentions emg ON emg.entity_id = e.id
-    WHERE ema.item_id = ?
-    GROUP BY e.id
-  `).all(bId, aId) as Array<{ canonical_form: string; entity_type: string; global_count: number }>;
+async function scoreEntities(aId: string, bId: string): Promise<{ score: number; shared: string[] }> {
+  const config = getWorkspaceConfigCached();
+  const db = getLibsqlDb();
+  const rows = await db
+    .prepare(
+      `SELECT e.canonical_form, e.entity_type, COUNT(DISTINCT emg.item_id) AS global_count
+       FROM entity_mentions ema
+       JOIN entity_mentions emb ON emb.entity_id = ema.entity_id AND emb.item_id = ?
+       JOIN entities e ON e.id = ema.entity_id
+       LEFT JOIN entity_mentions emg ON emg.entity_id = e.id
+       WHERE ema.item_id = ?
+       GROUP BY e.id`,
+    )
+    .all<{ canonical_form: string; entity_type: string; global_count: number }>(bId, aId);
   if (rows.length === 0) return { score: 0, shared: [] };
 
   // Type + rarity weighted: configured high-signal entity classes (for example
@@ -382,30 +450,38 @@ function scoreEntities(aId: string, bId: string): { score: number; shared: strin
   return { score: Math.min(1, score), shared: rows.map(r => `${r.entity_type}:${r.canonical_form}`) };
 }
 
-function scoreTopics(aId: string, bId: string): { score: number; count: number } {
-  const row = getDb().prepare(`
-    SELECT COUNT(*) AS c
-    FROM item_tags ia
-    JOIN item_tags ib ON ib.tag_id = ia.tag_id AND ib.item_id = ?
-    JOIN tags t ON t.id = ia.tag_id
-    WHERE ia.item_id = ? AND t.category = 'topic'
-  `).get(bId, aId) as { c: number };
-  if (!row.c) return { score: 0, count: 0 };
+async function scoreTopics(aId: string, bId: string): Promise<{ score: number; count: number }> {
+  const db = getLibsqlDb();
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS c
+       FROM item_tags ia
+       JOIN item_tags ib ON ib.tag_id = ia.tag_id AND ib.item_id = ?
+       JOIN tags t ON t.id = ia.tag_id
+       WHERE ia.item_id = ? AND t.category = 'topic'`,
+    )
+    .get<{ c: number }>(bId, aId);
+  if (!row?.c) return { score: 0, count: 0 };
   return { score: Math.min(1, row.c * 0.3), count: row.c };
 }
 
-function scoreEmbedding(aId: string, bId: string): { score: number; bestChunks?: [number, number] } {
-  const aChunks = getDb().prepare('SELECT id FROM item_chunks WHERE item_id = ?').all(aId) as { id: number }[];
-  const bChunks = getDb().prepare('SELECT id FROM item_chunks WHERE item_id = ?').all(bId) as { id: number }[];
+async function scoreEmbedding(aId: string, bId: string): Promise<{ score: number; bestChunks?: [number, number] }> {
+  const db = getLibsqlDb();
+  const aChunks = await db
+    .prepare('SELECT id FROM item_chunks WHERE item_id = ?')
+    .all<{ id: number }>(aId);
+  const bChunks = await db
+    .prepare('SELECT id FROM item_chunks WHERE item_id = ?')
+    .all<{ id: number }>(bId);
   if (aChunks.length === 0 || bChunks.length === 0) return { score: 0 };
 
   let best = 0;
   let bestPair: [number, number] | undefined;
   for (const ac of aChunks) {
-    const va = loadEmbeddingVector(ac.id);
+    const va = await loadEmbeddingVector(ac.id);
     if (!va) continue;
     for (const bc of bChunks) {
-      const vb = loadEmbeddingVector(bc.id);
+      const vb = await loadEmbeddingVector(bc.id);
       if (!vb) continue;
       const s = cosineBuf(va, vb);
       if (s > best) { best = s; bestPair = [ac.id, bc.id]; }
@@ -451,19 +527,22 @@ function safeParse(s: string | null): any {
 
 // ──────────── driver ────────────
 
-export function createLinksForItem(itemId: string): number {
-  const item = getItem(itemId);
+export async function createLinksForItem(itemId: string): Promise<number> {
+  await ensureInit();
+  const item = await getItem(itemId);
   if (!item) return 0;
 
-  const candidateIds = findCandidates(item);
-  const getCandidate = getDb().prepare(`
-    SELECT id, source, source_id, item_type, title, body, author, created_at, metadata
-    FROM work_items WHERE id = ?
-  `);
+  const candidateIds = await findCandidates(item);
+  const db = getLibsqlDb();
 
   let created = 0;
   for (const cid of candidateIds) {
-    const other = getCandidate.get(cid) as WorkItemRow | undefined;
+    const other = await db
+      .prepare(
+        `SELECT id, source, source_id, item_type, title, body, author, created_at, metadata
+         FROM work_items WHERE id = ?`,
+      )
+      .get<WorkItemRow>(cid);
     if (!other) continue;
 
     // Explicit or structural → short-circuit
@@ -480,9 +559,9 @@ export function createLinksForItem(itemId: string): number {
       if (exp.score > 0) signals.explicit = exp.score;
       if (str.score > 0) signals.structural = str.score;
     } else {
-      const emb = scoreEmbedding(item.id, other.id);
-      const ent = scoreEntities(item.id, other.id);
-      const top = scoreTopics(item.id, other.id);
+      const emb = await scoreEmbedding(item.id, other.id);
+      const ent = await scoreEntities(item.id, other.id);
+      const top = await scoreTopics(item.id, other.id);
       const auth = scoreAuthor(item, other);
       const ctx = scoreContext(item, other);
       const tmul = temporalMultiplier(item, other);
@@ -519,7 +598,7 @@ export function createLinksForItem(itemId: string): number {
     if (finalScore < LINK_THRESHOLD) continue;
 
     const linkType = determineLinkType(item, other.source);
-    const linkId = upsertLink(item.id, other.id, linkType, finalScore);
+    const linkId = await upsertLink(item.id, other.id, linkType, finalScore);
 
     if (linkId) {
       const evidence: ChunkEvidence[] = [];
@@ -533,25 +612,28 @@ export function createLinksForItem(itemId: string): number {
           });
         }
       }
-      recordChunkEvidence(linkId, evidence);
+      await recordChunkEvidence(linkId, evidence);
       created++;
     }
   }
   return created;
 }
 
-export function createLinksForAll(opts: { limit?: number } = {}): { items: number; links: number } {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT id FROM work_items ORDER BY created_at DESC ${opts.limit ? 'LIMIT ?' : ''}
-  `).all(...(opts.limit ? [opts.limit] : [])) as { id: string }[];
+export async function createLinksForAll(opts: { limit?: number } = {}): Promise<{ items: number; links: number }> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  const rows = await db
+    .prepare(
+      `SELECT id FROM work_items ORDER BY created_at DESC ${opts.limit ? 'LIMIT ?' : ''}`,
+    )
+    .all<{ id: string }>(...(opts.limit ? [opts.limit] : []));
 
   let totalLinks = 0;
   let i = 0;
   for (const row of rows) {
     i++;
     if (i % 25 === 0) process.stdout.write(`  [${i}/${rows.length}] links=${totalLinks}\r`);
-    totalLinks += createLinksForItem(row.id);
+    totalLinks += await createLinksForItem(row.id);
   }
   process.stdout.write('\n');
   return { items: rows.length, links: totalLinks };

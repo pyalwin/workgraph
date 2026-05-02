@@ -14,7 +14,7 @@ export async function ensureFreshAccessToken(
   workspaceId: string,
   source: string,
 ): Promise<OAuthToken | null> {
-  const token = getOAuthToken(workspaceId, source);
+  const token = await getOAuthToken(workspaceId, source);
   if (!token) return null;
   if (!isExpired(token)) return token;
   return refreshAccessToken(workspaceId, source, token);
@@ -25,7 +25,7 @@ export async function refreshAccessToken(
   source: string,
   current?: OAuthToken,
 ): Promise<OAuthToken | null> {
-  const token = current ?? getOAuthToken(workspaceId, source);
+  const token = current ?? (await getOAuthToken(workspaceId, source));
   if (!token || !token.refreshToken) return null;
 
   const provider = getProvider(source);
@@ -44,7 +44,7 @@ export async function refreshAccessToken(
   } else {
     const baseUrl = process.env.OAUTH_REDIRECT_BASE_URL || '';
     const redirectUri = `${baseUrl.replace(/\/$/, '')}/api/oauth/callback`;
-    const dcr = getRegisteredClient(provider.source, redirectUri);
+    const dcr = await getRegisteredClient(provider.source, redirectUri);
     if (!dcr) return null;
     clientId = dcr.clientId;
     clientSecret = dcr.clientSecret;
@@ -88,7 +88,7 @@ export async function refreshAccessToken(
       ? new Date(Date.now() + Number(data.expires_in) * 1000).toISOString()
       : null;
 
-    return rotateOAuthToken(workspaceId, source, {
+    return await rotateOAuthToken(workspaceId, source, {
       accessToken: data.access_token,
       refreshToken: data.refresh_token ?? undefined,
       expiresAt,

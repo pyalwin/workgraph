@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { ensureCustomTable } from '@/lib/custom-tables';
 import {
   addCustomTableToWorkspace,
@@ -33,8 +33,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    initSchema();
-    seedWorkspaceConfig();
+    await ensureSchemaAsync();
+    await seedWorkspaceConfig();
     const { id: workspaceId } = await params;
     const body = await req.json();
 
@@ -54,8 +54,8 @@ export async function POST(
       columns: body.columns.map(normalizeColumn),
     };
 
-    ensureCustomTable(table);
-    const workspace = addCustomTableToWorkspace(workspaceId, table);
+    await ensureCustomTable(table);
+    const workspace = await addCustomTableToWorkspace(workspaceId, table);
     return NextResponse.json({ ok: true, table, workspace });
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 400 });

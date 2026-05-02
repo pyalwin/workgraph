@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initSchema, migrateProjectSummaries } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getProjectSummaryCards } from '@/lib/project-queries';
 
 export const dynamic = 'force-dynamic';
 
-export function GET(req: NextRequest) {
-  initSchema();
-  migrateProjectSummaries();
+export async function GET(req: NextRequest) {
+  await ensureSchemaAsync();
 
   const period = req.nextUrl.searchParams.get('period') || '30d';
-  return NextResponse.json(getProjectSummaryCards(period));
+  return NextResponse.json(await getProjectSummaryCards(period));
 }

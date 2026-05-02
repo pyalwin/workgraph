@@ -21,10 +21,16 @@
 import { generateObject } from 'ai';
 import { v4 as uuid } from 'uuid';
 import { z } from 'zod';
-import { getDb } from '../db';
-import { initSchema } from '../schema';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
 import { getProjectReadme } from './project-readme';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 const TICKET_LIMIT = 60;
 const MAX_OBJECTIVES = 3;
@@ -76,18 +82,18 @@ function endOfQuarter(d: Date, addQuarters = 0): string {
   return last.toISOString().slice(0, 10);
 }
 
-function gatherContext(projectKey: string): OKRContext | null {
-  const db = getDb();
+async function gatherContext(projectKey: string): Promise<OKRContext | null> {
+  const db = getLibsqlDb();
 
-  const projectRow = db
+  const projectRow = await db
     .prepare(`SELECT title FROM work_items WHERE source='jira' AND source_id = ?`)
-    .get(`project:${projectKey}`) as { title: string } | undefined;
+    .get<{ title: string }>(`project:${projectKey}`);
   if (!projectRow) return null;
 
-  const { readme } = getProjectReadme(projectKey);
+  const { readme } = await getProjectReadme(projectKey);
   if (!readme) return null;
 
-  const tickets = db
+  const tickets = await db
     .prepare(
       `SELECT source_id, title, status, summary
        FROM work_items
@@ -95,12 +101,12 @@ function gatherContext(projectKey: string): OKRContext | null {
        ORDER BY COALESCE(updated_at, created_at) DESC
        LIMIT ?`,
     )
-    .all(projectKey, TICKET_LIMIT) as Array<{
+    .all<{
       source_id: string;
       title: string;
       status: string | null;
       summary: string | null;
-    }>;
+    }>(projectKey, TICKET_LIMIT);
 
   const ticketLines = tickets.map((t) => {
     const status = (t.status ?? 'unknown').padEnd(8);
@@ -108,16 +114,17 @@ function gatherContext(projectKey: string): OKRContext | null {
     return `[${status}] ${t.source_id}: ${t.title}${blurb ? ` — ${blurb.slice(0, 200)}` : ''}`;
   });
 
-  const recentDecisions = (
-    db
-      .prepare(
-        `SELECT d.title, d.summary FROM decisions d
-         JOIN work_items wi ON wi.id = d.item_id
-         WHERE wi.source='jira' AND json_extract(wi.metadata, '$.entity_key') = ?
-         ORDER BY d.decided_at DESC LIMIT 5`,
-      )
-      .all(projectKey) as Array<{ title: string; summary: string | null }>
-  ).map((d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`);
+  const decisionRows = await db
+    .prepare(
+      `SELECT d.title, d.summary FROM decisions d
+       JOIN work_items wi ON wi.id = d.item_id
+       WHERE wi.source='jira' AND json_extract(wi.metadata, '$.entity_key') = ?
+       ORDER BY d.decided_at DESC LIMIT 5`,
+    )
+    .all<{ title: string; summary: string | null }>(projectKey);
+  const recentDecisions = decisionRows.map(
+    (d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`,
+  );
 
   const now = new Date();
   return {
@@ -150,7 +157,7 @@ target_metric guidelines:
 
 Anti-patterns to avoid:
   - Vague objectives ("Improve the platform")
-  - Restating the README ("Build Otti Assistant")
+  - Restating the README ("Build the product")
   - Effort metrics as KRs ("Spend 50 hours on X") — measure outcomes, not effort
   - Pure ticket counts ("Close 100 tickets") unless the count is the genuine outcome`;
 
@@ -182,70 +189,71 @@ interface PersistedOKR {
   keyResultIds: string[];
 }
 
-function persist(projectKey: string, projectName: string, okrs: OKRs): PersistedOKR[] {
-  const db = getDb();
+async function persist(projectKey: string, projectName: string, okrs: OKRs): Promise<PersistedOKR[]> {
+  const db = getLibsqlDb();
 
   // Wipe AI-generated OKRs for this project so we start fresh. User-
   // edited rows (derived_from='manual') survive — even if the AI
   // suggested them originally and the user has since edited them.
-  const aiObjectiveIds = (db
+  const aiObjectiveRows = await db
     .prepare(
       `SELECT id FROM goals WHERE project_key = ? AND kind='objective' AND derived_from='ai_okr'`,
     )
-    .all(projectKey) as { id: string }[]).map((r) => r.id);
+    .all<{ id: string }>(projectKey);
+  const aiObjectiveIds = aiObjectiveRows.map((r) => r.id);
 
   if (aiObjectiveIds.length > 0) {
     const placeholders = aiObjectiveIds.map(() => '?').join(',');
-    db.prepare(`DELETE FROM goals WHERE parent_id IN (${placeholders}) AND derived_from='ai_okr'`).run(...aiObjectiveIds);
-    db.prepare(`DELETE FROM goals WHERE id IN (${placeholders}) AND derived_from='ai_okr'`).run(...aiObjectiveIds);
+    await db
+      .prepare(`DELETE FROM goals WHERE parent_id IN (${placeholders}) AND derived_from='ai_okr'`)
+      .run(...aiObjectiveIds);
+    await db
+      .prepare(`DELETE FROM goals WHERE id IN (${placeholders}) AND derived_from='ai_okr'`)
+      .run(...aiObjectiveIds);
   }
 
-  const insertGoal = db.prepare(`
+  const insertSql = `
     INSERT INTO goals (
       id, name, description, status, origin, kind, parent_id,
       project_key, target_metric, target_value, target_at,
       ai_confidence, derived_from, keywords
-    ) VALUES (?, ?, ?, 'active', 'inferred', ?, ?, ?, ?, ?, ?, ?, 'ai_okr', '[]')
-  `);
+    ) VALUES (?, ?, ?, 'active', 'inferred', ?, ?, ?, ?, ?, ?, ?, 'ai_okr', '[]')`;
 
   const out: PersistedOKR[] = [];
-  const tx = db.transaction(() => {
-    for (const obj of okrs.objectives) {
-      const objId = uuid();
-      insertGoal.run(
-        objId,
-        obj.title,
-        obj.why,
-        'objective',
-        null,
-        projectKey,
-        null,
-        null,
-        null,
-        0.8,
-      );
+  for (const obj of okrs.objectives) {
+    const objId = uuid();
+    await db.prepare(insertSql).run(
+      objId,
+      obj.title,
+      obj.why,
+      'objective',
+      null,
+      projectKey,
+      null,
+      null,
+      null,
+      0.8,
+    );
 
-      const krIds: string[] = [];
-      for (const kr of obj.key_results) {
-        const krId = uuid();
-        insertGoal.run(
-          krId,
-          kr.text,
-          kr.why,
-          'key_result',
-          objId,
-          projectKey,
-          kr.target_metric,
-          kr.target_value,
-          kr.target_at,
-          0.75,
-        );
-        krIds.push(krId);
-      }
-      out.push({ objectiveId: objId, keyResultIds: krIds });
+    const krIds: string[] = [];
+    for (const kr of obj.key_results) {
+      const krId = uuid();
+      await db.prepare(insertSql).run(
+        krId,
+        kr.text,
+        kr.why,
+        'key_result',
+        objId,
+        projectKey,
+        kr.target_metric,
+        kr.target_value,
+        kr.target_at,
+        0.75,
+      );
+      krIds.push(krId);
     }
-  });
-  tx();
+    out.push({ objectiveId: objId, keyResultIds: krIds });
+  }
 
   void projectName; // currently unused — could be stored alongside if we want a denormalized name
   return out;
@@ -254,9 +262,9 @@ function persist(projectKey: string, projectName: string, okrs: OKRs): Persisted
 export async function generateProjectOKRs(
   projectKey: string,
 ): Promise<{ ok: true; objectives: number; keyResults: number } | { ok: false; reason: string }> {
-  initSchema();
+  await ensureInit();
 
-  const ctx = gatherContext(projectKey);
+  const ctx = await gatherContext(projectKey);
   if (!ctx) return { ok: false, reason: 'project README missing — generate it first' };
   if (ctx.ticketLines.length === 0) return { ok: false, reason: 'no tickets in project' };
 
@@ -275,7 +283,7 @@ export async function generateProjectOKRs(
     return { ok: false, reason: (err as Error).message };
   }
 
-  const persisted = persist(projectKey, ctx.projectName, result);
+  const persisted = await persist(projectKey, ctx.projectName, result);
   return {
     ok: true,
     objectives: persisted.length,
@@ -303,35 +311,35 @@ export interface ProjectKeyResult {
   derived_from: string;
 }
 
-export function getProjectOKRs(projectKey: string): ProjectOKR[] {
-  const db = getDb();
-  const objectives = db
+export async function getProjectOKRs(projectKey: string): Promise<ProjectOKR[]> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  const objectives = await db
     .prepare(
       `SELECT id, name, description, ai_confidence, derived_from
        FROM goals
        WHERE project_key = ? AND kind = 'objective' AND status = 'active'
        ORDER BY created_at ASC`,
     )
-    .all(projectKey) as Array<{
+    .all<{
       id: string;
       name: string;
       description: string | null;
       ai_confidence: number | null;
       derived_from: string;
-    }>;
+    }>(projectKey);
 
   if (objectives.length === 0) return [];
 
-  const krStmt = db.prepare(
-    `SELECT id, name, description, target_metric, target_value, target_at,
+  const krSql = `SELECT id, name, description, target_metric, target_value, target_at,
             ai_confidence, derived_from
      FROM goals
      WHERE parent_id = ? AND kind = 'key_result' AND status = 'active'
-     ORDER BY created_at ASC`,
-  );
+     ORDER BY created_at ASC`;
 
-  return objectives.map((o) => {
-    const krs = krStmt.all(o.id) as Array<{
+  const out: ProjectOKR[] = [];
+  for (const o of objectives) {
+    const krs = await db.prepare(krSql).all<{
       id: string;
       name: string;
       description: string | null;
@@ -340,8 +348,8 @@ export function getProjectOKRs(projectKey: string): ProjectOKR[] {
       target_at: string | null;
       ai_confidence: number | null;
       derived_from: string;
-    }>;
-    return {
+    }>(o.id);
+    out.push({
       id: o.id,
       title: o.name,
       why: o.description,
@@ -357,6 +365,7 @@ export function getProjectOKRs(projectKey: string): ProjectOKR[] {
         ai_confidence: kr.ai_confidence,
         derived_from: kr.derived_from,
       })),
-    };
-  });
+    });
+  }
+  return out;
 }

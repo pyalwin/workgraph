@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid';
-import { getDb } from '../db';
-import { initSchema } from '../schema';
 import { decrypt, decryptOptional, encrypt, encryptOptional, isCryptoConfigured } from '../crypto';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 
 export interface RegisteredClient {
   source: string;
@@ -26,6 +26,12 @@ interface ClientRow {
   registered_at: string;
 }
 
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
+
 function rowToClient(row: ClientRow): RegisteredClient {
   const reg = decryptOptional(row.registration_response_enc);
   return {
@@ -40,55 +46,67 @@ function rowToClient(row: ClientRow): RegisteredClient {
   };
 }
 
-export function getRegisteredClient(source: string, redirectUri: string): RegisteredClient | null {
-  initSchema();
-  const db = getDb();
-  const row = db
+export async function getRegisteredClient(
+  source: string,
+  redirectUri: string,
+): Promise<RegisteredClient | null> {
+  await ensureInit();
+  const row = await getLibsqlDb()
     .prepare('SELECT * FROM oauth_clients WHERE source = ? AND redirect_uri = ?')
-    .get(source, redirectUri) as ClientRow | undefined;
+    .get<ClientRow>(source, redirectUri);
   return row ? rowToClient(row) : null;
 }
 
-export function saveRegisteredClient(input: Omit<RegisteredClient, 'registeredAt'>): RegisteredClient {
+export async function saveRegisteredClient(
+  input: Omit<RegisteredClient, 'registeredAt'>,
+): Promise<RegisteredClient> {
   if (!isCryptoConfigured()) {
     throw new Error('Cannot persist OAuth client — WORKGRAPH_SECRET_KEY is not set.');
   }
-  initSchema();
-  const db = getDb();
-  const existing = db
+  await ensureInit();
+  const db = getLibsqlDb();
+  const existing = await db
     .prepare('SELECT id FROM oauth_clients WHERE source = ? AND redirect_uri = ?')
-    .get(input.source, input.redirectUri) as { id: string } | undefined;
+    .get<{ id: string }>(input.source, input.redirectUri);
   const id = existing?.id ?? uuid();
   const regBlob = input.registrationResponse ? encrypt(JSON.stringify(input.registrationResponse)) : null;
 
   if (existing) {
-    db.prepare(`
-      UPDATE oauth_clients
-      SET client_id_enc = ?, client_secret_enc = ?, registration_response_enc = ?,
-          authorization_endpoint = ?, token_endpoint = ?, registered_at = datetime('now')
-      WHERE id = ?
-    `).run(
-      encrypt(input.clientId),
-      encryptOptional(input.clientSecret),
-      regBlob,
-      input.authorizationEndpoint,
-      input.tokenEndpoint,
-      id,
-    );
+    await db
+      .prepare(
+        `UPDATE oauth_clients
+         SET client_id_enc = ?, client_secret_enc = ?, registration_response_enc = ?,
+             authorization_endpoint = ?, token_endpoint = ?, registered_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(
+        encrypt(input.clientId),
+        encryptOptional(input.clientSecret),
+        regBlob,
+        input.authorizationEndpoint,
+        input.tokenEndpoint,
+        id,
+      );
   } else {
-    db.prepare(`
-      INSERT INTO oauth_clients
-        (id, source, redirect_uri, client_id_enc, client_secret_enc, registration_response_enc,
-         authorization_endpoint, token_endpoint)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      id, input.source, input.redirectUri,
-      encrypt(input.clientId),
-      encryptOptional(input.clientSecret),
-      regBlob,
-      input.authorizationEndpoint,
-      input.tokenEndpoint,
-    );
+    await db
+      .prepare(
+        `INSERT INTO oauth_clients
+           (id, source, redirect_uri, client_id_enc, client_secret_enc, registration_response_enc,
+            authorization_endpoint, token_endpoint)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.source,
+        input.redirectUri,
+        encrypt(input.clientId),
+        encryptOptional(input.clientSecret),
+        regBlob,
+        input.authorizationEndpoint,
+        input.tokenEndpoint,
+      );
   }
-  return getRegisteredClient(input.source, input.redirectUri)!;
+  const saved = await getRegisteredClient(input.source, input.redirectUri);
+  if (!saved) throw new Error('saveRegisteredClient: row vanished after insert/update');
+  return saved;
 }

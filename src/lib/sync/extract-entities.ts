@@ -21,10 +21,16 @@
  */
 import { generateObject } from 'ai';
 import { z } from 'zod';
-import { getDb } from '../db';
-import { initSchema } from '../schema';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
-import { getWorkspaceConfig, seedWorkspaceConfig, type OntologyEntityType } from '../workspace-config';
+import { getWorkspaceConfigCached, seedWorkspaceConfig, type OntologyEntityType } from '../workspace-config';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 export type EntityType = string;
 
@@ -74,7 +80,7 @@ Return all entities in a single object with shape { entities: [...] }. Allowed e
 
 async function extractFromText(text: string): Promise<ExtractedEntity[]> {
   if (!text || text.trim().length === 0) return [];
-  const config = getWorkspaceConfig();
+  const config = getWorkspaceConfigCached();
   const entityTypes = config.ontology.entityTypes;
   const allowed = new Set(entityTypes.map((t) => t.id));
 
@@ -108,7 +114,7 @@ async function extractFromText(text: string): Promise<ExtractedEntity[]> {
 
 function normalizeCanonical(canonical: string, type: EntityType): string {
   let s = canonical.trim();
-  const typeConfig = getWorkspaceConfig().ontology.entityTypes.find((t) => t.id === type);
+  const typeConfig = getWorkspaceConfigCached().ontology.entityTypes.find((t) => t.id === type);
   if (typeConfig?.normalization === 'upper') return s.toUpperCase();
   if (typeConfig?.normalization === 'lower') return s.toLowerCase();
   if (typeConfig?.normalization === 'title') {
@@ -127,20 +133,22 @@ function entityKey(canonical: string, type: EntityType): string {
   return `${type}:${slug}`;
 }
 
-function upsertEntity(canonical: string, type: EntityType, surface: string): string {
-  const db = getDb();
+async function upsertEntity(canonical: string, type: EntityType, surface: string): Promise<string> {
+  const db = getLibsqlDb();
   const id = entityKey(canonical, type);
   const normalized = normalizeCanonical(canonical, type);
 
-  const existing = db.prepare('SELECT id, aliases FROM entities WHERE id = ?').get(id) as
-    | { id: string; aliases: string }
-    | undefined;
+  const existing = await db
+    .prepare('SELECT id, aliases FROM entities WHERE id = ?')
+    .get<{ id: string; aliases: string }>(id);
 
   if (!existing) {
-    db.prepare(
-      `INSERT INTO entities (id, canonical_form, entity_type, aliases)
-       VALUES (?, ?, ?, ?)`,
-    ).run(id, normalized, type, JSON.stringify([surface]));
+    await db
+      .prepare(
+        `INSERT INTO entities (id, canonical_form, entity_type, aliases)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(id, normalized, type, JSON.stringify([surface]));
     return id;
   }
 
@@ -149,30 +157,31 @@ function upsertEntity(canonical: string, type: EntityType, surface: string): str
     const aliases: string[] = JSON.parse(existing.aliases || '[]');
     if (!aliases.includes(surface)) {
       aliases.push(surface);
-      db.prepare('UPDATE entities SET aliases = ?, updated_at = datetime(\'now\') WHERE id = ?').run(
-        JSON.stringify(aliases),
-        id,
-      );
+      await db
+        .prepare('UPDATE entities SET aliases = ?, updated_at = datetime(\'now\') WHERE id = ?')
+        .run(JSON.stringify(aliases), id);
     }
   } catch { /* ignore parse errors */ }
 
   return id;
 }
 
-function recordMention(
+async function recordMention(
   itemId: string,
   entityId: string,
   surface: string,
   startOffset?: number,
   endOffset?: number,
   confidence: number = 1.0,
-) {
-  const db = getDb();
-  db.prepare(
-    `INSERT OR IGNORE INTO entity_mentions
-       (item_id, entity_id, surface_form, start_offset, end_offset, confidence)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(itemId, entityId, surface, startOffset ?? null, endOffset ?? null, confidence);
+): Promise<void> {
+  const db = getLibsqlDb();
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO entity_mentions
+         (item_id, entity_id, surface_form, start_offset, end_offset, confidence)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(itemId, entityId, surface, startOffset ?? null, endOffset ?? null, confidence);
 }
 
 function safeParseMetadata(metadata: string | null): Record<string, any> {
@@ -212,7 +221,7 @@ function extractStructuredMetadataEntities(item: {
   author: string | null;
   metadata: string | null;
 }): ExtractedEntity[] {
-  const config = getWorkspaceConfig();
+  const config = getWorkspaceConfigCached();
   const mapping = config.sourceMappings[item.source] ?? {};
   const metadata = safeParseMetadata(item.metadata);
   const entities: ExtractedEntity[] = [];
@@ -252,23 +261,27 @@ function extractStructuredMetadataEntities(item: {
  * Wrapped in try/catch: a broken dual-write must never poison the per-item
  * extraction — the new entity_mentions row is the source of truth.
  */
-function writeLegacyEntityTag(itemId: string, entityId: string, canonical: string, type: EntityType) {
+async function writeLegacyEntityTag(itemId: string, entityId: string, canonical: string, type: EntityType): Promise<void> {
+  void entityId;
   try {
-    const db = getDb();
+    const db = getLibsqlDb();
     const slug = canonical.toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     const tagName = `${type}:${canonical.toLowerCase().trim()}`;
     const tagId = `entity:${type}:${slug}`;
 
-    const existingTag = db.prepare('SELECT id FROM tags WHERE id = ?').get(tagId);
+    const existingTag = await db.prepare('SELECT id FROM tags WHERE id = ?').get(tagId);
     if (!existingTag) {
       try {
-        db.prepare(`INSERT INTO tags (id, name, category) VALUES (?, ?, 'entity')`).run(tagId, tagName);
+        await db
+          .prepare(`INSERT INTO tags (id, name, category) VALUES (?, ?, 'entity')`)
+          .run(tagId, tagName);
       } catch { /* unique constraint race / collision — fine, tag row exists */ }
     }
     // Verify the tag actually exists before FK-dependent insert
-    const tagExists = db.prepare('SELECT 1 FROM tags WHERE id = ?').get(tagId);
+    const tagExists = await db.prepare('SELECT 1 FROM tags WHERE id = ?').get(tagId);
     if (tagExists) {
-      db.prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
+      await db
+        .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
         .run(itemId, tagId);
     }
   } catch {
@@ -277,10 +290,10 @@ function writeLegacyEntityTag(itemId: string, entityId: string, canonical: strin
 }
 
 export async function extractEntitiesForItem(itemId: string): Promise<number> {
-  const db = getDb();
-  const item = db
+  const db = getLibsqlDb();
+  const item = await db
     .prepare('SELECT id, source, title, body, author, metadata FROM work_items WHERE id = ?')
-    .get(itemId) as { id: string; source: string; title: string; body: string | null; author: string | null; metadata: string | null } | undefined;
+    .get<{ id: string; source: string; title: string; body: string | null; author: string | null; metadata: string | null }>(itemId);
   if (!item) return 0;
 
   const text = [item.title, item.body].filter(Boolean).join('\n\n');
@@ -293,8 +306,8 @@ export async function extractEntitiesForItem(itemId: string): Promise<number> {
 
   let stored = 0;
   for (const e of entities) {
-    const entityId = upsertEntity(e.canonical_form, e.entity_type, e.surface_form);
-    recordMention(
+    const entityId = await upsertEntity(e.canonical_form, e.entity_type, e.surface_form);
+    await recordMention(
       item.id,
       entityId,
       e.surface_form,
@@ -302,7 +315,7 @@ export async function extractEntitiesForItem(itemId: string): Promise<number> {
       e.end_offset,
       e.confidence ?? 1.0,
     );
-    writeLegacyEntityTag(item.id, entityId, e.canonical_form, e.entity_type);
+    await writeLegacyEntityTag(item.id, entityId, e.canonical_form, e.entity_type);
     stored++;
   }
 
@@ -314,9 +327,9 @@ export async function extractAllEntities(options: {
   force?: boolean;
   concurrency?: number;
 } = {}): Promise<{ processed: number; mentions: number; failed: number }> {
-  initSchema();
-  seedWorkspaceConfig();
-  const db = getDb();
+  await ensureInit();
+  await seedWorkspaceConfig();
+  const db = getLibsqlDb();
 
   const limit = options.limit ?? 2000;
   const concurrency = options.concurrency ?? 4;
@@ -327,9 +340,9 @@ export async function extractAllEntities(options: {
     : `WHERE body IS NOT NULL AND length(body) > 0
        AND id NOT IN (SELECT DISTINCT item_id FROM entity_mentions)`;
 
-  const items = db
+  const items = await db
     .prepare(`SELECT id FROM work_items ${whereClause} ORDER BY created_at DESC LIMIT ?`)
-    .all(limit) as { id: string }[];
+    .all<{ id: string }>(limit);
 
   console.log(`  ${items.length} items to extract entities from (concurrency: ${concurrency})`);
   if (items.length === 0) return { processed: 0, mentions: 0, failed: 0 };

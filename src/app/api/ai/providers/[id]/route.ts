@@ -47,7 +47,7 @@ export async function PUT(req: NextRequest, props: { params: Promise<{ id: strin
         ? body.baseUrl.trim()
         : undefined;
 
-  upsertProviderConfig(id, { apiKey, baseUrl });
+  await upsertProviderConfig(id, { apiKey, baseUrl });
   return NextResponse.json({ ok: true });
 }
 
@@ -56,6 +56,6 @@ export async function DELETE(_req: NextRequest, props: { params: Promise<{ id: s
   const id = params.id;
   if (!SUPPORTED_PROVIDERS.has(id)) return unsupported(id);
   if (!isCryptoConfigured()) return cryptoMissing();
-  deleteProviderConfig(id);
+  await deleteProviderConfig(id);
   return NextResponse.json({ ok: true });
 }

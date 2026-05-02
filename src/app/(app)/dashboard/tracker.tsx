@@ -12,8 +12,8 @@
  */
 import Link from 'next/link';
 import { withAuth } from '@workos-inc/authkit-nextjs';
-import { initSchema } from '@/lib/schema';
-import { getDb } from '@/lib/db';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
 import { getUserAliases, seedAliasesFromAuth } from '@/lib/sync/identity';
 
 const PRIORITY_ORDER: Record<string, number> = { p0: 0, p1: 1, p2: 2, p3: 3 };
@@ -57,12 +57,10 @@ interface OpenAnomaly {
   explanation: string | null;
 }
 
-function gatherTracker(workspaceId: string, authUserId: string) {
-  const db = getDb();
+async function gatherTracker(workspaceId: string, authUserId: string) {
+  const db = getLibsqlDb();
 
-  // 1. Open work items where is_mine = true. Highest-priority via the
-  //    item's first action_item.ai_priority (or 'p3' if none).
-  const myItems = db
+  const myItems = await db
     .prepare(
       `SELECT wi.id, wi.source_id, wi.title, wi.status, wi.url,
               (SELECT ai_priority FROM action_items
@@ -75,7 +73,7 @@ function gatherTracker(workspaceId: string, authUserId: string) {
        ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC
        LIMIT 50`,
     )
-    .all() as OpenItem[];
+    .all<OpenItem>();
 
   myItems.sort((a, b) => {
     const pa = PRIORITY_ORDER[a.ai_priority ?? 'p3'] ?? 3;
@@ -83,12 +81,11 @@ function gatherTracker(workspaceId: string, authUserId: string) {
     return pa - pb;
   });
 
-  // 2. Open action items assigned to one of the user's aliases
-  const aliases = Array.from(getUserAliases(workspaceId, authUserId));
+  const aliases = Array.from(await getUserAliases(workspaceId, authUserId));
   let myActions: OpenActionItem[] = [];
   if (aliases.length > 0) {
     const placeholders = aliases.map(() => '?').join(',');
-    myActions = db
+    myActions = await db
       .prepare(
         `SELECT ai.id, ai.text, ai.ai_priority, ai.user_priority, ai.due_at,
                 ai.source_item_id, wi.title AS source_title
@@ -100,11 +97,10 @@ function gatherTracker(workspaceId: string, authUserId: string) {
                   ai.due_at ASC NULLS LAST
          LIMIT 20`,
       )
-      .all(...aliases) as OpenActionItem[];
+      .all<OpenActionItem>(...aliases);
   }
 
-  // 3. Goals owned by the user
-  const ownedGoals = db
+  const ownedGoals = await db
     .prepare(
       `SELECT g.id, g.name, g.target_metric, g.target_value, g.target_at,
               g.ai_confidence, g.derived_from,
@@ -116,10 +112,9 @@ function gatherTracker(workspaceId: string, authUserId: string) {
          AND g.status = 'active'
        ORDER BY g.target_at ASC NULLS LAST`,
     )
-    .all(authUserId) as OwnedGoal[];
+    .all<OwnedGoal>(authUserId);
 
-  // 4. Anomalies — open, top 5 by severity
-  const openAnomalies = db
+  const openAnomalies = await db
     .prepare(
       `SELECT id, scope, kind, severity, explanation
        FROM anomalies
@@ -129,20 +124,20 @@ function gatherTracker(workspaceId: string, authUserId: string) {
        ORDER BY severity DESC
        LIMIT 5`,
     )
-    .all(workspaceId) as OpenAnomaly[];
+    .all<OpenAnomaly>(workspaceId);
 
   return { myItems: myItems.slice(0, 8), myActions, ownedGoals, openAnomalies };
 }
 
-function pickDefaultWorkspaceId(): string | null {
-  const db = getDb();
-  const row = db
+async function pickDefaultWorkspaceId(): Promise<string | null> {
+  const db = getLibsqlDb();
+  const row = await db
     .prepare(
       `SELECT workspace_id FROM workspace_connector_configs
        WHERE status != 'skipped'
        ORDER BY workspace_id LIMIT 1`,
     )
-    .get() as { workspace_id: string } | undefined;
+    .get<{ workspace_id: string }>();
   return row?.workspace_id ?? null;
 }
 
@@ -150,20 +145,20 @@ export async function TrackerSection({ workspaceId }: { workspaceId?: string }) 
   const { user } = await withAuth();
   if (!user) return null;
 
-  initSchema();
-  const resolvedWorkspaceId = workspaceId ?? pickDefaultWorkspaceId();
+  await ensureSchemaAsync();
+  const resolvedWorkspaceId = workspaceId ?? (await pickDefaultWorkspaceId());
   if (!resolvedWorkspaceId) return null;
 
   // Seed reasonable aliases on first run so is_mine matching has something to
   // work with even before the user manually adds any.
-  seedAliasesFromAuth(resolvedWorkspaceId, {
+  await seedAliasesFromAuth(resolvedWorkspaceId, {
     id: user.id,
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
   });
 
-  const data = gatherTracker(resolvedWorkspaceId, user.id);
+  const data = await gatherTracker(resolvedWorkspaceId, user.id);
   const greeting = user.firstName ?? user.email?.split('@')[0] ?? 'there';
 
   return (

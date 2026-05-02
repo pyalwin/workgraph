@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Markdown } from '@/components/prompt-kit/markdown';
-import { ItemDetailDrawer } from '@/components/item-detail-drawer';
-import { useWorkgraphState } from '@/components/workgraph-state';
+import { Markdown } from '@/components/chat/prompt-kit/markdown';
+import { ItemDetailDrawer } from '@/components/items/item-detail-drawer';
+import { useWorkgraphState } from '@/components/workspace/workgraph-state';
 
 export interface GoalDisplay {
   id: string;

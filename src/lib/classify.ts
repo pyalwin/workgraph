@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getLibsqlDb } from './db/libsql';
 
 interface Goal {
   id: string;
@@ -7,9 +7,14 @@ interface Goal {
   status: string;
 }
 
-export function classifyItem(title: string, body: string | null): { goalId: string; confidence: number }[] {
-  const db = getDb();
-  const goals = db.prepare("SELECT id, name, keywords, status FROM goals WHERE status = 'active'").all() as Goal[];
+export async function classifyItem(
+  title: string,
+  body: string | null,
+): Promise<{ goalId: string; confidence: number }[]> {
+  const db = getLibsqlDb();
+  const goals = await db
+    .prepare("SELECT id, name, keywords, status FROM goals WHERE status = 'active'")
+    .all<Goal>();
 
   const text = `${title} ${body || ''}`.toLowerCase();
   const matches: { goalId: string; confidence: number }[] = [];
@@ -33,22 +38,26 @@ export function classifyItem(title: string, body: string | null): { goalId: stri
   return matches;
 }
 
-export function reclassifyAll() {
-  const db = getDb();
+export async function reclassifyAll(): Promise<void> {
+  const db = getLibsqlDb();
 
-  // Clear existing goal tags
-  db.prepare("DELETE FROM item_tags WHERE tag_id IN (SELECT id FROM tags WHERE category = 'goal')").run();
+  await db
+    .prepare("DELETE FROM item_tags WHERE tag_id IN (SELECT id FROM tags WHERE category = 'goal')")
+    .run();
 
-  const items = db.prepare('SELECT id, title, body FROM work_items').all() as { id: string; title: string; body: string | null }[];
-
-  const insertTag = db.prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, ?)');
+  const items = await db
+    .prepare('SELECT id, title, body FROM work_items')
+    .all<{ id: string; title: string; body: string | null }>();
 
   for (const item of items) {
-    const matches = classifyItem(item.title, item.body);
+    const matches = await classifyItem(item.title, item.body);
     for (const m of matches) {
-      // Use goal id as tag id for simplicity (goal tags have category='goal')
-      db.prepare("INSERT OR IGNORE INTO tags (id, name, category) VALUES (?, ?, 'goal')").run(m.goalId, m.goalId);
-      insertTag.run(item.id, m.goalId, m.confidence);
+      await db
+        .prepare("INSERT OR IGNORE INTO tags (id, name, category) VALUES (?, ?, 'goal')")
+        .run(m.goalId, m.goalId);
+      await db
+        .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, ?)')
+        .run(item.id, m.goalId, m.confidence);
     }
   }
 }

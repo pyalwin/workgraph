@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { ProjectSummaryCard } from '@/lib/project-queries';
-import { useWorkgraphState } from '@/components/workgraph-state';
-import { ROLES } from '@/components/topbar';
-import { Markdown } from '@/components/prompt-kit/markdown';
+import { useWorkgraphState } from '@/components/workspace/workgraph-state';
+import { ROLES } from '@/components/layout/topbar';
+import { Markdown } from '@/components/chat/prompt-kit/markdown';
 
 type Health = 'fire' | 'watch' | 'healthy' | 'quiet';
 type Status = 'on-track' | 'at-risk' | 'stalled' | 'shipped';

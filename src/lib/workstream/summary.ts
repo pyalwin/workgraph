@@ -8,10 +8,17 @@
  * workstreams.narrative and workstreams.timeline_events (JSON).
  */
 import { generateText } from 'ai';
-import { getDb } from '../db';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
 import { listWorkstreams } from './assemble';
-import { getWorkspaceConfig } from '../workspace-config';
+import { getWorkspaceConfigCached } from '../workspace-config';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 interface WSItem {
   id: string;
@@ -45,17 +52,20 @@ export interface WorkstreamSummaryPayload {
 }
 
 
-function loadWSItems(wsId: string): WSItem[] {
-  return getDb().prepare(`
-    SELECT
-      wi.id, wi.source, wi.source_id, wi.item_type, wi.title,
-      wi.trace_role, wi.trace_event_at, wi.created_at, wi.summary, wi.body,
-      wsi.is_seed, wsi.is_terminal, wsi.role_in_workstream, wsi.event_at
-    FROM workstream_items wsi
-    JOIN work_items wi ON wi.id = wsi.item_id
-    WHERE wsi.workstream_id = ?
-    ORDER BY COALESCE(wsi.event_at, wi.created_at) ASC
-  `).all(wsId) as WSItem[];
+async function loadWSItems(wsId: string): Promise<WSItem[]> {
+  const db = getLibsqlDb();
+  return db
+    .prepare(
+      `SELECT
+        wi.id, wi.source, wi.source_id, wi.item_type, wi.title,
+        wi.trace_role, wi.trace_event_at, wi.created_at, wi.summary, wi.body,
+        wsi.is_seed, wsi.is_terminal, wsi.role_in_workstream, wsi.event_at
+      FROM workstream_items wsi
+      JOIN work_items wi ON wi.id = wsi.item_id
+      WHERE wsi.workstream_id = ?
+      ORDER BY COALESCE(wsi.event_at, wi.created_at) ASC`,
+    )
+    .all<WSItem>(wsId);
 }
 
 const MAX_PROMPT_ITEMS = 20;
@@ -95,7 +105,7 @@ function sampleItemsForPrompt(items: WSItem[]): WSItem[] {
 }
 
 function buildPrompt(items: WSItem[]): { system: string; user: string } {
-  const config = getWorkspaceConfig();
+  const config = getWorkspaceConfigCached();
   const lifecycle = config.lifecycle.stages
     .map((s) => `${s.id} (${s.label})`)
     .join(' → ');
@@ -163,7 +173,8 @@ async function callSonnet(prompt: { system: string; user: string }): Promise<Wor
 }
 
 export async function summarizeWorkstream(wsId: string): Promise<boolean> {
-  const items = loadWSItems(wsId);
+  await ensureInit();
+  const items = await loadWSItems(wsId);
   if (items.length < 1) return false;
 
   const sampled = sampleItemsForPrompt(items);
@@ -175,11 +186,14 @@ export async function summarizeWorkstream(wsId: string): Promise<boolean> {
   const payload = await callSonnet(prompt);
   if (!payload) return false;
 
-  getDb().prepare(`
-    UPDATE workstreams
-    SET narrative = ?, timeline_events = ?, generated_at = datetime('now'), updated_at = datetime('now')
-    WHERE id = ?
-  `).run(payload.narrative, JSON.stringify(payload.timeline_events), wsId);
+  const db = getLibsqlDb();
+  await db
+    .prepare(
+      `UPDATE workstreams
+       SET narrative = ?, timeline_events = ?, generated_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(payload.narrative, JSON.stringify(payload.timeline_events), wsId);
 
   return true;
 }
@@ -189,7 +203,7 @@ export async function summarizeAllWorkstreams(opts: { force?: boolean; minItems?
   const minItems = opts.minItems ?? 2;
   const concurrency = Math.max(1, opts.concurrency ?? 2);
 
-  const all = listWorkstreams();
+  const all = await listWorkstreams();
   const pending = all.filter(ws => {
     if (ws.item_count < minItems) return false;
     if (!force && ws.narrative && ws.generated_at) return false;

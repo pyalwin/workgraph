@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { createLinksForAll } from '@/lib/crossref';
-import { getDb } from '@/lib/db';
+import { getLibsqlDb } from '@/lib/db/libsql';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,37 +19,43 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: Request) {
   try {
-    initSchema();
+    await ensureSchemaAsync();
     const url = new URL(req.url);
     const mode = url.searchParams.get('mode') === 'full' ? 'full' : 'incremental';
-    const db = getDb();
+    const db = getLibsqlDb();
 
     if (mode === 'full') {
       // Soft links only — preserve adapter-emitted structural edges.
       // Use a join because item_links_chunks references links via FK.
-      db.exec(`
-        DELETE FROM item_links_chunks WHERE link_id IN (
-          SELECT id FROM links WHERE link_type IN ('mentions','references','discusses','executes','related_code')
+      await db
+        .prepare(
+          `DELETE FROM item_links_chunks WHERE link_id IN (
+             SELECT id FROM links WHERE link_type IN ('mentions','references','discusses','executes','related_code')
+           )`,
         )
-      `);
-      const r = db.prepare(
-        "DELETE FROM links WHERE link_type IN ('mentions','references','discusses','executes','related_code')",
-      ).run();
+        .run();
+      const r = await db
+        .prepare(
+          "DELETE FROM links WHERE link_type IN ('mentions','references','discusses','executes','related_code')",
+        )
+        .run();
       console.error(`[crossref full] cleared ${r.changes} soft links`);
 
-      const result = createLinksForAll({});
+      const result = await createLinksForAll({});
       return NextResponse.json({ ok: true, mode, ...result });
     }
 
     // Incremental mode — process items synced recently.
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const candidates = db
-      .prepare('SELECT id FROM work_items WHERE synced_at >= ? OR enriched_at IS NULL ORDER BY synced_at DESC LIMIT 1000')
-      .all(cutoff) as { id: string }[];
+    const candidates = await db
+      .prepare(
+        'SELECT id FROM work_items WHERE synced_at >= ? OR enriched_at IS NULL ORDER BY synced_at DESC LIMIT 1000',
+      )
+      .all<{ id: string }>(cutoff);
 
     const { createLinksForItem } = await import('@/lib/crossref');
     let totalLinks = 0;
-    for (const r of candidates) totalLinks += createLinksForItem(r.id);
+    for (const r of candidates) totalLinks += await createLinksForItem(r.id);
 
     return NextResponse.json({ ok: true, mode, items: candidates.length, links: totalLinks });
   } catch (err: any) {

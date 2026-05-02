@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { Badge } from '@/components/ui/badge';
-import { Markdown } from '@/components/prompt-kit/markdown';
+import { Markdown } from '@/components/chat/prompt-kit/markdown';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
 

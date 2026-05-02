@@ -67,7 +67,7 @@ export const SLOT_OPTIONS: Record<string, SlotOption[]> = {
     { source: 'approvals', label: 'Approval Workflow', status: 'planned' },
   ],
 
-  // Custom / Otti
+  // Custom workspace
   'Primary system': [
     { source: 'jira', label: 'Jira', status: 'available' },
     { source: 'linear', label: 'Linear', status: 'available' },
@@ -78,9 +78,6 @@ export const SLOT_OPTIONS: Record<string, SlotOption[]> = {
     { source: 'gmail', label: 'Gmail', status: 'planned' },
   ],
   'Configured custom tables': [],
-  'Session telemetry': [],
-  'Identity metadata': [],
-  'Deployment markers': [],
 };
 
 export function optionsForSlot(slot: string): SlotOption[] {

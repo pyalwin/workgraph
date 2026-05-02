@@ -23,9 +23,15 @@
  */
 import { generateObject, generateText } from 'ai';
 import { z } from 'zod';
-import { getDb } from '../db';
-import { initSchema } from '../schema';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 const TICKET_LIMIT = 1000;        // hard ceiling per project
 const CHUNK_SIZE = 40;            // tickets per map-call
@@ -48,12 +54,12 @@ interface ReadmeContext {
   recentDecisions: string[];
 }
 
-function gatherContext(projectKey: string): ReadmeContext | null {
-  const db = getDb();
+async function gatherContext(projectKey: string): Promise<ReadmeContext | null> {
+  const db = getLibsqlDb();
 
-  const projectRow = db
+  const projectRow = await db
     .prepare(`SELECT title FROM work_items WHERE source='jira' AND source_id = ?`)
-    .get(`project:${projectKey}`) as { title: string } | undefined;
+    .get<{ title: string }>(`project:${projectKey}`);
   if (!projectRow) return null;
 
   // Match BOTH metadata.project (legacy) and metadata.entity_key (Phase 1.2+)
@@ -62,7 +68,7 @@ function gatherContext(projectKey: string): ReadmeContext | null {
   // set on those derived rows.
   const projectFilter = `(json_extract(metadata, '$.project') = ? OR json_extract(metadata, '$.entity_key') = ?)`;
 
-  const counts = db
+  const counts = await db
     .prepare(
       `SELECT
          SUM(CASE WHEN status IN ('done','closed','resolved') THEN 1 ELSE 0 END) AS done,
@@ -73,9 +79,12 @@ function gatherContext(projectKey: string): ReadmeContext | null {
        FROM work_items
        WHERE source='jira' AND ${projectFilter}`,
     )
-    .get(projectKey, projectKey) as { done: number; active: number; backlog: number; earliest: string | null; latest: string | null };
+    .get<{ done: number; active: number; backlog: number; earliest: string | null; latest: string | null }>(
+      projectKey,
+      projectKey,
+    );
 
-  const tickets = db
+  const tickets = await db
     .prepare(
       `SELECT source_id, title, status, summary, item_type
        FROM work_items
@@ -83,13 +92,13 @@ function gatherContext(projectKey: string): ReadmeContext | null {
        ORDER BY COALESCE(updated_at, created_at) DESC
        LIMIT ?`,
     )
-    .all(projectKey, projectKey, TICKET_LIMIT) as Array<{
+    .all<{
       source_id: string;
       title: string;
       status: string | null;
       summary: string | null;
       item_type: string;
-    }>;
+    }>(projectKey, projectKey, TICKET_LIMIT);
 
   // Compact format — title + status. Use AI summary when present; otherwise
   // omit the body entirely. Per-ticket overhead drops from ~250 chars to
@@ -102,7 +111,7 @@ function gatherContext(projectKey: string): ReadmeContext | null {
   });
 
   // Top entities by mention count, scoped to this project
-  function topEntities(entityType: string) {
+  async function topEntities(entityType: string) {
     return db
       .prepare(
         `SELECT e.canonical_form AS canonical, COUNT(DISTINCT em.item_id) AS c
@@ -116,15 +125,15 @@ function gatherContext(projectKey: string): ReadmeContext | null {
          ORDER BY c DESC
          LIMIT ?`,
       )
-      .all(entityType, projectKey, ENTITY_LIMIT) as Array<{ canonical: string; c: number }>;
+      .all<{ canonical: string; c: number }>(entityType, projectKey, ENTITY_LIMIT);
   }
 
-  const topThemes = topEntities('theme').map((r) => ({ canonical: r.canonical, count: r.c }));
-  const topCapabilities = topEntities('capability').map((r) => ({ canonical: r.canonical, count: r.c }));
-  const topSystems = topEntities('system').map((r) => ({ canonical: r.canonical, count: r.c }));
+  const topThemes = (await topEntities('theme')).map((r) => ({ canonical: r.canonical, count: r.c }));
+  const topCapabilities = (await topEntities('capability')).map((r) => ({ canonical: r.canonical, count: r.c }));
+  const topSystems = (await topEntities('system')).map((r) => ({ canonical: r.canonical, count: r.c }));
 
   // Most active people on this project (assignees + reporters)
-  const actors = db
+  const actors = await db
     .prepare(
       `SELECT author AS name, COUNT(*) AS c
        FROM work_items
@@ -133,28 +142,29 @@ function gatherContext(projectKey: string): ReadmeContext | null {
        GROUP BY author
        ORDER BY c DESC LIMIT 8`,
     )
-    .all(projectKey, projectKey) as Array<{ name: string; c: number }>;
+    .all<{ name: string; c: number }>(projectKey, projectKey);
 
-  const recentDecisions = (
-    db
-      .prepare(
-        `SELECT d.title, d.summary FROM decisions d
-         JOIN work_items wi ON wi.id = d.item_id
-         WHERE wi.source='jira'
-           AND (json_extract(wi.metadata, '$.project') = ? OR json_extract(wi.metadata, '$.entity_key') = ?)
-         ORDER BY d.decided_at DESC LIMIT 8`,
-      )
-      .all(projectKey, projectKey) as Array<{ title: string; summary: string | null }>
-  ).map((d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`);
+  const decisionRows = await db
+    .prepare(
+      `SELECT d.title, d.summary FROM decisions d
+       JOIN work_items wi ON wi.id = d.item_id
+       WHERE wi.source='jira'
+         AND (json_extract(wi.metadata, '$.project') = ? OR json_extract(wi.metadata, '$.entity_key') = ?)
+       ORDER BY d.decided_at DESC LIMIT 8`,
+    )
+    .all<{ title: string; summary: string | null }>(projectKey, projectKey);
+  const recentDecisions = decisionRows.map(
+    (d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`,
+  );
 
   return {
     projectKey,
     projectName: projectRow.title,
-    totalDone: counts.done ?? 0,
-    totalActive: counts.active ?? 0,
-    totalBacklog: counts.backlog ?? 0,
-    earliestActivity: counts.earliest,
-    latestActivity: counts.latest,
+    totalDone: counts?.done ?? 0,
+    totalActive: counts?.active ?? 0,
+    totalBacklog: counts?.backlog ?? 0,
+    earliestActivity: counts?.earliest ?? null,
+    latestActivity: counts?.latest ?? null,
     ticketLines,
     topThemes,
     topCapabilities,
@@ -360,9 +370,9 @@ ${ctx.recentDecisions.length > 0
 export async function generateProjectReadme(
   projectKey: string,
 ): Promise<{ ok: true; length: number; chunks: number } | { ok: false; reason: string }> {
-  initSchema();
+  await ensureInit();
 
-  const ctx = gatherContext(projectKey);
+  const ctx = await gatherContext(projectKey);
   if (!ctx) return { ok: false, reason: 'project hub not found' };
   if (ctx.ticketLines.length === 0) return { ok: false, reason: 'no tickets in project' };
 
@@ -383,24 +393,27 @@ export async function generateProjectReadme(
   const readme = await reduceToReadme({ ctx, chunkInsights });
   if (!readme) return { ok: false, reason: 'reduce step failed' };
 
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO project_summaries (project_key, name, readme, readme_generated_at, updated_at)
-     VALUES (?, ?, ?, datetime('now'), datetime('now'))
-     ON CONFLICT(project_key) DO UPDATE SET
-       readme = excluded.readme,
-       readme_generated_at = excluded.readme_generated_at,
-       updated_at = excluded.updated_at`,
-  ).run(projectKey, ctx.projectName, readme);
+  const db = getLibsqlDb();
+  await db
+    .prepare(
+      `INSERT INTO project_summaries (project_key, name, readme, readme_generated_at, updated_at)
+       VALUES (?, ?, ?, datetime('now'), datetime('now'))
+       ON CONFLICT(project_key) DO UPDATE SET
+         readme = excluded.readme,
+         readme_generated_at = excluded.readme_generated_at,
+         updated_at = excluded.updated_at`,
+    )
+    .run(projectKey, ctx.projectName, readme);
 
   return { ok: true, length: readme.length, chunks: chunkInsights.length };
 }
 
-export function getProjectReadme(projectKey: string): { readme: string | null; generatedAt: string | null } {
-  const db = getDb();
-  const row = db
+export async function getProjectReadme(projectKey: string): Promise<{ readme: string | null; generatedAt: string | null }> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  const row = await db
     .prepare(`SELECT readme, readme_generated_at FROM project_summaries WHERE project_key = ?`)
-    .get(projectKey) as { readme: string | null; readme_generated_at: string | null } | undefined;
+    .get<{ readme: string | null; readme_generated_at: string | null }>(projectKey);
   return {
     readme: row?.readme ?? null,
     generatedAt: row?.readme_generated_at ?? null,

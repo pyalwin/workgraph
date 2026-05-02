@@ -1,23 +1,30 @@
-import type { MCPConnector, LinkInput } from '../types';
+import type { MCPConnector, DiscoveryOption, LinkInput } from '../types';
 import type { WorkItemInput } from '../../sync/types';
-import { resolveSince, BACKFILL_DEFAULT_DATE } from '../defaults';
 
-const STATUS_MAP: Record<string, string> = {
-  open: 'open', closed: 'done', merged: 'done',
+/**
+ * GitHub adapter — RELEASES ONLY.
+ *
+ * PRs and issues used to come through this adapter as work_items; that path
+ * is gone. PRs now live as `issue_trails` rows anchored to Jira tickets
+ * (see src/lib/sync/github-trails.ts), GitHub issues are dropped entirely
+ * (Jira is the tracker). Releases stay as standalone work_items because
+ * shipping cadence is a useful node-level concept independent of tickets.
+ *
+ * This adapter still exists for two reasons:
+ *   1. The runner needs an MCPConnector to ingest releases on the regular tick.
+ *   2. The Settings UI uses `discover` to populate the repo multi-select that
+ *      the trails sync reads from `config.options.repos`.
+ *
+ * The list step is a no-op — releases are fetched via postPass so we can
+ * iterate every configured repo even when some have zero releases (the
+ * runner breaks the list loop on first empty page).
+ */
+
+const RELEASE_STATUS_FROM = (raw: any): string => {
+  if (raw?.draft) return 'open';
+  if (raw?.prerelease) return 'active';
+  return 'done';
 };
-
-function repoFullName(raw: any): string | null {
-  return raw?.repository_url?.split('/repos/')[1]
-    || raw?.repository?.full_name
-    || (raw?.html_url ? extractRepoFromHtmlUrl(raw.html_url) : null)
-    || null;
-}
-
-function extractRepoFromHtmlUrl(url: string): string | null {
-  // https://github.com/owner/repo/pull/123 or .../issues/123
-  const m = url.match(/^https?:\/\/[^/]+\/([^/]+\/[^/]+)\//);
-  return m ? m[1] : null;
-}
 
 function repoSourceId(fullName: string): string {
   return `repo:${fullName}`;
@@ -40,16 +47,39 @@ function repoToWorkItem(fullName: string): WorkItemInput {
   };
 }
 
+function releaseToWorkItem(raw: any, repo: string): WorkItemInput | null {
+  if (!raw?.id || !raw?.tag_name) return null;
+  return {
+    source: 'github',
+    source_id: `release:${repo}:${raw.tag_name}`,
+    item_type: 'release',
+    title: raw.name || raw.tag_name || `Release ${raw.id}`,
+    body: raw.body || null,
+    author: raw.author?.login || null,
+    status: RELEASE_STATUS_FROM(raw),
+    priority: null,
+    url: raw.html_url || null,
+    metadata: {
+      repo,
+      tag_name: raw.tag_name,
+      draft: raw.draft ?? false,
+      prerelease: raw.prerelease ?? false,
+      published_at: raw.published_at,
+    },
+    created_at: raw.created_at || raw.published_at || new Date().toISOString(),
+    updated_at: raw.published_at || null,
+  };
+}
+
 export const githubConnector: MCPConnector = {
   source: 'github',
   label: 'GitHub',
   serverId: 'github',
-  itemType: 'issue',
+  itemType: 'release',
 
-  // Detect references to GitHub items in two forms:
-  //   - "owner/repo#123"     → matches our source_id directly
-  //   - "github.com/.../pull/123" or "github.com/.../issues/123" URLs
-  // Bare "#123" is too ambiguous (could mean anything) — skip.
+  // Cross-source detection still useful for any text body that mentions a PR.
+  // Even though PRs aren't work_items, callers (crossref) consume this to
+  // surface PR refs in other sources' text.
   idDetection: {
     findReferences: (text) => {
       const refs = new Set<string>();
@@ -63,151 +93,159 @@ export const githubConnector: MCPConnector = {
     },
   },
 
-  list: {
-    tool: 'search_issues',
-    args: (ctx) => {
-      const username = (ctx.options.username as string) || process.env.MCP_GITHUB_USERNAME || '';
-      const owner = (ctx.options.owner as string) || process.env.MCP_GITHUB_OWNER || '';
-      const r = resolveSince(ctx.options, ctx.since ?? undefined, BACKFILL_DEFAULT_DATE);
-
-      let q = process.env.MCP_GITHUB_QUERY;
-      if (!q) {
-        const filters: string[] = [];
-        if (!r.allTime) filters.push(`updated:>=${r.date}`);
-        if (username) filters.push(`involves:${username}`);
-        if (owner) filters.push(`org:${owner}`);
-        // Always include at least one filter — bare GitHub search rejects empty queries.
-        if (filters.length === 0) filters.push(`is:issue is:open`);
-        q = filters.join(' ');
-      }
-      return {
-        q,
-        per_page: ctx.limit,
-        page: ctx.cursor ? Number(ctx.cursor) : 1,
-      };
+  // Repo multi-select for the trails sync. The connector-runner only invokes
+  // discover() during connector setup; it isn't called on every sync.
+  supportedLists: [
+    {
+      id: 'repos',
+      label: 'Repositories to sync',
+      helpText:
+        'PRs from these repos are pulled and attached as trails on the Jira tickets they reference. Leave empty to disable GitHub sync.',
+      mapsToOption: 'repos',
     },
-    extractItems: (resp: any) => resp?.items ?? resp?.results ?? [],
-    extractCursor: (resp: any) => {
-      const items = resp?.items ?? [];
-      if (items.length === 0) return null;
-      const next = Number(resp?._page ?? 1) + 1;
-      return String(next);
-    },
-  },
+  ],
 
-  // PRs only — fetch the full PR object for commits/additions/deletions.
-  // Issues skip this entirely (search_issues already has everything we need).
-  detail: {
-    tool: 'get_pull_request',
-    skip: (raw: any) => !raw?.pull_request,
-    args: (raw: any) => {
-      const fullName = repoFullName(raw)!;
-      const [owner, repo] = fullName.split('/');
-      return { owner, repo, pull_number: raw.number };
-    },
-    merge: (raw: any, detail: any) => ({
-      ...raw,
-      commits_count: detail?.commits ?? detail?.commits_count ?? null,
-      additions: detail?.additions ?? null,
-      deletions: detail?.deletions ?? null,
-      changed_files: detail?.changed_files ?? null,
-      merged: detail?.merged ?? raw.pull_request?.merged_at != null,
-    }),
-  },
+  discover: async (client, listName, _env, options): Promise<DiscoveryOption[]> => {
+    if (listName !== 'repos') return [];
 
-  toItem: (raw: any): WorkItemInput | null => {
-    if (!raw?.id) return null;
-    const isPR = Boolean(raw.pull_request);
-    const repo = repoFullName(raw);
-    return {
-      source: 'github',
-      source_id: `${repo || 'unknown'}#${raw.number}`,
-      item_type: isPR ? 'pull_request' : 'issue',
-      title: raw.title || `#${raw.number}`,
-      body: raw.body || null,
-      author: raw.user?.login || null,
-      status: STATUS_MAP[raw.state] || 'open',
-      priority: null,
-      url: raw.html_url || null,
-      metadata: {
-        repo,
-        labels: (raw.labels || []).map((l: any) => (typeof l === 'string' ? l : l.name)),
-        assignees: (raw.assignees || []).map((a: any) => a.login),
-        comments: raw.comments ?? 0,
-        merged: raw.pull_request?.merged_at ?? raw.merged ?? null,
-        commits_count: raw.commits_count ?? null,
-        additions: raw.additions ?? null,
-        deletions: raw.deletions ?? null,
-        changed_files: raw.changed_files ?? null,
-      },
-      created_at: raw.created_at || new Date().toISOString(),
-      updated_at: raw.updated_at || null,
-    };
-  },
+    // The official @modelcontextprotocol/server-github only exposes
+    // search_repositories — there's no list_user_orgs / list_user_repos.
+    // So we explicitly iterate the user's own repos plus each org the
+    // user listed in the connector setup. GitHub search supports
+    // `user:<login>` and `org:<name>` qualifiers.
+    const username = (options?.username as string | undefined)?.trim();
+    const orgs = ((options?.orgs as string[] | undefined) ?? []).map((s) => s.trim()).filter(Boolean);
 
-  derivedItems: (raw: any) => {
-    const repo = repoFullName(raw);
-    return repo ? [repoToWorkItem(repo)] : [];
-  },
+    const queries: string[] = [];
+    if (username) queries.push(`user:${username} fork:true`);
+    for (const org of orgs) queries.push(`org:${org} fork:true`);
 
-  links: (raw: any, primary): LinkInput[] => {
-    if (!primary) return [];
-    const repo = repoFullName(raw);
-    if (!repo) return [];
-    return [{
-      from: { source: 'github', source_id: primary.source_id },
-      to: { source: 'github', source_id: repoSourceId(repo) },
-      link_type: 'in_repo',
-    }];
-  },
-
-  // After processing all PRs/issues, fetch releases for each unique repo we saw.
-  postPass: async (client, primaries) => {
-    const repos = new Set<string>();
-    for (const p of primaries) {
-      if (p.item_type === 'repository') repos.add(p.title);
+    if (queries.length === 0) {
+      // Without a username or any org, we can't enumerate. The UI's
+      // discovery panel surfaces an empty list with the form's helpText,
+      // which tells the user to fill in their login + orgs.
+      return [];
     }
 
+    const seen = new Set<string>();
+    const results: DiscoveryOption[] = [];
+    const MAX = 500;
+
+    for (const q of queries) {
+      let page = 1;
+      const PER_PAGE = 100;
+      while (results.length < MAX) {
+        let resp: any;
+        try {
+          resp = await client.callTool('search_repositories', { query: q, perPage: PER_PAGE, page });
+        } catch {
+          break;
+        }
+        const items: any[] = resp?.items ?? resp?.results ?? (Array.isArray(resp) ? resp : []);
+        if (items.length === 0) break;
+        for (const r of items) {
+          const fullName: string = r.full_name || `${r.owner?.login}/${r.name}`;
+          if (!fullName || seen.has(fullName)) continue;
+          seen.add(fullName);
+          const visibility = r.private ? 'private' : 'public';
+          const lang = r.language ? ` · ${r.language}` : '';
+          const desc = r.description ? ` — ${String(r.description).slice(0, 80)}` : '';
+          results.push({
+            id: fullName,
+            label: fullName,
+            hint: `${visibility}${lang}${desc}`,
+          });
+          if (results.length >= MAX) break;
+        }
+        if (items.length < PER_PAGE) break;
+        page++;
+      }
+    }
+    return results;
+  },
+
+  // Releases are fetched in postPass so we can iterate every configured
+  // repo regardless of which has releases (the per-page loop bails on the
+  // first empty page). list.skip = true tells the runner to bypass the
+  // page loop and go straight to postPass.
+  list: {
+    tool: '_skipped',
+    args: () => ({}),
+    extractItems: () => [],
+    extractCursor: () => null,
+    skip: true,
+  },
+
+  toItem: () => null,
+
+  // Real work happens here. Iterate configured repos in parallel (cap 6),
+  // fetch releases per repo via the GitHub REST API (the MCP server
+  // doesn't expose list_releases), emit release work_items + repository
+  // derived items + has_release links.
+  postPass: async (_client, _primaries, ctx) => {
     const items: WorkItemInput[] = [];
     const links: LinkInput[] = [];
-    for (const fullName of repos) {
+
+    const repos = ((ctx.options.repos as string[] | undefined) ?? [])
+      .map((s) => String(s).trim())
+      .filter(Boolean);
+
+    if (repos.length === 0) return { items, links };
+
+    const token = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
+    if (!token) return { items, links };
+
+    const REPO_CONCURRENCY = 6;
+    let cursor = 0;
+    const seenRepos = new Set<string>();
+    const fetchOne = async (fullName: string) => {
       const [owner, repo] = fullName.split('/');
+      if (!owner || !repo) return;
+      seenRepos.add(fullName);
       try {
-        const resp: any = await client.callTool('list_releases', { owner, repo, per_page: 30 });
-        const releases: any[] = Array.isArray(resp) ? resp : (resp?.releases ?? resp?.items ?? []);
-        for (const r of releases) {
-          if (!r?.id) continue;
-          const sourceId = `release:${fullName}:${r.tag_name || r.id}`;
-          items.push({
-            source: 'github',
-            source_id: sourceId,
-            item_type: 'release',
-            title: r.name || r.tag_name || `Release ${r.id}`,
-            body: r.body || null,
-            author: r.author?.login || null,
-            status: r.draft ? 'open' : (r.prerelease ? 'active' : 'done'),
-            priority: null,
-            url: r.html_url || null,
-            metadata: {
-              repo: fullName,
-              tag_name: r.tag_name,
-              draft: r.draft ?? false,
-              prerelease: r.prerelease ?? false,
-              published_at: r.published_at,
+        const resp = await fetch(
+          `https://api.github.com/repos/${owner}/${repo}/releases?per_page=30`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
             },
-            created_at: r.created_at || r.published_at || new Date().toISOString(),
-            updated_at: r.published_at || null,
-          });
+          },
+        );
+        if (!resp.ok) return;
+        const releases: any[] = await resp.json();
+        for (const release of releases) {
+          const item = releaseToWorkItem(release, fullName);
+          if (!item) continue;
+          items.push(item);
           links.push({
-            from: { source: 'github', source_id: sourceId },
+            from: { source: 'github', source_id: item.source_id },
             to: { source: 'github', source_id: repoSourceId(fullName) },
             link_type: 'has_release',
           });
         }
       } catch {
-        // Releases tool unavailable or repo has no releases — non-fatal.
+        // Per-repo failures are non-fatal — log silently and continue.
       }
+    };
+
+    const workers: Promise<void>[] = [];
+    for (let w = 0; w < REPO_CONCURRENCY; w++) {
+      workers.push((async () => {
+        while (true) {
+          const idx = cursor++;
+          if (idx >= repos.length) return;
+          await fetchOne(repos[idx]);
+        }
+      })());
     }
+    await Promise.all(workers);
+
+    // Emit repo items for every repo we touched (even if it had no releases),
+    // so the Settings UI / project queries see the configured set.
+    for (const r of seenRepos) items.push(repoToWorkItem(r));
+
     return { items, links };
   },
 };

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
 import { searchChunks } from '@/lib/embeddings/embed';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,7 @@ interface SearchResult {
 }
 
 export async function GET(req: NextRequest) {
-  initSchema();
+  await ensureSchemaAsync();
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q')?.trim();
   const k = Math.min(Math.max(parseInt(searchParams.get('k') || '30', 10), 1), 100);
@@ -40,20 +40,16 @@ export async function GET(req: NextRequest) {
       if (!prev || h.distance < prev.distance) bestByItem.set(h.item_id, h);
     }
 
-    const db = getDb();
-    const itemStmt = db.prepare(`
-      SELECT id, title, source, item_type, trace_role, substance, url, created_at
-      FROM work_items WHERE id = ?
-    `);
-    const wsStmt = db.prepare(`
-      SELECT workstream_id FROM workstream_items WHERE item_id = ?
-    `);
+    const db = getLibsqlDb();
+    const itemSql = `SELECT id, title, source, item_type, trace_role, substance, url, created_at
+      FROM work_items WHERE id = ?`;
+    const wsSql = `SELECT workstream_id FROM workstream_items WHERE item_id = ?`;
 
     const results: SearchResult[] = [];
     for (const [itemId, hit] of bestByItem) {
-      const item = itemStmt.get(itemId) as any;
+      const item = await db.prepare(itemSql).get<any>(itemId);
       if (!item) continue;
-      const wss = wsStmt.all(itemId) as Array<{ workstream_id: string }>;
+      const wss = await db.prepare(wsSql).all<{ workstream_id: string }>(itemId);
       results.push({
         ...item,
         match_excerpt: hit.chunk_text.length > 320 ? hit.chunk_text.slice(0, 320) + '…' : hit.chunk_text,

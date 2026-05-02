@@ -15,10 +15,16 @@
 import { generateObject } from 'ai';
 import { v4 as uuid } from 'uuid';
 import { z } from 'zod';
-import { getDb } from '../db';
-import { initSchema } from '../schema';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
-import { getWorkspaceConfig } from '../workspace-config';
+import { getWorkspaceConfigCached } from '../workspace-config';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 // ─── Schema returned by the AI ────────────────────────────────────────────
 
@@ -71,12 +77,12 @@ type Enrichment = z.infer<typeof EnrichmentSchema>;
 
 // ─── Prompt ───────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(): string {
-  const db = getDb();
-  const config = getWorkspaceConfig();
-  const goals = db
+async function buildSystemPrompt(): Promise<string> {
+  const db = getLibsqlDb();
+  const config = getWorkspaceConfigCached();
+  const goals = await db
     .prepare("SELECT id, name, description FROM goals WHERE status = 'active' ORDER BY sort_order")
-    .all() as { id: string; name: string; description: string }[];
+    .all<{ id: string; name: string; description: string }>();
 
   const goalList = goals.map((g) => `- "${g.id}": ${g.name} — ${g.description}`).join('\n') || '(none)';
   const stages = config.lifecycle.stages
@@ -123,106 +129,108 @@ action items, or anomalies to fill quota.`;
 
 // ─── Persistence helpers ──────────────────────────────────────────────────
 
-function upsertEntity(canonical: string, type: string): string {
-  const db = getDb();
-  const existing = db
+async function upsertEntity(canonical: string, type: string): Promise<string> {
+  const db = getLibsqlDb();
+  const existing = await db
     .prepare('SELECT id FROM entities WHERE canonical_form = ? AND entity_type = ?')
-    .get(canonical, type) as { id: string } | undefined;
+    .get<{ id: string }>(canonical, type);
   if (existing) return existing.id;
   const id = uuid();
-  db.prepare(
-    'INSERT INTO entities (id, canonical_form, entity_type, aliases) VALUES (?, ?, ?, ?)',
-  ).run(id, canonical, type, '[]');
+  await db
+    .prepare('INSERT INTO entities (id, canonical_form, entity_type, aliases) VALUES (?, ?, ?, ?)')
+    .run(id, canonical, type, '[]');
   return id;
 }
 
-function persistEntities(itemId: string, list: Enrichment['entities']) {
-  const db = getDb();
+async function persistEntities(itemId: string, list: Enrichment['entities']): Promise<void> {
+  const db = getLibsqlDb();
   // Replace all AI-generated mentions for this item — keep the door open for
   // a second pass to refine. We identify "AI mentions" as those without
   // start_offset (the entity-extraction script does set offsets).
-  db.prepare('DELETE FROM entity_mentions WHERE item_id = ? AND start_offset IS NULL').run(itemId);
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO entity_mentions
+  await db
+    .prepare('DELETE FROM entity_mentions WHERE item_id = ? AND start_offset IS NULL')
+    .run(itemId);
+  const insertSql = `INSERT OR IGNORE INTO entity_mentions
       (item_id, entity_id, surface_form, start_offset, end_offset, confidence)
-    VALUES (?, ?, ?, NULL, NULL, ?)
-  `);
+    VALUES (?, ?, ?, NULL, NULL, ?)`;
   for (const e of list) {
     const canonical = e.canonical_form.trim();
     const surface = (e.surface_form || canonical).trim();
     if (!canonical || !surface) continue;
-    const entityId = upsertEntity(canonical, e.type);
-    insert.run(itemId, entityId, surface, 0.85);
+    const entityId = await upsertEntity(canonical, e.type);
+    await db.prepare(insertSql).run(itemId, entityId, surface, 0.85);
   }
 }
 
-function persistAnomalies(itemId: string, workspaceId: string, list: Enrichment['anomaly_signals']) {
-  const db = getDb();
+async function persistAnomalies(itemId: string, workspaceId: string, list: Enrichment['anomaly_signals']): Promise<void> {
+  const db = getLibsqlDb();
   const scope = `item:${itemId}`;
   // Resolve any existing item-scoped anomalies for kinds we no longer flag.
   const flagged = new Set(list.map((a) => a.kind));
-  const existing = db
+  const existing = await db
     .prepare(
       `SELECT kind FROM anomalies WHERE workspace_id = ? AND scope = ? AND resolved_at IS NULL`,
     )
-    .all(workspaceId, scope) as { kind: string }[];
-  const resolveStmt = db.prepare(
-    `UPDATE anomalies SET resolved_at = datetime('now') WHERE workspace_id = ? AND scope = ? AND kind = ? AND resolved_at IS NULL`,
-  );
+    .all<{ kind: string }>(workspaceId, scope);
+  const resolveSql = `UPDATE anomalies SET resolved_at = datetime('now') WHERE workspace_id = ? AND scope = ? AND kind = ? AND resolved_at IS NULL`;
   for (const e of existing) {
     if (!flagged.has(e.kind as Enrichment['anomaly_signals'][number]['kind'])) {
-      resolveStmt.run(workspaceId, scope, e.kind);
+      await db.prepare(resolveSql).run(workspaceId, scope, e.kind);
     }
   }
   // Upsert the live ones.
-  const upsert = db.prepare(`
-    INSERT INTO anomalies (id, workspace_id, scope, kind, severity, evidence_item_ids, explanation, detected_at, resolved_at, dismissed_by_user)
+  const upsertSql = `INSERT INTO anomalies (id, workspace_id, scope, kind, severity, evidence_item_ids, explanation, detected_at, resolved_at, dismissed_by_user)
     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), NULL, 0)
     ON CONFLICT(workspace_id, scope, kind) DO UPDATE SET
       severity = excluded.severity,
       explanation = excluded.explanation,
       detected_at = excluded.detected_at,
-      resolved_at = NULL
-  `);
+      resolved_at = NULL`;
   const evidence = JSON.stringify([itemId]);
   for (const a of list) {
-    upsert.run(uuid(), workspaceId, scope, a.kind, a.severity, evidence, a.evidence);
+    await db.prepare(upsertSql).run(uuid(), workspaceId, scope, a.kind, a.severity, evidence, a.evidence);
   }
 }
 
-function storeTopicTags(itemId: string, topics: string[]) {
-  const db = getDb();
+async function storeTopicTags(itemId: string, topics: string[]): Promise<void> {
+  const db = getLibsqlDb();
   for (const raw of topics) {
     const name = raw.toLowerCase().trim();
     if (name.length < 2) continue;
     const tagId = `topic:${name}`;
-    const existing = db.prepare('SELECT id FROM tags WHERE id = ?').get(tagId);
+    const existing = await db.prepare('SELECT id FROM tags WHERE id = ?').get(tagId);
     if (!existing) {
-      db.prepare('INSERT INTO tags (id, name, category) VALUES (?, ?, ?)').run(tagId, name, 'topic');
+      await db
+        .prepare('INSERT INTO tags (id, name, category) VALUES (?, ?, ?)')
+        .run(tagId, name, 'topic');
     }
-    db.prepare(
-      'INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)',
-    ).run(itemId, tagId);
+    await db
+      .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
+      .run(itemId, tagId);
   }
 }
 
-function storeGoalTags(itemId: string, goalIds: string[]) {
-  const db = getDb();
-  db.prepare(
-    `DELETE FROM item_tags WHERE item_id = ? AND tag_id IN (SELECT id FROM tags WHERE category = 'goal')`,
-  ).run(itemId);
+async function storeGoalTags(itemId: string, goalIds: string[]): Promise<void> {
+  const db = getLibsqlDb();
+  await db
+    .prepare(
+      `DELETE FROM item_tags WHERE item_id = ? AND tag_id IN (SELECT id FROM tags WHERE category = 'goal')`,
+    )
+    .run(itemId);
   for (const goalId of goalIds) {
-    const goal = db.prepare('SELECT name FROM goals WHERE id = ?').get(goalId) as
-      | { name: string }
-      | undefined;
+    const goal = await db
+      .prepare('SELECT name FROM goals WHERE id = ?')
+      .get<{ name: string }>(goalId);
     if (!goal) continue;
-    const existing = db.prepare('SELECT id FROM tags WHERE id = ?').get(goalId);
+    const existing = await db.prepare('SELECT id FROM tags WHERE id = ?').get(goalId);
     if (!existing) {
-      db.prepare(`INSERT INTO tags (id, name, category) VALUES (?, ?, 'goal')`).run(goalId, goal.name);
+      await db
+        .prepare(`INSERT INTO tags (id, name, category) VALUES (?, ?, 'goal')`)
+        .run(goalId, goal.name);
     }
-    db.prepare(
-      'INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)',
-    ).run(itemId, goalId);
+    await db
+      .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
+      .run(itemId, goalId);
   }
 }
 
@@ -250,26 +258,24 @@ export async function enrichItemFully(
   itemId: string,
   workspaceId: string,
 ): Promise<{ ok: true; enrichment: Enrichment } | { ok: false; error: string }> {
-  initSchema();
-  const db = getDb();
-  const item = db
+  await ensureInit();
+  const db = getLibsqlDb();
+  const item = await db
     .prepare(
       `SELECT id, title, body, source, item_type, status, metadata, created_at, updated_at
        FROM work_items WHERE id = ?`,
     )
-    .get(itemId) as
-    | {
-        id: string;
-        title: string;
-        body: string | null;
-        source: string;
-        item_type: string;
-        status: string | null;
-        metadata: string | null;
-        created_at: string;
-        updated_at: string | null;
-      }
-    | undefined;
+    .get<{
+      id: string;
+      title: string;
+      body: string | null;
+      source: string;
+      item_type: string;
+      status: string | null;
+      metadata: string | null;
+      created_at: string;
+      updated_at: string | null;
+    }>(itemId);
   if (!item) return { ok: false, error: 'item not found' };
 
   const content = [
@@ -286,7 +292,7 @@ export async function enrichItemFully(
     const { object } = await generateObject({
       model: getModel('enrich'),
       maxOutputTokens: 2000,
-      system: buildSystemPrompt(),
+      system: await buildSystemPrompt(),
       schema: EnrichmentSchema,
       prompt: content,
     });
@@ -297,21 +303,23 @@ export async function enrichItemFully(
 
   // 1. Update work_items
   const traceEventAt = computeTraceEventAt(item);
-  db.prepare(`
-    UPDATE work_items
-    SET summary = ?,
-        trace_role = ?,
-        substance = ?,
-        trace_event_at = ?,
-        enriched_at = datetime('now')
-    WHERE id = ?
-  `).run(result.summary, result.trace_role, result.substance, traceEventAt, itemId);
+  await db
+    .prepare(
+      `UPDATE work_items
+       SET summary = ?,
+           trace_role = ?,
+           substance = ?,
+           trace_event_at = ?,
+           enriched_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(result.summary, result.trace_role, result.substance, traceEventAt, itemId);
 
   // 2. Persist derived rows
-  storeTopicTags(itemId, result.topics);
-  storeGoalTags(itemId, result.goals);
-  persistEntities(itemId, result.entities);
-  persistAnomalies(itemId, workspaceId, result.anomaly_signals);
+  await storeTopicTags(itemId, result.topics);
+  await storeGoalTags(itemId, result.goals);
+  await persistEntities(itemId, result.entities);
+  await persistAnomalies(itemId, workspaceId, result.anomaly_signals);
 
   return { ok: true, enrichment: result };
 }

@@ -1,5 +1,5 @@
-import { getDb } from '@/lib/db';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
 import { MetricsClient, type GoalDisplay } from './metrics-client';
 
 export const dynamic = 'force-dynamic';
@@ -144,47 +144,46 @@ function buildGoalDisplay(
   };
 }
 
-export default function MetricsPage() {
+export default async function MetricsPage() {
   let goals: GoalDisplay[] = [];
   let totalItems = 0;
   let sourcesCount = 0;
 
   try {
-    initSchema();
-    const db = getDb();
+    await ensureSchemaAsync();
+    const db = getLibsqlDb();
 
-    totalItems = (db.prepare('SELECT COUNT(*) as c FROM work_items').get() as { c: number }).c;
+    const totalItemsRow = await db
+      .prepare('SELECT COUNT(*) as c FROM work_items')
+      .get<{ c: number }>();
+    totalItems = totalItemsRow?.c ?? 0;
 
-    const goalRows = db
+    const goalRows = await db
       .prepare(
-        `
-      SELECT g.id, g.name, g.description,
-        COUNT(DISTINCT wi.id) as total,
-        SUM(CASE WHEN wi.status IN ('done','closed','resolved') THEN 1 ELSE 0 END) as done,
-        SUM(CASE WHEN wi.status IN ('open','in_progress','to_do') THEN 1 ELSE 0 END) as active,
-        SUM(CASE WHEN julianday('now') - julianday(COALESCE(wi.updated_at, wi.created_at)) >= 14 AND wi.status NOT IN ('done','closed','resolved') THEN 1 ELSE 0 END) as stale,
-        SUM(CASE WHEN wi.updated_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) as velocity_7d
-      FROM goals g
-      LEFT JOIN item_tags it ON it.tag_id = g.id
-      LEFT JOIN work_items wi ON wi.id = it.item_id
-      WHERE g.status = 'active'
-      GROUP BY g.id
-      ORDER BY g.sort_order
-    `,
+        `SELECT g.id, g.name, g.description,
+          COUNT(DISTINCT wi.id) as total,
+          SUM(CASE WHEN wi.status IN ('done','closed','resolved') THEN 1 ELSE 0 END) as done,
+          SUM(CASE WHEN wi.status IN ('open','in_progress','to_do') THEN 1 ELSE 0 END) as active,
+          SUM(CASE WHEN julianday('now') - julianday(COALESCE(wi.updated_at, wi.created_at)) >= 14 AND wi.status NOT IN ('done','closed','resolved') THEN 1 ELSE 0 END) as stale,
+          SUM(CASE WHEN wi.updated_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) as velocity_7d
+        FROM goals g
+        LEFT JOIN item_tags it ON it.tag_id = g.id
+        LEFT JOIN work_items wi ON wi.id = it.item_id
+        WHERE g.status = 'active'
+        GROUP BY g.id
+        ORDER BY g.sort_order`,
       )
-      .all() as GoalRow[];
+      .all<GoalRow>();
 
-    const perSourceRows = db
+    const perSourceRows = await db
       .prepare(
-        `
-      SELECT g.id as goal_id, wi.source, COUNT(*) as count
-      FROM goals g
-      JOIN item_tags it ON it.tag_id = g.id
-      JOIN work_items wi ON wi.id = it.item_id
-      GROUP BY g.id, wi.source
-    `,
+        `SELECT g.id as goal_id, wi.source, COUNT(*) as count
+         FROM goals g
+         JOIN item_tags it ON it.tag_id = g.id
+         JOIN work_items wi ON wi.id = it.item_id
+         GROUP BY g.id, wi.source`,
       )
-      .all() as Array<{ goal_id: string; source: string; count: number }>;
+      .all<{ goal_id: string; source: string; count: number }>();
 
     const perSource = new Map<string, Record<string, number>>();
     for (const r of perSourceRows) {
@@ -197,19 +196,17 @@ export default function MetricsPage() {
     perSourceRows.forEach((r) => sourcesSet.add(r.source));
     sourcesCount = sourcesSet.size;
 
-    const velocityRows = db
+    const velocityRows = await db
       .prepare(
-        `
-      SELECT g.id as goal_id, strftime('%Y-%W', wi.updated_at) as week, COUNT(*) as c
-      FROM goals g
-      JOIN item_tags it ON it.tag_id = g.id
-      JOIN work_items wi ON wi.id = it.item_id
-      WHERE wi.updated_at >= datetime('now','-91 days')
-      GROUP BY g.id, week
-      ORDER BY g.id, week
-    `,
+        `SELECT g.id as goal_id, strftime('%Y-%W', wi.updated_at) as week, COUNT(*) as c
+         FROM goals g
+         JOIN item_tags it ON it.tag_id = g.id
+         JOIN work_items wi ON wi.id = it.item_id
+         WHERE wi.updated_at >= datetime('now','-91 days')
+         GROUP BY g.id, week
+         ORDER BY g.id, week`,
       )
-      .all() as Array<{ goal_id: string; week: string; c: number }>;
+      .all<{ goal_id: string; week: string; c: number }>();
 
     const velByGoal = new Map<string, number[]>();
     for (const v of velocityRows) {
@@ -223,17 +220,15 @@ export default function MetricsPage() {
       velByGoal.set(key, padded.slice(-13));
     });
 
-    const highlightRows = db
+    const highlightRows = await db
       .prepare(
-        `
-      SELECT g.id as goal_id, wi.id as id, wi.title, wi.source, wi.created_at, wi.updated_at
-      FROM goals g
-      JOIN item_tags it ON it.tag_id = g.id
-      JOIN work_items wi ON wi.id = it.item_id
-      ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC
-    `,
+        `SELECT g.id as goal_id, wi.id as id, wi.title, wi.source, wi.created_at, wi.updated_at
+         FROM goals g
+         JOIN item_tags it ON it.tag_id = g.id
+         JOIN work_items wi ON wi.id = it.item_id
+         ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC`,
       )
-      .all() as Array<HighlightRow & { goal_id: string }>;
+      .all<HighlightRow & { goal_id: string }>();
 
     const highlightByGoal = new Map<string, HighlightRow[]>();
     for (const h of highlightRows) {

@@ -1,4 +1,11 @@
-import { getDb } from './db';
+import { ensureSchemaAsync } from './db/init-schema-async';
+import { getLibsqlDb } from './db/libsql';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 // --- Types ---
 
@@ -42,6 +49,8 @@ export interface ProjectTicket {
   updated_at: string | null;
   url: string | null;
   linked_prs: LinkedPR[];
+  /** From work_items.gap_analysis.status — 'unknown' is normalized to null. */
+  gap_status: 'complete' | 'partial' | 'gap' | null;
 }
 
 export interface VelocityWeek {
@@ -60,6 +69,13 @@ export interface CodeActivity {
   repo_count: number;
 }
 
+export interface AnomalyEvidence {
+  id: string;
+  source_id: string;
+  title: string;
+  url: string | null;
+}
+
 export interface ProjectAnomaly {
   id: string;
   scope: string;
@@ -67,7 +83,15 @@ export interface ProjectAnomaly {
   severity: number;
   explanation: string | null;
   evidence_item_ids: string[];
+  evidence: AnomalyEvidence[];
   detected_at: string;
+  // Set when the user has acted on the anomaly. action_item_id and
+  // jira_issue_key are mutually optional — a user can both create an action
+  // item AND a Jira ticket from the same anomaly, but typically picks one.
+  action_item_id?: string | null;
+  jira_issue_key?: string | null;
+  handled_at?: string | null;
+  dismissed_by_user?: number;
 }
 
 export interface ProjectActionItem {
@@ -132,9 +156,9 @@ export interface ProjectSummaryCard {
 // --- Config ---
 
 const PROJECT_NAMES: Record<string, string> = {
-  OA: 'Otti Assistant',
-  PEX: 'Partner Experience',
-  INT: 'Integrations',
+  ALPHA: 'Alpha Initiative',
+  BETA: 'Beta Platform',
+  GAMMA: 'Gamma Workflow',
 };
 
 // --- Helpers ---
@@ -147,14 +171,16 @@ function periodToDays(period: string): number | null {
   }
 }
 
-function periodRange(period: string): { start: string; end: string; priorStart: string } {
+async function periodRange(period: string): Promise<{ start: string; end: string; priorStart: string }> {
   const now = new Date();
   const end = now.toISOString().slice(0, 10);
   const days = periodToDays(period);
 
   if (!days) {
-    const db = getDb();
-    const row = db.prepare("SELECT MIN(created_at) as m FROM work_items WHERE source = 'jira'").get() as { m: string } | undefined;
+    const db = getLibsqlDb();
+    const row = await db
+      .prepare("SELECT MIN(created_at) as m FROM work_items WHERE source = 'jira'")
+      .get<{ m: string }>();
     const minDate = row?.m?.slice(0, 10) || end;
     return { start: minDate, end, priorStart: minDate };
   }
@@ -165,11 +191,6 @@ function periodRange(period: string): { start: string; end: string; priorStart: 
   priorStart.setDate(priorStart.getDate() - days);
 
   return { start: start.toISOString().slice(0, 10), end, priorStart: priorStart.toISOString().slice(0, 10) };
-}
-
-function extractTicketKeys(text: string): string[] {
-  const matches = text.match(/[A-Z]+-\d+/g);
-  return matches ? [...new Set(matches)] : [];
 }
 
 function computeHealthStatus(signals: ProjectSignals): 'healthy' | 'needs_attention' | 'at_risk' {
@@ -190,61 +211,155 @@ function computeHealthStatus(signals: ProjectSignals): 'healthy' | 'needs_attent
 
 // --- Main Queries ---
 
-export function getProjectDetail(projectKey: string, period: string): ProjectDetail {
-  const db = getDb();
-  const { start, end, priorStart } = periodRange(period);
+export async function getProjectDetail(projectKey: string, period: string): Promise<ProjectDetail> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  const { start, end, priorStart } = await periodRange(period);
   const endTs = end + 'T23:59:59';
   const startTs = start + 'T00:00:00';
   const priorStartTs = priorStart + 'T00:00:00';
 
   const name = PROJECT_NAMES[projectKey] || projectKey;
+  const inPeriod = (ts: string | null | undefined) =>
+    !!ts && ts >= startTs && ts <= endTs;
 
   // --- Tickets ---
-  const allTickets = db.prepare(`
-    SELECT id, source_id, title, status, created_at, updated_at, url
+  // Pull gap_analysis status alongside the ticket fields so the list view can
+  // badge "Partially Shipped" / "Implementation Gap" without a follow-up call.
+  // We extract just the status string via json_extract — no need to ship the
+  // whole shipped/missing arrays here (the drawer fetches the full object).
+  const allTicketsRows = await db.prepare(`
+    SELECT id, source_id, title, status, created_at, updated_at, url,
+           json_extract(gap_analysis, '$.status') AS gap_status_raw
     FROM work_items
     WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
     ORDER BY updated_at DESC, created_at DESC
-  `).all(projectKey) as ProjectTicket[];
+  `).all<any>(projectKey);
+  const allTickets = allTicketsRows.map((t: any) => ({
+    id: t.id,
+    source_id: t.source_id,
+    title: t.title,
+    status: t.status,
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+    url: t.url,
+    linked_prs: [] as LinkedPR[],
+    // 'unknown' isn't worth surfacing — collapse it to null so the UI only
+    // renders a badge when the model actually evaluated fulfillment.
+    gap_status: (t.gap_status_raw === 'complete' || t.gap_status_raw === 'partial' || t.gap_status_raw === 'gap')
+      ? (t.gap_status_raw as 'complete' | 'partial' | 'gap')
+      : null,
+  })) as ProjectTicket[];
 
-  const totalTickets = allTickets.length;
+  // Project totals are period-independent — they describe the project as a whole.
+  // Period-scoped views below filter to tickets that were created or updated
+  // within the window.
+  const projectTotalTickets = allTickets.length;
+  const ticketsInPeriod = allTickets.filter(
+    (t) => inPeriod(t.updated_at) || inPeriod(t.created_at),
+  );
   const doneTickets = allTickets.filter(t => ['done', 'closed', 'resolved'].includes(t.status));
   const openTickets = allTickets.filter(t => !['done', 'closed', 'resolved'].includes(t.status));
+  const doneInPeriodTickets = ticketsInPeriod.filter((t) =>
+    ['done', 'closed', 'resolved'].includes(t.status),
+  );
 
-  // --- Link PRs to tickets ---
-  const allPRs = db.prepare(`
-    SELECT source_id, title, status, updated_at, url,
-           json_extract(metadata, '$.repo') as repo
-    FROM work_items
-    WHERE source = 'github'
-  `).all() as (LinkedPR & { repo: string })[];
+  // --- Link PRs to tickets via issue_trails ---
+  // PRs aren't work_items anymore; they're trail rows anchored to Jira
+  // tickets. Aggregate per pr_ref so the project KPI strip + tickets list
+  // see one entry per PR with derived status, latest activity, contributors.
+  const trailRows = await db
+    .prepare(
+      `SELECT t.pr_ref, t.repo, t.kind, t.actor, t.title, t.pr_url, t.occurred_at,
+              t.state, t.match_status, w.source_id AS ticket_source_id
+       FROM issue_trails t
+       JOIN work_items w ON w.id = t.issue_item_id
+       WHERE w.source = 'jira'
+         AND json_extract(w.metadata, '$.project') = ?
+         AND t.match_status IN ('matched', 'ai_matched')
+       ORDER BY t.occurred_at ASC`,
+    )
+    .all<{
+      pr_ref: string;
+      repo: string | null;
+      kind: 'pr_opened' | 'pr_review' | 'pr_merged' | 'pr_closed';
+      actor: string | null;
+      title: string | null;
+      pr_url: string | null;
+      occurred_at: string;
+      state: string | null;
+      ticket_source_id: string;
+    }>(projectKey);
 
-  // Build a map: ticket key → PRs
-  const ticketPRMap = new Map<string, LinkedPR[]>();
-  let projectPRCount = 0;
-  for (const pr of allPRs) {
-    const keys = extractTicketKeys(pr.title + ' ' + pr.source_id);
-    for (const key of keys) {
-      if (key.startsWith(projectKey + '-')) {
-        if (!ticketPRMap.has(key)) ticketPRMap.set(key, []);
-        ticketPRMap.get(key)!.push(pr);
-        projectPRCount++;
-      }
+  type PrAgg = {
+    pr_ref: string;
+    repo: string | null;
+    url: string | null;
+    title: string | null;
+    status: 'open' | 'merged' | 'closed';
+    latest_at: string;
+    earliest_at: string;
+    authors: Set<string>;
+  };
+  const prMap = new Map<string, PrAgg>();
+  for (const r of trailRows) {
+    let agg = prMap.get(r.pr_ref);
+    if (!agg) {
+      agg = {
+        pr_ref: r.pr_ref,
+        repo: r.repo,
+        url: r.pr_url,
+        title: r.title,
+        status: 'open',
+        latest_at: r.occurred_at,
+        earliest_at: r.occurred_at,
+        authors: new Set(),
+      };
+      prMap.set(r.pr_ref, agg);
     }
+    if (r.kind === 'pr_merged') agg.status = 'merged';
+    else if (r.kind === 'pr_closed' && agg.status !== 'merged') agg.status = 'closed';
+    if (r.actor) agg.authors.add(r.actor);
+    if (r.occurred_at > agg.latest_at) agg.latest_at = r.occurred_at;
+    if (r.occurred_at < agg.earliest_at) agg.earliest_at = r.occurred_at;
+    if (!agg.title && r.title) agg.title = r.title;
+    if (!agg.url && r.pr_url) agg.url = r.pr_url;
+    if (!agg.repo && r.repo) agg.repo = r.repo;
   }
 
-  // Attach PRs to tickets
-  const ticketsWithPRs: ProjectTicket[] = allTickets.map(t => ({
+  // Build per-ticket linked_prs map. Dedup by pr_ref since the same trail
+  // row repeats per kind (opened / review / merged) but tickets only need
+  // one entry per PR.
+  const ticketPRMap = new Map<string, LinkedPR[]>();
+  const ticketSeen = new Map<string, Set<string>>();
+  for (const r of trailRows) {
+    const agg = prMap.get(r.pr_ref);
+    if (!agg) continue;
+    if (!ticketPRMap.has(r.ticket_source_id)) {
+      ticketPRMap.set(r.ticket_source_id, []);
+      ticketSeen.set(r.ticket_source_id, new Set());
+    }
+    const seen = ticketSeen.get(r.ticket_source_id)!;
+    if (seen.has(agg.pr_ref)) continue;
+    seen.add(agg.pr_ref);
+    ticketPRMap.get(r.ticket_source_id)!.push({
+      source_id: agg.pr_ref,
+      title: agg.title || agg.pr_ref,
+      status: agg.status,
+      updated_at: agg.latest_at,
+      repo: agg.repo ?? '',
+      url: agg.url,
+    });
+  }
+
+  // Attach PRs to tickets — list view shows only tickets active in the period.
+  const ticketsWithPRs: ProjectTicket[] = ticketsInPeriod.map((t) => ({
     ...t,
     linked_prs: ticketPRMap.get(t.source_id) || [],
   }));
 
-  // Deduplicate PR count (same PR may link to multiple tickets)
-  const uniquePRIds = new Set<string>();
-  for (const prs of ticketPRMap.values()) {
-    for (const pr of prs) uniquePRIds.add(pr.source_id);
-  }
-  const totalPRs = uniquePRIds.size;
+  const allProjectPrs = [...prMap.values()];
+  const totalPRs = allProjectPrs.length;
 
   // --- Delivery Signals ---
   // Velocity: tickets closed in period
@@ -300,36 +415,45 @@ export function getProjectDetail(projectKey: string, period: string): ProjectDet
     ? Math.round(staleCount / openTickets.length * 1000) / 10
     : 0;
 
-  const completionPct = totalTickets > 0
-    ? Math.round(doneTickets.length / totalTickets * 100)
+  // Completion is scoped to the period: of tickets active in the window, what
+  // share is done. For "all" this naturally collapses to overall completion.
+  const completionTotal = ticketsInPeriod.length;
+  const completionDone = doneInPeriodTickets.length;
+  const completionPct = completionTotal > 0
+    ? Math.round(completionDone / completionTotal * 100)
     : 0;
 
-  // --- Code Activity ---
-  const projectPRs = allPRs.filter(pr => {
-    const keys = extractTicketKeys(pr.title + ' ' + pr.source_id);
-    return keys.some(k => k.startsWith(projectKey + '-'));
-  });
-  const mergedPRs = projectPRs.filter(pr => pr.status === 'done' || pr.status === 'merged');
-  const openPRs = projectPRs.filter(pr => pr.status === 'open');
-  // Actually get unique authors from work_items
-  const uniquePRIdsArr = Array.from(uniquePRIds);
-  const authorRows = uniquePRIdsArr.length > 0
-    ? db.prepare(`
-        SELECT DISTINCT author FROM work_items
-        WHERE source = 'github' AND source_id IN (${uniquePRIdsArr.map(() => '?').join(',')})
-        AND author IS NOT NULL
-      `).all(...uniquePRIdsArr) as { author: string }[]
-    : [];
-  const contributorNames = authorRows.map(r => r.author);
+  // --- Code Activity (sourced from issue_trails) ---
+  const projectPRsInPeriod = allProjectPrs.filter((pr) => inPeriod(pr.latest_at));
+  const mergedPRs = projectPRsInPeriod.filter((pr) => pr.status === 'merged');
+  const openPRs = projectPRsInPeriod.filter((pr) => pr.status === 'open');
 
-  const days = periodToDays(period) || 60;
-  const weeks = Math.max(days / 7, 1);
-  const mergeCadence = Math.round(mergedPRs.length / weeks * 10) / 10;
+  const contributorNames = [
+    ...new Set(allProjectPrs.flatMap((pr) => [...pr.authors])),
+  ];
 
-  const repos = [...new Set(projectPRs.map(pr => pr.repo).filter(Boolean))];
+  // For 30d/90d use the explicit window; for "all" estimate from earliest
+  // PR in scope so the cadence stays meaningful instead of dividing by ~60d.
+  const explicitDays = periodToDays(period);
+  let cadenceWeeks = explicitDays ? explicitDays / 7 : 1;
+  if (!explicitDays && allProjectPrs.length > 0) {
+    const earliest = allProjectPrs.reduce<string | null>(
+      (acc, pr) => (acc && acc < pr.earliest_at ? acc : pr.earliest_at),
+      null,
+    );
+    if (earliest) {
+      const span = (Date.now() - new Date(earliest).getTime()) / 86400000;
+      cadenceWeeks = Math.max(span / 7, 1);
+    }
+  }
+  const mergeCadence = Math.round(mergedPRs.length / Math.max(cadenceWeeks, 1) * 10) / 10;
+
+  const repos = [
+    ...new Set(allProjectPrs.map((pr) => pr.repo).filter((r): r is string => !!r)),
+  ];
 
   // --- Velocity Weekly ---
-  const weeklyRows = db.prepare(`
+  const weeklyRows = await db.prepare(`
     SELECT strftime('%Y-%W', updated_at) as week, COUNT(*) as closed
     FROM work_items
     WHERE source = 'jira'
@@ -337,7 +461,7 @@ export function getProjectDetail(projectKey: string, period: string): ProjectDet
       AND status IN ('done', 'closed', 'resolved')
       AND updated_at >= ? AND updated_at <= ?
     GROUP BY week ORDER BY week ASC
-  `).all(projectKey, startTs, endTs) as { week: string; closed: number }[];
+  `).all<{ week: string; closed: number }>(projectKey, startTs, endTs);
 
   const velocityWeekly: VelocityWeek[] = weeklyRows
     .filter(r => r.week != null)
@@ -347,14 +471,14 @@ export function getProjectDetail(projectKey: string, period: string): ProjectDet
     }));
 
   // --- Summary ---
-  const summaryRow = db.prepare(
-    'SELECT recap, summary_generated_at FROM project_summaries WHERE project_key = ?'
-  ).get(projectKey) as { recap: string | null; summary_generated_at: string | null } | undefined;
+  const summaryRow = await db
+    .prepare('SELECT recap, summary_generated_at FROM project_summaries WHERE project_key = ?')
+    .get<{ recap: string | null; summary_generated_at: string | null }>(projectKey);
 
   const signals: ProjectSignals = {
     completion_pct: completionPct,
-    completion_done: doneTickets.length,
-    completion_total: totalTickets,
+    completion_done: completionDone,
+    completion_total: completionTotal,
     velocity,
     velocity_prior: velocityPrior,
     velocity_delta_pct: velocityDeltaPct,
@@ -366,11 +490,8 @@ export function getProjectDetail(projectKey: string, period: string): ProjectDet
     stale_pct: stalePct,
   };
 
-  // suppress unused variable warning
-  void projectPRCount;
-
   return {
-    project: { key: projectKey, name, total_tickets: totalTickets, total_prs: totalPRs },
+    project: { key: projectKey, name, total_tickets: projectTotalTickets, total_prs: totalPRs },
     health: {
       status: computeHealthStatus(signals),
       summary: summaryRow?.recap || null,
@@ -379,7 +500,7 @@ export function getProjectDetail(projectKey: string, period: string): ProjectDet
     },
     velocity_weekly: velocityWeekly,
     code_activity: {
-      total_prs: totalPRs,
+      total_prs: projectPRsInPeriod.length,
       merged_prs: mergedPRs.length,
       open_prs: openPRs.length,
       contributors: contributorNames,
@@ -392,21 +513,36 @@ export function getProjectDetail(projectKey: string, period: string): ProjectDet
   };
 }
 
-export function getProjectSummaryCards(period: string): ProjectSummaryCard[] {
-  const db = getDb();
-  const { start, end, priorStart } = periodRange(period);
+export async function getProjectSummaryCards(period: string): Promise<ProjectSummaryCard[]> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  const { start, end, priorStart } = await periodRange(period);
   const startTs = start + 'T00:00:00';
   const endTs = end + 'T23:59:59';
   const priorStartTs = priorStart + 'T00:00:00';
 
   // Get all JIRA project keys
-  const projectKeys = db.prepare(`
+  const projectKeys = await db.prepare(`
     SELECT DISTINCT json_extract(metadata, '$.project') as key
     FROM work_items WHERE source = 'jira'
-  `).all() as { key: string }[];
+  `).all<{ key: string }>();
 
-  // All PRs for linking
-  const allPRs = db.prepare("SELECT source_id, title FROM work_items WHERE source = 'github'").all() as { source_id: string; title: string }[];
+  // PR counts per project, sourced from issue_trails. PRs aren't work_items
+  // anymore — they're trail rows anchored to Jira tickets. One DISTINCT
+  // pr_ref per project gives us the per-card pr_count below.
+  const prCountsRows = await db
+    .prepare(
+      `SELECT json_extract(w.metadata, '$.project') AS project,
+              COUNT(DISTINCT t.pr_ref) AS n
+       FROM issue_trails t
+       JOIN work_items w ON w.id = t.issue_item_id
+       WHERE w.source = 'jira'
+         AND t.match_status IN ('matched', 'ai_matched')
+       GROUP BY project`,
+    )
+    .all<{ project: string | null; n: number }>();
+  const prCountsByProject = new Map<string, number>();
+  for (const r of prCountsRows) if (r.project) prCountsByProject.set(r.project, r.n);
 
   const cards: ProjectSummaryCard[] = [];
 
@@ -414,10 +550,10 @@ export function getProjectSummaryCards(period: string): ProjectSummaryCard[] {
     if (!key) continue;
     const name = PROJECT_NAMES[key] || key;
 
-    const allTickets = db.prepare(`
+    const allTickets = await db.prepare(`
       SELECT status, updated_at, created_at FROM work_items
       WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
-    `).all(key) as { status: string; updated_at: string | null; created_at: string }[];
+    `).all<{ status: string; updated_at: string | null; created_at: string }>(key);
 
     const total = allTickets.length;
     const done = allTickets.filter(t => ['done', 'closed', 'resolved'].includes(t.status)).length;
@@ -446,16 +582,12 @@ export function getProjectSummaryCards(period: string): ProjectSummaryCard[] {
 
     const stalePct = open.length > 0 ? stale / open.length * 100 : 0;
 
-    // Count PRs linked to this project
-    const prCount = new Set(allPRs.filter(pr => {
-      const keys = extractTicketKeys(pr.title + ' ' + pr.source_id);
-      return keys.some(k => k.startsWith(key + '-'));
-    }).map(pr => pr.source_id)).size;
+    const prCount = prCountsByProject.get(key) ?? 0;
 
     // Summary
-    const summaryRow = db.prepare(
-      'SELECT recap FROM project_summaries WHERE project_key = ?'
-    ).get(key) as { recap: string | null } | undefined;
+    const summaryRow = await db
+      .prepare('SELECT recap FROM project_summaries WHERE project_key = ?')
+      .get<{ recap: string | null }>(key);
     const snippet = summaryRow?.recap?.split(/[.!]\s/)[0] || null;
 
     // Health

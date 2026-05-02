@@ -78,6 +78,18 @@ export async function connectMCP(server: MCPServerConfig): Promise<MCPClient> {
         cmdArgs.push(a);
       }
     }
+    // Compat shim: older Atlassian connector rows were saved with JIRA_*
+    // env names; the mcp-atlassian package this repo depends on reads
+    // ATLASSIAN_*. Mirror the values so both old and new rows work without
+    // requiring a destructive DB migration.
+    if (env.JIRA_URL && !env.ATLASSIAN_BASE_URL) env.ATLASSIAN_BASE_URL = env.JIRA_URL;
+    if (env.JIRA_USERNAME && !env.ATLASSIAN_EMAIL) env.ATLASSIAN_EMAIL = env.JIRA_USERNAME;
+    if (env.JIRA_API_TOKEN && !env.ATLASSIAN_API_TOKEN) env.ATLASSIAN_API_TOKEN = env.JIRA_API_TOKEN;
+    // And the reverse — newer rows emit ATLASSIAN_* and we want any adapter
+    // still reading JIRA_URL to keep working.
+    if (env.ATLASSIAN_BASE_URL && !env.JIRA_URL) env.JIRA_URL = env.ATLASSIAN_BASE_URL;
+    if (env.ATLASSIAN_EMAIL && !env.JIRA_USERNAME) env.JIRA_USERNAME = env.ATLASSIAN_EMAIL;
+    if (env.ATLASSIAN_API_TOKEN && !env.JIRA_API_TOKEN) env.JIRA_API_TOKEN = env.ATLASSIAN_API_TOKEN;
     transport = new sdk.stdio.StdioClientTransport({
       command: server.transport.command,
       args: cmdArgs,
@@ -121,9 +133,9 @@ export async function resolveServerConfig(
   env: NodeJS.ProcessEnv,
 ): Promise<MCPServerConfig | null> {
   if (workspaceId) {
-    let cfg: ReturnType<typeof getConnectorConfigBySource> | null = null;
+    let cfg: Awaited<ReturnType<typeof getConnectorConfigBySource>> | null = null;
     try {
-      cfg = getConnectorConfigBySource(workspaceId, source);
+      cfg = await getConnectorConfigBySource(workspaceId, source);
     } catch (err: any) {
       console.error(`[resolveServerConfig] DB lookup failed for ${workspaceId}/${source}: ${err.message}`);
     }

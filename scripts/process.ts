@@ -17,9 +17,6 @@ import { summarizeAllDecisions } from '../src/lib/decision/summary';
 import { getDb } from '../src/lib/db';
 import { seedWorkspaceConfig } from '../src/lib/workspace-config';
 
-initSchema();
-seedWorkspaceConfig();
-
 const args = new Set(process.argv.slice(2));
 const FULL = args.has('--full');
 const SKIP_SUMMARIES = args.has('--no-summaries');
@@ -27,6 +24,8 @@ const SKIP_EMBED = args.has('--no-embed');
 const SKIP_LINKS = args.has('--no-links');
 
 async function run() {
+  initSchema();
+  await seedWorkspaceConfig();
   const t0 = Date.now();
   console.log(`Processing pipeline${FULL ? ' (FULL)' : ' (incremental)'}...`);
 
@@ -40,7 +39,7 @@ async function run() {
 
   // Phase 2: Chunking
   console.log('\n  [2/7] Chunking...');
-  const ch = chunkAllPending({ force: FULL });
+  const ch = await chunkAllPending({ force: FULL });
   console.log(`    items=${ch.items}, chunks=${ch.chunks}`);
 
   // Phase 3: Entity extraction (Haiku + tool_use, typed + canonicalized + offsets)
@@ -68,7 +67,7 @@ async function run() {
       getDb().exec('DELETE FROM item_links_chunks');
       getDb().exec('DELETE FROM links');
     }
-    const lk = createLinksForAll({});
+    const lk = await createLinksForAll({});
     console.log(`    items=${lk.items}, links=${lk.links}`);
   } else {
     console.log('\n  [5/7] Links SKIPPED (--no-links)');
@@ -76,7 +75,7 @@ async function run() {
 
   // Phase 6: Workstream assembly
   console.log('\n  [6/7] Workstream assembly...');
-  const ws = assembleAll();
+  const ws = await assembleAll();
   console.log(`    workstreams=${ws.workstreams}, items-in-ws=${ws.items}, seeds=${ws.seeds}, orphans=${ws.orphans}`);
 
   // Phase 6: Workstream narrative summaries (Sonnet, paragraph + timeline)
@@ -90,7 +89,7 @@ async function run() {
 
   // Phase 7: Decision extraction (every trace_role='decision' → decision record with bidirectional trace)
   console.log('\n  [7/8] Decision extraction...');
-  const dx = extractDecisions();
+  const dx = await extractDecisions();
   console.log(`    decisions=${dx.decisions}, relations=${dx.relations}`);
 
   // Phase 8: Structured decision summaries (Sonnet — Context / Decision / Rationale / Outcome / Traceability)

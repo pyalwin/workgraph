@@ -4,8 +4,10 @@ import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import type { ProjectDetail } from '@/lib/project-queries';
-import { Markdown } from '@/components/prompt-kit/markdown';
-import { ItemDetailDrawer } from '@/components/item-detail-drawer';
+import { Markdown } from '@/components/chat/prompt-kit/markdown';
+import { ItemDetailDrawer } from '@/components/items/item-detail-drawer';
+import { AnomalyActionPanel } from '@/components/anomalies/anomaly-action-panel';
+import { OrphanPrReviewModal } from '@/components/anomalies/orphan-pr-review-modal';
 
 type Tab = 'overview' | 'goals' | 'actions' | 'activity';
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -51,6 +53,12 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
   const [refreshingReadme, setRefreshingReadme] = useState(false);
   const [refreshingOkrs, setRefreshingOkrs] = useState(false);
   const [openItemId, setOpenItemId] = useState<string | null>(null);
+  const [ticketQuery, setTicketQuery] = useState('');
+  const [ticketsExpanded, setTicketsExpanded] = useState(false);
+  const [ticketStatus, setTicketStatus] = useState<string>('all');
+  // Repo name to scope the orphan-PR review modal. Set when the user clicks
+  // "Review" on an orphan_pr_batch anomaly card; null = modal closed.
+  const [orphanReviewRepo, setOrphanReviewRepo] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -346,15 +354,82 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
           </div>
           <div className="proj-section-body">
             <ul className="proj-anomalies-v2">
-              {d.anomalies!.map((a) => (
-                <li key={a.id} className="proj-anomaly-v2">
-                  <span className={`tracker-anomaly-kind tracker-anomaly-${a.kind}`}>
-                    {a.kind.replace(/_/g, ' ')}
-                  </span>
-                  <span className="proj-anomaly-text">{a.explanation ?? a.scope}</span>
-                  <span className="proj-anomaly-sev">sev {Math.round(a.severity * 100)}%</span>
-                </li>
-              ))}
+              {d.anomalies!.map((a) => {
+                const evidence = a.evidence ?? [];
+                const primary = evidence[0];
+                const extra = evidence.slice(1, 4);
+                return (
+                  <li key={a.id} className="proj-anomaly-v2" style={{ flexWrap: 'wrap' }}>
+                    <span className={`tracker-anomaly-kind tracker-anomaly-${a.kind}`}>
+                      {a.kind.replace(/_/g, ' ')}
+                    </span>
+                    <span className="proj-anomaly-text">{a.explanation ?? a.scope}</span>
+                    {primary && (
+                      <span className="proj-anomaly-sources">
+                        <button
+                          type="button"
+                          className="proj-anomaly-source"
+                          onClick={() => setOpenItemId(primary.id)}
+                          title={primary.title}
+                        >
+                          {primary.source_id}
+                        </button>
+                        {extra.map((ev) => (
+                          <button
+                            key={ev.id}
+                            type="button"
+                            className="proj-anomaly-source"
+                            onClick={() => setOpenItemId(ev.id)}
+                            title={ev.title}
+                          >
+                            {ev.source_id}
+                          </button>
+                        ))}
+                        {evidence.length > 4 && (
+                          <span className="proj-anomaly-source-more">+{evidence.length - 4}</span>
+                        )}
+                      </span>
+                    )}
+                    <span className="proj-anomaly-sev">sev {Math.round(a.severity * 100)}%</span>
+                    {a.kind === 'orphan_pr_batch' && a.scope.startsWith('repo:') && (
+                      <button
+                        type="button"
+                        onClick={() => setOrphanReviewRepo(a.scope.slice('repo:'.length))}
+                        style={{
+                          fontSize: 11,
+                          padding: '3px 9px',
+                          background: 'var(--ink)',
+                          color: 'var(--paper)',
+                          border: 'none',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Review &amp; attach
+                      </button>
+                    )}
+                    <div style={{ flexBasis: '100%' }}>
+                      <AnomalyActionPanel
+                        anomaly={{
+                          id: a.id,
+                          kind: a.kind,
+                          severity: a.severity,
+                          explanation: a.explanation,
+                          evidence: a.evidence ?? [],
+                          scope: a.scope,
+                          action_item_id: a.action_item_id,
+                          jira_issue_key: a.jira_issue_key,
+                          handled_at: a.handled_at,
+                          dismissed_by_user: a.dismissed_by_user,
+                        }}
+                        projectKey={projectKey}
+                        onActioned={fetchData}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         </section>
@@ -396,47 +471,175 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
       )}
 
       {/* ───── Items / Tickets ───── */}
-      {d.tickets.length > 0 && (
+      {d.tickets.length > 0 ? (() => {
+        const q = ticketQuery.trim().toLowerCase();
+        const statusCounts = d.tickets.reduce<Record<string, number>>((acc, t) => {
+          acc[t.status] = (acc[t.status] ?? 0) + 1;
+          return acc;
+        }, {});
+        const statusOrder = ['to_do', 'open', 'in_progress', 'done', 'resolved', 'closed'];
+        const statusKeys = Object.keys(statusCounts).sort((a, b) => {
+          const ai = statusOrder.indexOf(a);
+          const bi = statusOrder.indexOf(b);
+          if (ai === -1 && bi === -1) return a.localeCompare(b);
+          if (ai === -1) return 1;
+          if (bi === -1) return -1;
+          return ai - bi;
+        });
+        const filtered = d.tickets.filter((t) => {
+          if (ticketStatus !== 'all' && t.status !== ticketStatus) return false;
+          if (!q) return true;
+          return (
+            t.source_id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q)
+          );
+        });
+        return (
+          <section className="proj-section">
+            <div className="proj-section-head">
+              <div>
+                <p className="proj-section-eyebrow">Items</p>
+                <h2 className="proj-section-title">
+                  {q || ticketStatus !== 'all'
+                    ? `${filtered.length} of ${d.tickets.length}`
+                    : d.tickets.length}{' '}
+                  {filtered.length === 1 ? 'ticket' : 'tickets'} {periodLabel(period)}
+                </h2>
+              </div>
+              <span className="proj-section-meta">
+                {d.code_activity.contributor_count} contributors · {d.code_activity.repo_count} repos
+              </span>
+            </div>
+            <div className="proj-section-body">
+              <input
+                type="search"
+                value={ticketQuery}
+                onChange={(e) => setTicketQuery(e.target.value)}
+                placeholder="Filter by issue key or title"
+                className="proj-ticket-search"
+                style={{
+                  width: '100%',
+                  fontSize: 13,
+                  padding: '8px 10px',
+                  marginBottom: 10,
+                  background: 'var(--paper)',
+                  border: '1px solid var(--rule)',
+                  borderRadius: 6,
+                  fontFamily: 'inherit',
+                }}
+              />
+              {statusKeys.length > 1 && (
+                <div className="proj-ticket-filters">
+                  <button
+                    type="button"
+                    className={`proj-ticket-filter ${ticketStatus === 'all' ? 'is-active' : ''}`}
+                    onClick={() => setTicketStatus('all')}
+                  >
+                    All <span className="proj-ticket-filter-count">{d.tickets.length}</span>
+                  </button>
+                  {statusKeys.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`proj-ticket-filter state-${s} ${ticketStatus === s ? 'is-active' : ''}`}
+                      onClick={() => setTicketStatus(s)}
+                    >
+                      {s.replace(/_/g, ' ')}{' '}
+                      <span className="proj-ticket-filter-count">{statusCounts[s]}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {filtered.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--ink-4)' }}>
+                  No tickets match these filters.
+                </p>
+              ) : (
+                <>
+                  <ul className="proj-tickets">
+                    {(ticketsExpanded ? filtered : filtered.slice(0, 30)).map((t) => (
+                      <li
+                        key={t.id}
+                        className="proj-ticket"
+                        onClick={() => setOpenItemId(t.id)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setOpenItemId(t.id);
+                          }
+                        }}
+                      >
+                        <span className="src-badge src-jira">JRA</span>
+                        <span className="proj-ticket-id">{t.source_id}</span>
+                        <span className="proj-ticket-title">{t.title}</span>
+                        {t.linked_prs && t.linked_prs.length > 0 && (
+                          <span className="proj-ticket-pr-count" title={`${t.linked_prs.length} PR${t.linked_prs.length === 1 ? '' : 's'} attached`}>
+                            {t.linked_prs.length} PR
+                          </span>
+                        )}
+                        {/*
+                          Surface fulfillment badges only when the AI flagged something
+                          notable AND Jira agrees the ticket is "done-ish". Showing
+                          "Partial" on an open ticket adds no information — of course
+                          it's partial, it isn't finished. The valuable signal is when
+                          Jira says done but the code says otherwise.
+                        */}
+                        {(t.gap_status === 'partial' || t.gap_status === 'gap') &&
+                          ['done', 'closed', 'resolved'].includes(t.status) && (
+                            <span
+                              className={`proj-ticket-gap proj-ticket-gap-${t.gap_status}`}
+                              title={
+                                t.gap_status === 'partial'
+                                  ? 'AI says some asked requirements are missing from the linked PRs'
+                                  : 'AI says the linked PRs do not address what the ticket asked for'
+                              }
+                              style={{
+                                background: t.gap_status === 'gap' ? '#b13434' : '#c4790a',
+                                color: '#fff',
+                                fontSize: 10,
+                                fontWeight: 600,
+                                padding: '2px 7px',
+                                borderRadius: 999,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.06em',
+                              }}
+                            >
+                              {t.gap_status === 'gap' ? 'Gap' : 'Partial'}
+                            </span>
+                          )}
+                        <span className={`proj-ticket-state state-${t.status}`}>
+                          {t.status.replace(/_/g, ' ')}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {filtered.length > 30 && (
+                    <button
+                      type="button"
+                      className="proj-tickets-more"
+                      onClick={() => setTicketsExpanded((v) => !v)}
+                    >
+                      {ticketsExpanded ? 'Show less' : `Show ${filtered.length - 30} more`}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+        );
+      })() : (
         <section className="proj-section">
           <div className="proj-section-head">
             <div>
               <p className="proj-section-eyebrow">Items</p>
-              <h2 className="proj-section-title">
-                {d.tickets.length} {d.tickets.length === 1 ? 'ticket' : 'tickets'} in scope
-              </h2>
+              <h2 className="proj-section-title">No tickets {periodLabel(period)}</h2>
             </div>
-            <span className="proj-section-meta">
-              {d.code_activity.contributor_count} contributors · {d.code_activity.repo_count} repos
-            </span>
           </div>
           <div className="proj-section-body">
-            <ul className="proj-tickets">
-              {d.tickets.slice(0, 30).map((t) => (
-                <li
-                  key={t.id}
-                  className="proj-ticket"
-                  onClick={() => setOpenItemId(t.id)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setOpenItemId(t.id);
-                    }
-                  }}
-                >
-                  <span className="src-badge src-jira">JRA</span>
-                  <span className="proj-ticket-id">{t.source_id}</span>
-                  <span className="proj-ticket-title">{t.title}</span>
-                  <span className={`proj-ticket-state state-${t.status}`}>
-                    {t.status.replace(/_/g, ' ')}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {d.tickets.length > 30 && (
-              <p className="proj-tickets-more">… {d.tickets.length - 30} more</p>
-            )}
+            <p style={{ fontSize: 13, color: 'var(--ink-4)' }}>
+              Try a wider window — switch to <strong>all</strong> to see every ticket on this project.
+            </p>
           </div>
         </section>
       )}
@@ -444,8 +647,21 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
       </>)}
 
       <ItemDetailDrawer itemId={openItemId} onClose={() => setOpenItemId(null)} />
+      <OrphanPrReviewModal
+        open={orphanReviewRepo !== null}
+        repoFilter={orphanReviewRepo}
+        projectFilter={projectKey}
+        onClose={() => setOrphanReviewRepo(null)}
+        onChanged={fetchData}
+      />
     </div>
   );
+}
+
+function periodLabel(period: string): string {
+  if (period === '30d') return 'in last 30 days';
+  if (period === '90d') return 'in last 90 days';
+  return 'all-time';
 }
 
 function tabCount(

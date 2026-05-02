@@ -6,10 +6,17 @@
  * Traceability. Each with strict size caps so the output is uniform.
  */
 import { generateText } from 'ai';
-import { getDb } from '../db';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
 import { getDecisionItems, listDecisions, type DecisionItem, type DecisionSummary } from './extract';
-import { getWorkspaceConfig } from '../workspace-config';
+import { getWorkspaceConfigCached } from '../workspace-config';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 export interface TraceEntry {
   item_id: string;
@@ -33,7 +40,7 @@ export interface DecisionStructuredSummary {
 }
 
 function buildPrompt(d: DecisionSummary, items: DecisionItem[]): { system: string; user: string } {
-  const config = getWorkspaceConfig();
+  const config = getWorkspaceConfigCached();
   const sourceKinds = Object.entries(config.sources)
     .map(([id, source]) => `- ${id}: ${source.label} (${source.kind})`)
     .join('\n');
@@ -143,25 +150,30 @@ async function callSonnet(prompt: { system: string; user: string }): Promise<Dec
 }
 
 export async function summarizeDecision(decisionId: string): Promise<boolean> {
-  const d = listDecisions().find(x => x.id === decisionId);
+  await ensureInit();
+  const list = await listDecisions();
+  const d = list.find(x => x.id === decisionId);
   if (!d) return false;
-  const items = getDecisionItems(decisionId);
+  const items = await getDecisionItems(decisionId);
   const prompt = buildPrompt(d, items);
   const structured = await callSonnet(prompt);
   if (!structured) return false;
 
-  getDb().prepare(`
-    UPDATE decisions
-    SET summary = ?, generated_at = datetime('now'), updated_at = datetime('now')
-    WHERE id = ?
-  `).run(JSON.stringify(structured), decisionId);
+  const db = getLibsqlDb();
+  await db
+    .prepare(
+      `UPDATE decisions
+       SET summary = ?, generated_at = datetime('now'), updated_at = datetime('now')
+       WHERE id = ?`,
+    )
+    .run(JSON.stringify(structured), decisionId);
   return true;
 }
 
 export async function summarizeAllDecisions(opts: { force?: boolean; concurrency?: number } = {}): Promise<{ generated: number; skipped: number; failed: number }> {
   const force = opts.force ?? false;
   const concurrency = Math.max(1, opts.concurrency ?? 2);
-  const all = listDecisions();
+  const all = await listDecisions();
   const pending = all.filter(d => force || !d.summary || !d.generated_at);
 
   console.log(`  ${pending.length} decisions to summarize (of ${all.length} total)`);

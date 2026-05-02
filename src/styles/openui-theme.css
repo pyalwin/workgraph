@@ -1,0 +1,292 @@
+/* ─────────────────────────────────────────────────────────────────────
+ * Workgraph theme overrides for OpenUI.
+ *
+ * Maps the most-used `--openui-*` design tokens to Workgraph's bone/paper/
+ * ink palette so OpenUI components (Card, Table, Charts, Callout, etc.)
+ * blend with the rest of the chat. Also pins the theme to light by
+ * redeclaring the same overrides inside the `prefers-color-scheme: dark`
+ * media query — that beats OpenUI's built-in dark fallback.
+ *
+ * Imported AFTER `@openuidev/react-ui/defaults.css` in chat/layout.tsx so
+ * these win on cascade order.
+ * ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Surfaces */
+  --openui-background: var(--paper);
+  --openui-foreground: var(--bone-2);
+  --openui-popover-background: var(--paper);
+  --openui-sunk-light: rgba(21, 20, 15, 0.02);
+  --openui-sunk: rgba(21, 20, 15, 0.04);
+  --openui-sunk-deep: rgba(21, 20, 15, 0.08);
+  --openui-elevated-light: rgba(21, 20, 15, 0.04);
+  --openui-elevated: rgba(21, 20, 15, 0.08);
+  --openui-elevated-strong: rgba(21, 20, 15, 0.16);
+  --openui-elevated-intense: rgba(21, 20, 15, 0.32);
+  --openui-overlay: rgba(21, 20, 15, 0.4);
+  --openui-highlight-subtle: rgba(21, 20, 15, 0.02);
+  --openui-highlight: rgba(21, 20, 15, 0.04);
+  --openui-highlight-strong: rgba(21, 20, 15, 0.08);
+  --openui-highlight-intense: rgba(21, 20, 15, 0.32);
+  --openui-inverted-background: var(--ink);
+
+  /* Status backgrounds (low-alpha tints) */
+  --openui-info-background: rgba(42, 74, 122, 0.08);
+  --openui-success-background: rgba(47, 107, 61, 0.10);
+  --openui-alert-background: rgba(180, 90, 30, 0.12);
+  --openui-danger-background: rgba(180, 48, 27, 0.10);
+
+  /* Text */
+  --openui-text-neutral-primary: var(--ink);
+  --openui-text-neutral-secondary: var(--ink-3);
+  --openui-text-neutral-tertiary: var(--ink-5);
+  --openui-text-neutral-link: var(--blue);
+  --openui-text-brand: var(--ink);
+  --openui-text-black: var(--ink);
+  --openui-text-accent-primary: var(--bone);
+  --openui-text-accent-secondary: rgba(246, 243, 236, 0.7);
+  --openui-text-accent-tertiary: rgba(246, 243, 236, 0.4);
+
+  --openui-text-success-primary: var(--green);
+  --openui-text-alert-primary: var(--amber);
+  --openui-text-danger-primary: var(--red);
+  --openui-text-info-primary: var(--blue);
+
+  /* Interactive — primary */
+  --openui-interactive-accent-default: var(--ink);
+  --openui-interactive-accent-hover: rgba(21, 20, 15, 0.85);
+  --openui-interactive-accent-disabled: rgba(21, 20, 15, 0.3);
+  --openui-interactive-accent-pressed: var(--ink-2);
+
+  /* Interactive — destructive */
+  --openui-interactive-destructive-default: rgba(180, 48, 27, 0.04);
+  --openui-interactive-destructive-hover: rgba(180, 48, 27, 0.10);
+  --openui-interactive-destructive-pressed: rgba(180, 48, 27, 0.16);
+  --openui-interactive-destructive-accent-default: var(--red);
+  --openui-interactive-destructive-accent-hover: #c4391f;
+  --openui-interactive-destructive-accent-pressed: #952514;
+  --openui-interactive-destructive-accent-disabled: rgba(180, 48, 27, 0.4);
+
+  /* User message bubble (OpenUI's chat shell — kept consistent with our own) */
+  --openui-chat-user-response-bg: var(--bone-2);
+  --openui-chat-user-response-text: var(--ink);
+
+  /* Borders */
+  --openui-border-default: var(--rule);
+  --openui-border-interactive: var(--rule-2);
+  --openui-border-interactive-emphasis: var(--ink-4);
+  --openui-border-interactive-selected: var(--ink);
+  --openui-border-accent: var(--rule);
+  --openui-border-accent-emphasis: var(--ink-3);
+  --openui-border-info: rgba(42, 74, 122, 0.12);
+  --openui-border-info-emphasis: var(--blue);
+  --openui-border-alert: rgba(180, 90, 30, 0.16);
+  --openui-border-alert-emphasis: var(--amber);
+  --openui-border-success: rgba(47, 107, 61, 0.16);
+  --openui-border-success-emphasis: var(--green);
+  --openui-border-danger: rgba(180, 48, 27, 0.16);
+  --openui-border-danger-emphasis: var(--red);
+
+  /* Typography — use Workgraph fonts so OpenUI labels match the rest */
+  --openui-font-body: var(--sans);
+  --openui-font-heading: var(--sans);
+  --openui-font-label: var(--sans);
+  --openui-font-numbers: var(--sans);
+  --openui-font-code: var(--mono);
+
+  /* Font-size scale (Workgraph runs denser than OpenUI's default) */
+  --openui-font-size-2xs: 10px;
+  --openui-font-size-xs: 11px;
+  --openui-font-size-sm: 12px;
+  --openui-font-size-md: 14px;
+  --openui-font-size-lg: 16px;
+  --openui-font-size-xl: 18px;
+  --openui-font-size-2xl: 20px;
+  --openui-font-size-3xl: 24px;
+  --openui-font-size-4xl: 28px;
+  --openui-font-size-5xl: 32px;
+
+  /* Body text shorthands */
+  --openui-text-body-xs: 400 11px/1.55 var(--sans);
+  --openui-text-body-xs-heavy: 500 11px/1.55 var(--sans);
+  --openui-text-body-sm: 400 13px/1.55 var(--sans);
+  --openui-text-body-sm-heavy: 500 13px/1.55 var(--sans);
+  --openui-text-body-default: 400 14px/1.55 var(--sans);
+  --openui-text-body-default-heavy: 500 14px/1.55 var(--sans);
+  --openui-text-body-lg: 400 16px/1.55 var(--sans);
+  --openui-text-body-lg-heavy: 500 16px/1.55 var(--sans);
+
+  /* Heading shorthands */
+  --openui-text-heading-xs: 600 14px/1.3 var(--sans);
+  --openui-text-heading-sm: 600 16px/1.3 var(--sans);
+  --openui-text-heading-md: 600 20px/1.25 var(--sans);
+  --openui-text-heading-lg: 600 24px/1.2 var(--sans);
+  --openui-text-heading-lg-letter-spacing: -0.01em;
+  --openui-text-heading-xl: 600 28px/1.2 var(--sans);
+  --openui-text-heading-xl-letter-spacing: -0.01em;
+
+  /* Form labels */
+  --openui-text-label-xs: 400 11px/1.3 var(--sans);
+  --openui-text-label-xs-heavy: 500 11px/1.3 var(--sans);
+  --openui-text-label-sm: 400 12px/1.3 var(--sans);
+  --openui-text-label-sm-heavy: 500 12px/1.3 var(--sans);
+  --openui-text-label-default: 400 13px/1.3 var(--sans);
+  --openui-text-label-default-heavy: 500 13px/1.3 var(--sans);
+  --openui-text-label-lg: 400 15px/1.3 var(--sans);
+  --openui-text-label-lg-heavy: 500 15px/1.3 var(--sans);
+
+  /* Numbers (stat tiles) — match body scale */
+  --openui-text-numbers-xs: 400 11px/1.55 var(--sans);
+  --openui-text-numbers-xs-heavy: 500 11px/1.55 var(--sans);
+  --openui-text-numbers-sm: 400 13px/1.55 var(--sans);
+  --openui-text-numbers-sm-heavy: 500 13px/1.55 var(--sans);
+  --openui-text-numbers-default: 400 14px/1.55 var(--sans);
+  --openui-text-numbers-default-heavy: 500 14px/1.55 var(--sans);
+  --openui-text-numbers-lg: 400 16px/1.55 var(--sans);
+  --openui-text-numbers-lg-heavy: 500 16px/1.55 var(--sans);
+  --openui-text-numbers-heading-sm: 600 16px/1.25 var(--sans);
+  --openui-text-numbers-heading-md: 600 20px/1.2 var(--sans);
+  --openui-text-numbers-heading-lg: 600 24px/1.2 var(--sans);
+  --openui-text-numbers-heading-xl: 600 28px/1.2 var(--sans);
+
+  /* Code */
+  --openui-text-code-sm: 400 11px/1.5 var(--mono);
+  --openui-text-code-sm-heavy: 600 11px/1.5 var(--mono);
+  --openui-text-code-default: 400 12px/1.5 var(--mono);
+  --openui-text-code-default-heavy: 600 12px/1.5 var(--mono);
+}
+
+/* Pin to light: redeclare the overrides inside the dark-mode media query so
+ * users on macOS dark mode don't get OpenUI's built-in dark palette. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --openui-background: var(--paper);
+    --openui-foreground: var(--bone-2);
+    --openui-popover-background: var(--paper);
+    --openui-sunk-light: rgba(21, 20, 15, 0.02);
+    --openui-sunk: rgba(21, 20, 15, 0.04);
+    --openui-sunk-deep: rgba(21, 20, 15, 0.08);
+    --openui-elevated-light: rgba(21, 20, 15, 0.04);
+    --openui-elevated: rgba(21, 20, 15, 0.08);
+    --openui-elevated-strong: rgba(21, 20, 15, 0.16);
+    --openui-elevated-intense: rgba(21, 20, 15, 0.32);
+    --openui-overlay: rgba(21, 20, 15, 0.4);
+    --openui-highlight-subtle: rgba(21, 20, 15, 0.02);
+    --openui-highlight: rgba(21, 20, 15, 0.04);
+    --openui-highlight-strong: rgba(21, 20, 15, 0.08);
+    --openui-highlight-intense: rgba(21, 20, 15, 0.32);
+    --openui-inverted-background: var(--ink);
+
+    --openui-info-background: rgba(42, 74, 122, 0.08);
+    --openui-success-background: rgba(47, 107, 61, 0.10);
+    --openui-alert-background: rgba(180, 90, 30, 0.12);
+    --openui-danger-background: rgba(180, 48, 27, 0.10);
+
+    --openui-text-neutral-primary: var(--ink);
+    --openui-text-neutral-secondary: var(--ink-3);
+    --openui-text-neutral-tertiary: var(--ink-5);
+    --openui-text-neutral-link: var(--blue);
+    --openui-text-brand: var(--ink);
+    --openui-text-black: var(--ink);
+    --openui-text-accent-primary: var(--bone);
+    --openui-text-accent-secondary: rgba(246, 243, 236, 0.7);
+    --openui-text-accent-tertiary: rgba(246, 243, 236, 0.4);
+
+    --openui-text-success-primary: var(--green);
+    --openui-text-alert-primary: var(--amber);
+    --openui-text-danger-primary: var(--red);
+    --openui-text-info-primary: var(--blue);
+
+    --openui-interactive-accent-default: var(--ink);
+    --openui-interactive-accent-hover: rgba(21, 20, 15, 0.85);
+    --openui-interactive-accent-disabled: rgba(21, 20, 15, 0.3);
+    --openui-interactive-accent-pressed: var(--ink-2);
+
+    --openui-interactive-destructive-default: rgba(180, 48, 27, 0.04);
+    --openui-interactive-destructive-hover: rgba(180, 48, 27, 0.10);
+    --openui-interactive-destructive-pressed: rgba(180, 48, 27, 0.16);
+    --openui-interactive-destructive-accent-default: var(--red);
+    --openui-interactive-destructive-accent-hover: #c4391f;
+    --openui-interactive-destructive-accent-pressed: #952514;
+    --openui-interactive-destructive-accent-disabled: rgba(180, 48, 27, 0.4);
+
+    --openui-chat-user-response-bg: var(--bone-2);
+    --openui-chat-user-response-text: var(--ink);
+
+    --openui-border-default: var(--rule);
+    --openui-border-interactive: var(--rule-2);
+    --openui-border-interactive-emphasis: var(--ink-4);
+    --openui-border-interactive-selected: var(--ink);
+    --openui-border-accent: var(--rule);
+    --openui-border-accent-emphasis: var(--ink-3);
+    --openui-border-info: rgba(42, 74, 122, 0.12);
+    --openui-border-info-emphasis: var(--blue);
+    --openui-border-alert: rgba(180, 90, 30, 0.16);
+    --openui-border-alert-emphasis: var(--amber);
+    --openui-border-success: rgba(47, 107, 61, 0.16);
+    --openui-border-success-emphasis: var(--green);
+    --openui-border-danger: rgba(180, 48, 27, 0.16);
+    --openui-border-danger-emphasis: var(--red);
+
+    --openui-font-body: var(--sans);
+    --openui-font-heading: var(--sans);
+    --openui-font-label: var(--sans);
+    --openui-font-numbers: var(--sans);
+    --openui-font-code: var(--mono);
+
+    --openui-font-size-2xs: 10px;
+    --openui-font-size-xs: 11px;
+    --openui-font-size-sm: 12px;
+    --openui-font-size-md: 14px;
+    --openui-font-size-lg: 16px;
+    --openui-font-size-xl: 18px;
+    --openui-font-size-2xl: 20px;
+    --openui-font-size-3xl: 24px;
+    --openui-font-size-4xl: 28px;
+    --openui-font-size-5xl: 32px;
+
+    --openui-text-body-xs: 400 11px/1.55 var(--sans);
+    --openui-text-body-xs-heavy: 500 11px/1.55 var(--sans);
+    --openui-text-body-sm: 400 13px/1.55 var(--sans);
+    --openui-text-body-sm-heavy: 500 13px/1.55 var(--sans);
+    --openui-text-body-default: 400 14px/1.55 var(--sans);
+    --openui-text-body-default-heavy: 500 14px/1.55 var(--sans);
+    --openui-text-body-lg: 400 16px/1.55 var(--sans);
+    --openui-text-body-lg-heavy: 500 16px/1.55 var(--sans);
+
+    --openui-text-heading-xs: 600 14px/1.3 var(--sans);
+    --openui-text-heading-sm: 600 16px/1.3 var(--sans);
+    --openui-text-heading-md: 600 20px/1.25 var(--sans);
+    --openui-text-heading-lg: 600 24px/1.2 var(--sans);
+    --openui-text-heading-lg-letter-spacing: -0.01em;
+    --openui-text-heading-xl: 600 28px/1.2 var(--sans);
+    --openui-text-heading-xl-letter-spacing: -0.01em;
+
+    --openui-text-label-xs: 400 11px/1.3 var(--sans);
+    --openui-text-label-xs-heavy: 500 11px/1.3 var(--sans);
+    --openui-text-label-sm: 400 12px/1.3 var(--sans);
+    --openui-text-label-sm-heavy: 500 12px/1.3 var(--sans);
+    --openui-text-label-default: 400 13px/1.3 var(--sans);
+    --openui-text-label-default-heavy: 500 13px/1.3 var(--sans);
+    --openui-text-label-lg: 400 15px/1.3 var(--sans);
+    --openui-text-label-lg-heavy: 500 15px/1.3 var(--sans);
+
+    --openui-text-numbers-xs: 400 11px/1.55 var(--sans);
+    --openui-text-numbers-xs-heavy: 500 11px/1.55 var(--sans);
+    --openui-text-numbers-sm: 400 13px/1.55 var(--sans);
+    --openui-text-numbers-sm-heavy: 500 13px/1.55 var(--sans);
+    --openui-text-numbers-default: 400 14px/1.55 var(--sans);
+    --openui-text-numbers-default-heavy: 500 14px/1.55 var(--sans);
+    --openui-text-numbers-lg: 400 16px/1.55 var(--sans);
+    --openui-text-numbers-lg-heavy: 500 16px/1.55 var(--sans);
+    --openui-text-numbers-heading-sm: 600 16px/1.25 var(--sans);
+    --openui-text-numbers-heading-md: 600 20px/1.2 var(--sans);
+    --openui-text-numbers-heading-lg: 600 24px/1.2 var(--sans);
+    --openui-text-numbers-heading-xl: 600 28px/1.2 var(--sans);
+
+    --openui-text-code-sm: 400 11px/1.5 var(--mono);
+    --openui-text-code-sm-heavy: 600 11px/1.5 var(--mono);
+    --openui-text-code-default: 400 12px/1.5 var(--mono);
+    --openui-text-code-default-heavy: 600 12px/1.5 var(--mono);
+  }
+}

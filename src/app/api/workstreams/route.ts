@@ -1,26 +1,28 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  initSchema();
-  const db = getDb();
+  await ensureSchemaAsync();
+  const db = getLibsqlDb();
 
-  const rows = db.prepare(`
-    SELECT
-      ws.id, ws.narrative, ws.timeline_events, ws.earliest_at, ws.latest_at, ws.generated_at,
-      COUNT(wsi.item_id) AS item_count,
-      SUM(wsi.is_seed) AS seed_count,
-      SUM(wsi.is_terminal) AS terminal_count,
-      GROUP_CONCAT(DISTINCT wi.source) AS sources
-    FROM workstreams ws
-    LEFT JOIN workstream_items wsi ON wsi.workstream_id = ws.id
-    LEFT JOIN work_items wi ON wi.id = wsi.item_id
-    GROUP BY ws.id
-    ORDER BY ws.latest_at DESC
-  `).all() as any[];
+  const rows = await db
+    .prepare(
+      `SELECT
+        ws.id, ws.narrative, ws.timeline_events, ws.earliest_at, ws.latest_at, ws.generated_at,
+        COUNT(wsi.item_id) AS item_count,
+        SUM(wsi.is_seed) AS seed_count,
+        SUM(wsi.is_terminal) AS terminal_count,
+        GROUP_CONCAT(DISTINCT wi.source) AS sources
+      FROM workstreams ws
+      LEFT JOIN workstream_items wsi ON wsi.workstream_id = ws.id
+      LEFT JOIN work_items wi ON wi.id = wsi.item_id
+      GROUP BY ws.id
+      ORDER BY ws.latest_at DESC`,
+    )
+    .all<any>();
 
   const workstreams = rows.map(r => ({
     id: r.id,

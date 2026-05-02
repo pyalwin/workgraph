@@ -67,6 +67,11 @@ export interface MCPConnector {
     args: ToolCallArgs;
     extractItems: (response: unknown) => unknown[];
     extractCursor?: (response: unknown) => string | null;
+    // Connectors that produce items only via postPass (e.g. GitHub now only
+    // emits release work_items via per-repo iteration in postPass) can set
+    // this flag to skip the list-step tool call entirely. Without it, the
+    // runner would invoke an unknown tool on the MCP server and error.
+    skip?: boolean;
   };
 
   // Optional follow-up to fetch full details for each list result.
@@ -92,11 +97,13 @@ export interface MCPConnector {
   links?: (raw: unknown, primary: WorkItemInput | null) => LinkInput[];
 
   // Optional: after the primary list is fully ingested, run a second pass
-  // (e.g. fetch releases per discovered repo). Receives every primary item
-  // collected during the run plus an MCP client and may emit more items+links.
+  // (e.g. fetch releases per configured repo). Receives every primary item
+  // collected during the run plus an MCP client and the same ctx the list
+  // step saw (for options like the repo multi-select).
   postPass?: (
     client: MCPClient,
     primaries: WorkItemInput[],
+    ctx: ConnectorRunContext,
   ) => Promise<{ items: WorkItemInput[]; links: LinkInput[] }>;
 
   // Allow connector to declare which env vars it needs (for clear errors).
@@ -136,6 +143,7 @@ export interface MCPConnector {
     client: MCPClient,
     listName: string,
     env: NodeJS.ProcessEnv,
+    options?: Record<string, unknown>,
   ) => Promise<DiscoveryOption[]>;
 }
 

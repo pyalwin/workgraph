@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import {
   describeMissingCreds,
   getProvider,
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * the provider's authorization URL.
  */
 export async function GET(req: Request) {
-  initSchema();
+  await ensureSchemaAsync();
   const url = new URL(req.url);
   const source = (url.searchParams.get('source') || '').toLowerCase();
   const workspaceId = url.searchParams.get('workspace');
@@ -62,7 +62,7 @@ export async function GET(req: Request) {
   const pkce = generatePkce();
   const state = generateState();
 
-  saveFlowState({
+  await saveFlowState({
     state,
     workspaceId,
     source,

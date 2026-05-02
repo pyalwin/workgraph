@@ -1,9 +1,16 @@
 import { generateText } from 'ai';
-import { getDb } from './db';
+import { ensureSchemaAsync } from './db/init-schema-async';
+import { getLibsqlDb } from './db/libsql';
 import { getModel } from './ai';
 import { inngest } from '@/inngest/client';
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 interface SummaryCache {
   recap: string | null;
@@ -17,12 +24,13 @@ function isCacheStale(generatedAt: string | null): boolean {
 }
 
 export async function getOrGenerateSummary(projectKey: string, projectName: string): Promise<string> {
-  const db = getDb();
+  await ensureInit();
+  const db = getLibsqlDb();
 
   // Check cache
-  const cached = db.prepare(
-    'SELECT recap, summary_generated_at FROM project_summaries WHERE project_key = ?'
-  ).get(projectKey) as SummaryCache | undefined;
+  const cached = await db
+    .prepare('SELECT recap, summary_generated_at FROM project_summaries WHERE project_key = ?')
+    .get<SummaryCache>(projectKey);
 
   // Hot cache — return as-is.
   if (cached?.recap && !isCacheStale(cached.summary_generated_at)) {
@@ -55,18 +63,20 @@ async function dispatchRegen(projectKey: string, projectName: string): Promise<v
   }
 }
 
-function computeQuickFallback(projectKey: string, projectName: string): string {
-  const db = getDb();
+async function computeQuickFallback(projectKey: string, projectName: string): Promise<string> {
+  const db = getLibsqlDb();
   try {
-    const counts = db.prepare(`
+    const counts = await db.prepare(`
       SELECT
         COUNT(*) AS total,
         SUM(CASE WHEN status IN ('done','closed','resolved') THEN 1 ELSE 0 END) AS done
       FROM work_items
       WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
-    `).get(projectKey) as { total: number; done: number };
-    const pct = counts.total > 0 ? Math.round((counts.done / counts.total) * 100) : 0;
-    return `**Generating summary…** ${counts.total} tickets tracked (${counts.done} done, ${pct}%). Refresh in a moment for the AI-written health snapshot.`;
+    `).get<{ total: number; done: number }>(projectKey);
+    const total = counts?.total ?? 0;
+    const done = counts?.done ?? 0;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    return `**Generating summary…** ${total} tickets tracked (${done} done, ${pct}%). Refresh in a moment for the AI-written health snapshot.`;
   } catch {
     return `**Generating summary for ${projectName}…** Refresh in a moment.`;
   }
@@ -79,88 +89,98 @@ const RECAP_DONE_LIMIT = 200;
 const RECAP_ACTIVE_LIMIT = 100;
 
 export async function generateAndStore(projectKey: string, projectName: string): Promise<string> {
-  const db = getDb();
+  await ensureInit();
+  const db = getLibsqlDb();
 
   // Pull both done AND active tickets so the recap can speak to "in progress"
   // and "watch" with real grounding. The schema uses both `metadata.project`
   // (legacy) and `metadata.entity_key` (new) — match either so older items
   // aren't silently dropped.
-  const projectFilter = `(json_extract(metadata, '$.project') = ? OR json_extract(metadata, '$.entity_key') = ?)`;
+  //
+  // Parameterized by alias because some queries join work_items alongside
+  // other tables that also have a `metadata` column (entities, etc.) — bare
+  // `metadata` is ambiguous in those contexts.
+  const projectFilter = (alias = '') => {
+    const p = alias ? `${alias}.` : '';
+    return `(json_extract(${p}metadata, '$.project') = ? OR json_extract(${p}metadata, '$.entity_key') = ?)`;
+  };
 
-  const doneTickets = db.prepare(`
+  const doneTickets = await db.prepare(`
     SELECT source_id, title, status, summary, body, updated_at
     FROM work_items
-    WHERE source = 'jira' AND ${projectFilter}
+    WHERE source = 'jira' AND ${projectFilter()}
       AND status IN ('done', 'closed', 'resolved')
     ORDER BY COALESCE(updated_at, created_at) DESC
     LIMIT ${RECAP_DONE_LIMIT}
-  `).all(projectKey, projectKey) as Array<{
+  `).all<{
     source_id: string;
     title: string;
     status: string;
     summary: string | null;
     body: string | null;
     updated_at: string | null;
-  }>;
+  }>(projectKey, projectKey);
 
-  const activeTickets = db.prepare(`
+  const activeTickets = await db.prepare(`
     SELECT source_id, title, status, summary, priority,
            json_extract(metadata, '$.last_commented_at') AS last_at
     FROM work_items
-    WHERE source = 'jira' AND ${projectFilter}
+    WHERE source = 'jira' AND ${projectFilter()}
       AND status IN ('active', 'open', 'in_progress', 'to_do')
     ORDER BY COALESCE(updated_at, created_at) DESC
     LIMIT ${RECAP_ACTIVE_LIMIT}
-  `).all(projectKey, projectKey) as Array<{
+  `).all<{
     source_id: string;
     title: string;
     status: string;
     summary: string | null;
     priority: string | null;
     last_at: string | null;
-  }>;
+  }>(projectKey, projectKey);
 
   if (doneTickets.length === 0 && activeTickets.length === 0) {
     const fallback = `No tickets in scope for ${projectName} yet.`;
-    storeSummary(projectKey, projectName, fallback);
+    await storeSummary(projectKey, projectName, fallback);
     return fallback;
   }
 
   // Status breakdown — tells the AI the volume context.
-  const statusBreakdown = db.prepare(`
+  const statusBreakdown = await db.prepare(`
     SELECT status, COUNT(*) AS c
     FROM work_items
-    WHERE source = 'jira' AND ${projectFilter}
+    WHERE source = 'jira' AND ${projectFilter()}
     GROUP BY status
     ORDER BY c DESC
-  `).all(projectKey, projectKey) as Array<{ status: string | null; c: number }>;
+  `).all<{ status: string | null; c: number }>(projectKey, projectKey);
 
-  // Top entity themes for context (what the project is about)
-  const themes = db.prepare(`
+  // Top entity themes for context (what the project is about). Joins
+  // entities + work_items, both of which have a `metadata` column — alias
+  // the filter to wi.metadata explicitly.
+  const themes = await db.prepare(`
     SELECT e.canonical_form, COUNT(DISTINCT em.item_id) AS c
     FROM entities e
     JOIN entity_mentions em ON em.entity_id = e.id
     JOIN work_items wi ON wi.id = em.item_id
     WHERE e.entity_type IN ('theme', 'capability')
-      AND wi.source = 'jira' AND ${projectFilter}
+      AND wi.source = 'jira' AND ${projectFilter('wi')}
     GROUP BY e.id
     ORDER BY c DESC
     LIMIT 15
-  `).all(projectKey, projectKey) as Array<{ canonical_form: string; c: number }>;
+  `).all<{ canonical_form: string; c: number }>(projectKey, projectKey);
 
-  // Linked PRs — find via cross-references in the links table (cheaper than
-  // the loop-and-substring scan we used to do).
-  const linkedPrs = db.prepare(`
+  // Linked PRs — find via cross-references in the links table. Joins
+  // work_items twice (as pr + t); the project filter targets the ticket side.
+  const linkedPrs = await db.prepare(`
     SELECT pr.title, t.source_id AS ticket_key
     FROM work_items pr
     JOIN links l ON (l.source_item_id = pr.id OR l.target_item_id = pr.id)
     JOIN work_items t ON (t.id = l.source_item_id OR t.id = l.target_item_id)
     WHERE pr.source = 'github'
-      AND t.source = 'jira' AND ${projectFilter}
+      AND t.source = 'jira' AND ${projectFilter('t')}
       AND t.status IN ('done', 'closed', 'resolved')
       AND t.id != pr.id
     LIMIT 200
-  `).all(projectKey, projectKey) as Array<{ title: string; ticket_key: string }>;
+  `).all<{ title: string; ticket_key: string }>(projectKey, projectKey);
 
   const prsByTicket = new Map<string, string[]>();
   for (const pr of linkedPrs) {
@@ -232,7 +252,7 @@ Rules:
 - Be specific. "Improved performance" is bad; "p95 invoice ingestion latency reduced from 12s to 3s" is good.`,
     });
 
-    storeSummary(projectKey, projectName, summary);
+    await storeSummary(projectKey, projectName, summary);
     return summary;
   } catch (e) {
     console.error(`[project-summary] AI call failed for ${projectKey}:`, (e as Error).message);
@@ -243,15 +263,18 @@ Rules:
 export async function forceRegenerateSummary(projectKey: string, projectName: string): Promise<string> {
   // Skip the cache entirely and run synchronously — the explicit refresh
   // button is the user opting into the wait.
-  const db = getDb();
-  db.prepare('UPDATE project_summaries SET summary_generated_at = NULL WHERE project_key = ?').run(projectKey);
+  await ensureInit();
+  const db = getLibsqlDb();
+  await db
+    .prepare('UPDATE project_summaries SET summary_generated_at = NULL WHERE project_key = ?')
+    .run(projectKey);
   return generateAndStore(projectKey, projectName);
 }
 
-function storeSummary(projectKey: string, projectName: string, recap: string) {
-  const db = getDb();
+async function storeSummary(projectKey: string, projectName: string, recap: string): Promise<void> {
+  const db = getLibsqlDb();
   const now = new Date().toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO project_summaries (project_key, name, recap, summary_generated_at, updated_at)
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(project_key) DO UPDATE SET

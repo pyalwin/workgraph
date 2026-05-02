@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { generateProjectReadme } from '@/lib/sync/project-readme';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(_req: Request, props: { params: Promise<{ key: string }> }) {
   const params = await props.params;
-  initSchema();
+  await ensureSchemaAsync();
 
   const projectKey = params.key.toUpperCase();
   const result = await generateProjectReadme(projectKey);

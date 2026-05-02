@@ -106,8 +106,8 @@ async function main() {
   let savedOptions: Record<string, unknown> = {};
   if (flags.workspaceId) {
     try {
-      const cfg = getConnectorConfigBySource(flags.workspaceId, connector.source);
-      if (cfg?.config?.options) savedOptions = cfg.config.options;
+      const cfg = await getConnectorConfigBySource(flags.workspaceId, connector.source);
+      if (cfg?.config?.options) savedOptions = cfg.config.options as Record<string, unknown>;
     } catch {
       // ignore — adapters fall back to env vars
     }
@@ -142,7 +142,7 @@ async function main() {
   // per-bucket incremental floor; a global lastSyncedAt fallback here would
   // override that and force every bucket to use the same floor.
   const since = flags.since ?? null;
-  const lastSeenForLog = lastSyncedAt(connector.source);
+  const lastSeenForLog = await lastSyncedAt(connector.source);
   console.error(
     `[sync-mcp] ${connector.label} since=${since ?? `(per-bucket; last=${lastSeenForLog ?? 'never'})`} mode=${flags.fromStdin ? 'stdin' : 'mcp'}`,
   );

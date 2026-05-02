@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getOAuthToken } from '@/lib/connectors/oauth-tokens';
 import { getProvider } from '@/lib/oauth/providers';
 import { getRegisteredClient } from '@/lib/oauth/clients';
@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
  * Token value is NEVER returned in the response — only its length and prefix.
  */
 export async function GET(req: Request) {
-  initSchema();
+  await ensureSchemaAsync();
   const url = new URL(req.url);
   const workspaceId = url.searchParams.get('workspace') || 'engineering';
   const source = url.searchParams.get('source') || 'jira';
@@ -27,12 +27,12 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: `No provider for ${source}` }, { status: 400 });
   }
 
-  const token = getOAuthToken(workspaceId, source);
+  const token = await getOAuthToken(workspaceId, source);
   if (!token) {
     return NextResponse.json({ ok: false, error: `No token saved for ${workspaceId}/${source}` }, { status: 404 });
   }
 
-  const dcr = getRegisteredClient(source, `${process.env.OAUTH_REDIRECT_BASE_URL || ''}/api/oauth/callback`);
+  const dcr = await getRegisteredClient(source, `${process.env.OAUTH_REDIRECT_BASE_URL || ''}/api/oauth/callback`);
 
   // Try multiple variants — sometimes the right answer is just a different header.
   const targetUrlCandidate = overrideUrl || provider.mcpServerUrl;

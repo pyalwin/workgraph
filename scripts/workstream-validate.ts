@@ -25,7 +25,7 @@ async function main() {
   db.exec('DELETE FROM item_links_chunks');
   db.exec('DELETE FROM links');
   const t0 = Date.now();
-  const cr = createLinksForAll({});
+  const cr = await createLinksForAll({});
   console.log(`   ${cr.links} links across ${cr.items} items in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 
   console.log('\n3) Link distribution:');
@@ -35,10 +35,10 @@ async function main() {
   `).all());
 
   console.log('\n4) Assembling workstreams…');
-  const r = assembleAll();
+  const r = await assembleAll();
   console.log(`   workstreams=${r.workstreams}, items-in-ws=${r.items}, seeds=${r.seeds}, orphans=${r.orphans}`);
 
-  const all = listWorkstreams();
+  const all = await listWorkstreams();
   all.sort((a, b) => b.item_count - a.item_count);
 
   console.log('\n5) Workstream size distribution:');
@@ -61,7 +61,7 @@ async function main() {
 
   console.log(`\n6) Generating Sonnet summaries for ${picks.length} workstreams…`);
   for (const ws of picks) {
-    const items = getWorkstreamItems(ws.id);
+    const items = await getWorkstreamItems(ws.id);
     console.log(`\n━━━ workstream ${ws.id.slice(0, 8)} (${items.length} items, ${items[0].event_at?.slice(0, 10)} → ${items[items.length - 1].event_at?.slice(0, 10)}) ━━━`);
     for (const it of items) {
       const m = it.is_seed ? '★' : it.is_terminal ? '✓' : ' ';

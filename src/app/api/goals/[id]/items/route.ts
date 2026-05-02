@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
 
 interface ItemRow {
   id: string;
@@ -20,24 +20,22 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    initSchema();
+    await ensureSchemaAsync();
     const { id } = await params;
-    const db = getDb();
+    const db = getLibsqlDb();
 
-    const items = db
+    const items = await db
       .prepare(
-        `
-      SELECT wi.id, wi.source, wi.source_id, wi.item_type, wi.title,
-             wi.author, wi.status, wi.priority,
-             wi.created_at, wi.updated_at
-      FROM work_items wi
-      JOIN item_tags it ON it.item_id = wi.id
-      WHERE it.tag_id = ?
-      ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC
-      LIMIT 500
-    `,
+        `SELECT wi.id, wi.source, wi.source_id, wi.item_type, wi.title,
+                wi.author, wi.status, wi.priority,
+                wi.created_at, wi.updated_at
+         FROM work_items wi
+         JOIN item_tags it ON it.item_id = wi.id
+         WHERE it.tag_id = ?
+         ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC
+         LIMIT 500`,
       )
-      .all(id) as ItemRow[];
+      .all<ItemRow>(id);
 
     return NextResponse.json({ items });
   } catch (error) {

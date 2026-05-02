@@ -37,7 +37,7 @@ async function main() {
       console.log(`  SKIP ${item.source}:${item.item_type} "${(item.title || '').slice(0, 50)}" — below min`);
       continue;
     }
-    const ids = persistChunks(item.id, chunks);
+    const ids = await persistChunks(item.id, chunks);
     allChunkIds.push(...ids);
     bySource[item.source] = (bySource[item.source] ?? 0) + chunks.length;
     for (const c of chunks) byChunkType[c.chunk_type] = (byChunkType[c.chunk_type] ?? 0) + 1;

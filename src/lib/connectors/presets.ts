@@ -259,7 +259,7 @@ export const CONNECTOR_PRESETS: Record<string, ConnectorPreset> = {
   github: {
     source: 'github',
     label: 'GitHub',
-    blurb: 'Sync issues, pull requests, and comments from GitHub repositories.',
+    blurb: 'Pulls PRs and reviews from selected repos and attaches them to the Jira tickets they address.',
     transport: 'stdio',
     oauth: { provider: 'github', preferredOver: 'pat' },
     category: 'code',
@@ -279,16 +279,16 @@ export const CONNECTOR_PRESETS: Record<string, ConnectorPreset> = {
       },
       {
         name: 'username',
-        label: 'Your GitHub username',
+        label: 'Your GitHub login',
         placeholder: 'octocat',
         required: true,
-        helpText: 'Sync is scoped to issues/PRs you authored, are assigned to, were mentioned in, or asked to review.',
+        helpText: 'Used only for repo discovery (the user:<login> search) — not for ingest scoping.',
       },
       {
-        name: 'owner',
-        label: 'Org or user (optional narrowing)',
-        placeholder: 'plateiq',
-        helpText: 'Optional — further limits the search to one org or user.',
+        name: 'orgs',
+        label: 'Organizations (comma-separated)',
+        placeholder: 'my-org, my-other-org',
+        helpText: 'GitHub org names whose repos should appear in the picker. Required to see org repos — search_repositories cannot enumerate them automatically.',
       },
     ],
     authLink: {
@@ -296,10 +296,10 @@ export const CONNECTOR_PRESETS: Record<string, ConnectorPreset> = {
       url: 'https://github.com/settings/tokens/new',
     },
     features: [
-      'Issues and pull requests across your repos',
-      'PR reviews, status, and merge state',
-      'Commit history and authors',
-      'Labels, milestones, and assignees',
+      'PRs and reviews from selected repos',
+      'Each PR attached as a trail on the Jira ticket it references',
+      'Decisions extracted from review threads',
+      'Releases tracked as standalone shipping events',
     ],
     status: 'one-click',
   },
@@ -579,16 +579,34 @@ export function presetFieldsToPayload(
     const v = (values[field.name] ?? '').trim();
     if (!v) continue;
     if (field.name === 'token') token = v;
-    else opts[field.name] = v;
+    else if (preset.source === 'github' && field.name === 'orgs') {
+      // Comma-separated org names → array. Lowercased for stable comparison.
+      opts.orgs = v
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+    } else opts[field.name] = v;
   }
 
   // Adapter-specific glue: each preset maps its named fields to the env vars
   // the underlying MCP server expects. The mcp-client transport pulls leading
   // --env=KEY=VAL args out and merges them into the spawned process env.
   if (preset.source === 'jira' && command) {
-    if (opts.jiraUrl) envEntries.push(`JIRA_URL=${opts.jiraUrl}`);
-    if (opts.username) envEntries.push(`JIRA_USERNAME=${opts.username}`);
-    if (token) envEntries.push(`JIRA_API_TOKEN=${token}`);
+    // mcp-atlassian (./node_modules/mcp-atlassian) reads ATLASSIAN_*; we
+    // also emit JIRA_* aliases so adapters / future MCP servers that follow
+    // the older naming convention still work.
+    if (opts.jiraUrl) {
+      envEntries.push(`ATLASSIAN_BASE_URL=${opts.jiraUrl}`);
+      envEntries.push(`JIRA_URL=${opts.jiraUrl}`);
+    }
+    if (opts.username) {
+      envEntries.push(`ATLASSIAN_EMAIL=${opts.username}`);
+      envEntries.push(`JIRA_USERNAME=${opts.username}`);
+    }
+    if (token) {
+      envEntries.push(`ATLASSIAN_API_TOKEN=${token}`);
+      envEntries.push(`JIRA_API_TOKEN=${token}`);
+    }
   }
   if (preset.source === 'linear' && command && token) {
     envEntries.push(`LINEAR_API_KEY=${token}`);
@@ -602,7 +620,6 @@ export function presetFieldsToPayload(
   }
   if (preset.source === 'github' && command) {
     if (token) envEntries.push(`GITHUB_PERSONAL_ACCESS_TOKEN=${token}`);
-    if (opts.owner) envEntries.push(`MCP_GITHUB_OWNER=${opts.owner}`);
   }
   if (preset.source === 'gitlab' && command) {
     if (token) envEntries.push(`GITLAB_PERSONAL_ACCESS_TOKEN=${token}`);
@@ -623,15 +640,19 @@ export function presetFieldsToPayload(
   if (preset.source === 'confluence' && command) {
     const confluenceUrl = typeof opts.confluenceUrl === 'string' ? opts.confluenceUrl : '';
     if (confluenceUrl) {
+      const baseUrl = confluenceUrl.replace(/\/wiki\/?$/, '');
       envEntries.push(`CONFLUENCE_URL=${confluenceUrl}`);
-      envEntries.push(`JIRA_URL=${confluenceUrl.replace(/\/wiki\/?$/, '')}`);
+      envEntries.push(`ATLASSIAN_BASE_URL=${baseUrl}`);
+      envEntries.push(`JIRA_URL=${baseUrl}`);
     }
     if (opts.username) {
       envEntries.push(`CONFLUENCE_USERNAME=${opts.username}`);
+      envEntries.push(`ATLASSIAN_EMAIL=${opts.username}`);
       envEntries.push(`JIRA_USERNAME=${opts.username}`);
     }
     if (token) {
       envEntries.push(`CONFLUENCE_API_TOKEN=${token}`);
+      envEntries.push(`ATLASSIAN_API_TOKEN=${token}`);
       envEntries.push(`JIRA_API_TOKEN=${token}`);
     }
     if (opts.space) envEntries.push(`MCP_CONFLUENCE_SPACE=${opts.space}`);

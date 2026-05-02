@@ -18,7 +18,7 @@ async function main() {
   const db = getDb();
 
   console.log('1) Chunking all pending items…');
-  const chunkResult = chunkAllPending({});
+  const chunkResult = await chunkAllPending({});
   console.log(`   items=${chunkResult.items}, chunks=${chunkResult.chunks}`);
 
   console.log('2) Embedding pending chunks (local ollama)…');
@@ -31,7 +31,7 @@ async function main() {
 
   console.log('4) Running multi-signal crossref on 50 most recent items…');
   const start = Date.now();
-  const cr = createLinksForAll({ limit: 50 });
+  const cr = await createLinksForAll({ limit: 50 });
   console.log(`   items=${cr.items}, links=${cr.links}, elapsed=${((Date.now() - start) / 1000).toFixed(1)}s`);
 
   console.log('\n5) Link distribution:');

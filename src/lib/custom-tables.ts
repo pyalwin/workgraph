@@ -1,4 +1,4 @@
-import { getDb } from './db';
+import { getLibsqlDb } from './db/libsql';
 import type { CustomTableConfig, CustomTableColumn, CustomTableColumnType } from './workspace-config';
 
 const IDENT = /^[a-z][a-z0-9_]*$/;
@@ -33,15 +33,15 @@ function columnSql(column: CustomTableColumn): string {
   return parts.join(' ');
 }
 
-export function ensureCustomTable(table: CustomTableConfig) {
+export async function ensureCustomTable(table: CustomTableConfig): Promise<void> {
   assertIdent(table.id, 'table id');
   if (!table.columns.length) throw new Error(`Custom table ${table.id} has no columns`);
 
   const primaryKeys = table.columns.filter((column) => column.primaryKey);
   if (primaryKeys.length > 1) throw new Error(`Custom table ${table.id} has multiple primary keys`);
 
-  const db = getDb();
-  db.exec(`
+  const db = getLibsqlDb();
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS "${table.id}" (
       ${table.columns.map(columnSql).join(',\n      ')}
     );
@@ -50,10 +50,12 @@ export function ensureCustomTable(table: CustomTableConfig) {
   for (const column of table.columns) {
     if (!column.indexed) continue;
     assertIdent(column.name, 'indexed column');
-    db.exec(`CREATE INDEX IF NOT EXISTS "idx_${table.id}_${column.name}" ON "${table.id}"("${column.name}")`);
+    await db.exec(
+      `CREATE INDEX IF NOT EXISTS "idx_${table.id}_${column.name}" ON "${table.id}"("${column.name}")`,
+    );
   }
 }
 
-export function ensureCustomTables(tables: CustomTableConfig[]) {
-  for (const table of tables) ensureCustomTable(table);
+export async function ensureCustomTables(tables: CustomTableConfig[]): Promise<void> {
+  for (const table of tables) await ensureCustomTable(table);
 }

@@ -1,15 +1,15 @@
-import { initSchema, migrateProjectSummaries } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getProjectSummaryCards } from '@/lib/project-queries';
 import { ProjectsIndexClient } from './projects-client';
-import { WorkspaceModuleGuard } from '@/components/workspace-module-guard';
+import { WorkspaceModuleGuard } from '@/components/workspace/workspace-module-guard';
 
 export const dynamic = 'force-dynamic';
 
-export default function ProjectsPage() {
-  initSchema();
-  migrateProjectSummaries();
+export default async function ProjectsPage() {
+  await ensureSchemaAsync();
+  
 
-  const cards = getProjectSummaryCards('30d');
+  const cards = await getProjectSummaryCards('30d');
   return (
     <WorkspaceModuleGuard module="projects">
       <ProjectsIndexClient initialCards={cards} />

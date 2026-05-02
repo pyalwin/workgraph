@@ -5,9 +5,16 @@
  * A workstream = set of work_items + link edges + a summary (generated separately).
  * Items can belong to multiple workstreams (multi-membership).
  */
-import { getDb } from '../db';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { v4 as uuid } from 'uuid';
-import { getWorkspaceConfig, isTerminalLifecycleStage, normalizeLifecycleStage } from '../workspace-config';
+import { getWorkspaceConfigCached, isTerminalLifecycleStage, normalizeLifecycleStage } from '../workspace-config';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 // Links are created at ≥0.6 confidence (crossref threshold), but BFS walks
 // only strong edges (≥0.75) so transitive chains of weak mentions don't
@@ -27,28 +34,28 @@ interface ItemRow {
   created_at: string;
 }
 
-interface Edge {
-  source_item_id: string;
-  target_item_id: string;
-  confidence: number;
+async function loadItem(id: string): Promise<ItemRow | null> {
+  const db = getLibsqlDb();
+  const row = await db
+    .prepare(
+      `SELECT id, source, source_id, item_type, title, trace_role, trace_event_at, created_at
+       FROM work_items WHERE id = ?`,
+    )
+    .get<ItemRow>(id);
+  return row ?? null;
 }
 
-function loadItem(id: string): ItemRow | null {
-  return getDb().prepare(`
-    SELECT id, source, source_id, item_type, title, trace_role, trace_event_at, created_at
-    FROM work_items WHERE id = ?
-  `).get(id) as ItemRow | null;
-}
-
-function neighbors(itemId: string): Array<{ id: string; confidence: number }> {
-  const db = getDb();
-  return db.prepare(`
-    SELECT target_item_id AS id, confidence FROM links
-    WHERE source_item_id = ? AND confidence >= ?
-    UNION
-    SELECT source_item_id AS id, confidence FROM links
-    WHERE target_item_id = ? AND confidence >= ?
-  `).all(itemId, TRAVERSAL_THRESHOLD, itemId, TRAVERSAL_THRESHOLD) as Array<{ id: string; confidence: number }>;
+async function neighbors(itemId: string): Promise<Array<{ id: string; confidence: number }>> {
+  const db = getLibsqlDb();
+  return db
+    .prepare(
+      `SELECT target_item_id AS id, confidence FROM links
+       WHERE source_item_id = ? AND confidence >= ?
+       UNION
+       SELECT source_item_id AS id, confidence FROM links
+       WHERE target_item_id = ? AND confidence >= ?`,
+    )
+    .all<{ id: string; confidence: number }>(itemId, TRAVERSAL_THRESHOLD, itemId, TRAVERSAL_THRESHOLD);
 }
 
 /**
@@ -56,7 +63,7 @@ function neighbors(itemId: string): Array<{ id: string; confidence: number }> {
  * integration/terminal nodes (don't expand past shipped artefacts) and
  * caps at MAX_WORKSTREAM_SIZE to prevent giant-cluster blowup.
  */
-function bfsFromSeed(seedId: string): Set<string> {
+async function bfsFromSeed(seedId: string): Promise<Set<string>> {
   const visited = new Set<string>([seedId]);
   const frontier: Array<{ id: string; depth: number }> = [{ id: seedId, depth: 0 }];
 
@@ -66,10 +73,10 @@ function bfsFromSeed(seedId: string): Set<string> {
 
     // Don't expand past an integration item (trace has shipped — stop the chain
     // from transitively crossing into other workstreams via a shared PR).
-    const thisItem = loadItem(id);
+    const thisItem = await loadItem(id);
     if (thisItem && isTerminalLifecycleStage(thisItem.trace_role) && id !== seedId) continue;
 
-    for (const n of neighbors(id)) {
+    for (const n of await neighbors(id)) {
       if (visited.has(n.id)) continue;
       if (visited.size >= MAX_WORKSTREAM_SIZE) break;
       visited.add(n.id);
@@ -132,23 +139,26 @@ function mergeOverlapping(sets: Map<string, Set<string>>): Array<{ seedIds: stri
  * minimal workstream rooted at themselves, plus any upstream specification/decision
  * items reachable via BFS.
  */
-function orphanWorkstreams(claimed: Set<string>): Array<{ seedIds: string[]; members: Set<string> }> {
-  const db = getDb();
-  const executionStages = getWorkspaceConfig().lifecycle.stages
+async function orphanWorkstreams(claimed: Set<string>): Promise<Array<{ seedIds: string[]; members: Set<string> }>> {
+  const db = getLibsqlDb();
+  const executionStages = getWorkspaceConfigCached().lifecycle.stages
     .filter((s) => s.id === 'execution' || s.terminal)
     .flatMap((s) => [s.id, ...(s.legacyIds ?? [])]);
   const placeholders = executionStages.map(() => '?').join(',');
-  const orphanImpls = db.prepare(`
-    SELECT id FROM work_items
-    WHERE trace_role IN (${placeholders})
-  `).all(...executionStages) as { id: string }[];
+  const orphanImpls = await db
+    .prepare(
+      `SELECT id FROM work_items
+       WHERE trace_role IN (${placeholders})`,
+    )
+    .all<{ id: string }>(...executionStages);
 
   const out: Array<{ seedIds: string[]; members: Set<string> }> = [];
   for (const { id } of orphanImpls) {
     if (claimed.has(id)) continue;
-    const members = bfsFromSeed(id);
+    const members = await bfsFromSeed(id);
     // Elect a pseudo-seed: prefer the earliest-dated specification item, else the orphan itself
-    const memberItems = [...members].map(loadItem).filter((x): x is ItemRow => !!x);
+    const memberItemsRaw = await Promise.all([...members].map(loadItem));
+    const memberItems = memberItemsRaw.filter((x): x is ItemRow => !!x);
     const spec = memberItems
       .filter(m => normalizeLifecycleStage(m.trace_role) === 'specification')
       .sort((a, b) => (a.trace_event_at ?? a.created_at).localeCompare(b.trace_event_at ?? b.created_at))[0];
@@ -160,12 +170,13 @@ function orphanWorkstreams(claimed: Set<string>): Array<{ seedIds: string[]; mem
 }
 
 function roleInWorkstream(item: ItemRow, isSeed: boolean, isTerminal: boolean): string | null {
+  void isTerminal;
   if (isSeed && item.trace_role !== 'seed') return 'seed'; // orphan-promoted seed
   return normalizeLifecycleStage(item.trace_role);
 }
 
 function isEpic(item: ItemRow): boolean {
-  const sourceKind = getWorkspaceConfig().sources[item.source]?.kind;
+  const sourceKind = getWorkspaceConfigCached().sources[item.source]?.kind;
   return sourceKind === 'tracker' && item.item_type.toLowerCase() === 'epic';
 }
 
@@ -204,78 +215,73 @@ export interface AssembleResult {
  * Full recompute: wipe workstream tables and rebuild from scratch.
  * For incremental runs use reassembleForItem(itemId) (future).
  */
-export function assembleAll(): AssembleResult {
-  const db = getDb();
+export async function assembleAll(): Promise<AssembleResult> {
+  await ensureInit();
+  const db = getLibsqlDb();
 
-  const seeds = db.prepare(`
-    SELECT id FROM work_items WHERE trace_role = 'seed'
-  `).all() as { id: string }[];
+  const seeds = await db
+    .prepare(`SELECT id FROM work_items WHERE trace_role = 'seed'`)
+    .all<{ id: string }>();
 
   const bfsBySeed = new Map<string, Set<string>>();
-  for (const s of seeds) bfsBySeed.set(s.id, bfsFromSeed(s.id));
+  for (const s of seeds) bfsBySeed.set(s.id, await bfsFromSeed(s.id));
 
   const merged = mergeOverlapping(bfsBySeed);
   const claimed = new Set<string>();
   for (const g of merged) for (const m of g.members) claimed.add(m);
 
-  const orphans = orphanWorkstreams(claimed);
-
-  // Persist: full recompute
-  const wipeWS = db.prepare('DELETE FROM workstream_items');
-  const wipeWSRoot = db.prepare('DELETE FROM workstreams');
-  const insertWS = db.prepare(`
-    INSERT INTO workstreams (id, earliest_at, latest_at, created_at)
-    VALUES (?, ?, ?, datetime('now'))
-  `);
-  const insertWSI = db.prepare(`
-    INSERT INTO workstream_items (workstream_id, item_id, is_seed, is_terminal, role_in_workstream, event_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
+  const orphans = await orphanWorkstreams(claimed);
 
   let totalItems = 0;
   const allGroups = [...merged, ...orphans];
 
-  const tx = db.transaction(() => {
-    // Decisions reference workstreams via FK — wipe them first to avoid
-    // FK constraint failure. They'll be repopulated by extractDecisions().
-    db.exec('DELETE FROM decision_items');
-    db.exec('DELETE FROM decisions');
-    wipeWS.run();
-    wipeWSRoot.run();
+  // Sequential async — original wrapped in db.transaction(). The wipe + insert
+  // pattern can't easily be batched because membership values depend on async
+  // BFS and item-loading work. Acceptable: this is a backfill, not a hot path.
+  // Decisions reference workstreams via FK — wipe them first to avoid
+  // FK constraint failure. They'll be repopulated by extractDecisions().
+  await db.prepare('DELETE FROM decision_items').run();
+  await db.prepare('DELETE FROM decisions').run();
+  await db.prepare('DELETE FROM workstream_items').run();
+  await db.prepare('DELETE FROM workstreams').run();
 
-    for (const group of allGroups) {
-      const wsId = uuid();
-      const items = [...group.members].map(loadItem).filter((x): x is ItemRow => !!x);
-      if (items.length === 0) continue;
+  const insertWSSql = `INSERT INTO workstreams (id, earliest_at, latest_at, created_at)
+       VALUES (?, ?, ?, datetime('now'))`;
+  const insertWSISql = `INSERT INTO workstream_items (workstream_id, item_id, is_seed, is_terminal, role_in_workstream, event_at)
+       VALUES (?, ?, ?, ?, ?, ?)`;
 
-      const sorted = items.slice().sort((a, b) =>
-        (a.trace_event_at ?? a.created_at).localeCompare(b.trace_event_at ?? b.created_at),
+  for (const group of allGroups) {
+    const wsId = uuid();
+    const itemsRaw = await Promise.all([...group.members].map(loadItem));
+    const items = itemsRaw.filter((x): x is ItemRow => !!x);
+    if (items.length === 0) continue;
+
+    const sorted = items.slice().sort((a, b) =>
+      (a.trace_event_at ?? a.created_at).localeCompare(b.trace_event_at ?? b.created_at),
+    );
+    const earliest = sorted[0].trace_event_at ?? sorted[0].created_at;
+    const latest = sorted[sorted.length - 1].trace_event_at ?? sorted[sorted.length - 1].created_at;
+
+    await db.prepare(insertWSSql).run(wsId, earliest, latest);
+
+    // Epic promotion: if this cluster contains any JIRA epic, epics become
+    // the primary seed anchors. Notion/Meeting items are removed from the
+    // seed set (they remain members as supporting context).
+    const seedSet = promoteEpicsToSeeds(items, new Set(group.seedIds));
+    for (const item of items) {
+      const isSeed = seedSet.has(item.id);
+      const isTerminal = isTerminalLifecycleStage(item.trace_role);
+      await db.prepare(insertWSISql).run(
+        wsId,
+        item.id,
+        isSeed ? 1 : 0,
+        isTerminal ? 1 : 0,
+        roleInWorkstream(item, isSeed, isTerminal),
+        item.trace_event_at ?? item.created_at,
       );
-      const earliest = sorted[0].trace_event_at ?? sorted[0].created_at;
-      const latest = sorted[sorted.length - 1].trace_event_at ?? sorted[sorted.length - 1].created_at;
-
-      insertWS.run(wsId, earliest, latest);
-
-      // Epic promotion: if this cluster contains any JIRA epic, epics become
-      // the primary seed anchors. Notion/Meeting items are removed from the
-      // seed set (they remain members as supporting context).
-      const seedSet = promoteEpicsToSeeds(items, new Set(group.seedIds));
-      for (const item of items) {
-        const isSeed = seedSet.has(item.id);
-        const isTerminal = isTerminalLifecycleStage(item.trace_role);
-        insertWSI.run(
-          wsId,
-          item.id,
-          isSeed ? 1 : 0,
-          isTerminal ? 1 : 0,
-          roleInWorkstream(item, isSeed, isTerminal),
-          item.trace_event_at ?? item.created_at,
-        );
-        totalItems++;
-      }
+      totalItems++;
     }
-  });
-  tx();
+  }
 
   return {
     workstreams: allGroups.length,
@@ -285,25 +291,33 @@ export function assembleAll(): AssembleResult {
   };
 }
 
-export function getWorkstreamItems(wsId: string): Array<ItemRow & { is_seed: number; is_terminal: number; role_in_workstream: string | null; event_at: string | null }> {
-  return getDb().prepare(`
-    SELECT wi.id, wi.source, wi.source_id, wi.item_type, wi.title,
-           wi.trace_role, wi.trace_event_at, wi.created_at,
-           wsi.is_seed, wsi.is_terminal, wsi.role_in_workstream, wsi.event_at
-    FROM workstream_items wsi
-    JOIN work_items wi ON wi.id = wsi.item_id
-    WHERE wsi.workstream_id = ?
-    ORDER BY COALESCE(wsi.event_at, wi.created_at) ASC
-  `).all(wsId) as any[];
+export async function getWorkstreamItems(wsId: string): Promise<Array<ItemRow & { is_seed: number; is_terminal: number; role_in_workstream: string | null; event_at: string | null }>> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  return db
+    .prepare(
+      `SELECT wi.id, wi.source, wi.source_id, wi.item_type, wi.title,
+              wi.trace_role, wi.trace_event_at, wi.created_at,
+              wsi.is_seed, wsi.is_terminal, wsi.role_in_workstream, wsi.event_at
+       FROM workstream_items wsi
+       JOIN work_items wi ON wi.id = wsi.item_id
+       WHERE wsi.workstream_id = ?
+       ORDER BY COALESCE(wsi.event_at, wi.created_at) ASC`,
+    )
+    .all<any>(wsId);
 }
 
-export function listWorkstreams(): Array<{ id: string; item_count: number; earliest_at: string; latest_at: string; generated_at: string | null; narrative: string | null }> {
-  return getDb().prepare(`
-    SELECT ws.id, ws.earliest_at, ws.latest_at, ws.generated_at, ws.narrative,
-           COUNT(wsi.item_id) AS item_count
-    FROM workstreams ws
-    LEFT JOIN workstream_items wsi ON wsi.workstream_id = ws.id
-    GROUP BY ws.id
-    ORDER BY ws.latest_at DESC
-  `).all() as any[];
+export async function listWorkstreams(): Promise<Array<{ id: string; item_count: number; earliest_at: string; latest_at: string; generated_at: string | null; narrative: string | null }>> {
+  await ensureInit();
+  const db = getLibsqlDb();
+  return db
+    .prepare(
+      `SELECT ws.id, ws.earliest_at, ws.latest_at, ws.generated_at, ws.narrative,
+              COUNT(wsi.item_id) AS item_count
+       FROM workstreams ws
+       LEFT JOIN workstream_items wsi ON wsi.workstream_id = ws.id
+       GROUP BY ws.id
+       ORDER BY ws.latest_at DESC`,
+    )
+    .all<any>();
 }

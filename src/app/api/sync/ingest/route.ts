@@ -9,14 +9,14 @@ export async function POST(req: Request) {
     const items: WorkItemInput[] = body.items;
     const source = body.source || items[0]?.source || 'unknown';
 
-    const logId = startSyncLog(source);
+    const logId = await startSyncLog(source);
 
     try {
-      const result = ingestItems(items);
-      completeSyncLog(logId, result.itemsSynced + result.itemsUpdated);
+      const result = await ingestItems(items);
+      await completeSyncLog(logId, result.itemsSynced + result.itemsUpdated);
       return NextResponse.json(result);
     } catch (err: any) {
-      failSyncLog(logId, err.message);
+      await failSyncLog(logId, err.message);
       throw err;
     }
   } catch (error: any) {

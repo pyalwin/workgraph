@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { useWorkgraphState, type Theme } from '@/components/workgraph-state';
-import { ConnectorDirectory } from '@/components/connector-directory';
-import { ConnectorDetailPanel, type SavedConnectorRow } from '@/components/connector-detail-panel';
-import { WORKSPACE_PRESETS, type WorkspacePreset } from '@/components/workspace-onboarding';
+import { useWorkgraphState, type Theme } from '@/components/workspace/workgraph-state';
+import { ConnectorDirectory } from '@/components/connectors/connector-directory';
+import { ConnectorDetailPanel, type SavedConnectorRow } from '@/components/connectors/connector-detail-panel';
+import { WORKSPACE_PRESETS, type WorkspacePreset } from '@/components/workspace/workspace-onboarding';
 import { optionsForSlot } from '@/lib/connectors/preset-mapping';
-import { SettingsAdvancedSection } from '@/components/settings-advanced-section';
-import { AIProvidersSection } from '@/components/ai-providers-section';
+import { SettingsAdvancedSection } from '@/components/settings/settings-advanced-section';
+import { AIProvidersSection } from '@/components/ai/ai-providers-section';
+import { AITaskBackendsSection } from '@/components/ai/ai-task-backends-section';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 type Tab = 'profile' | 'connectors' | 'workspaces' | 'ai' | 'advanced';
@@ -61,7 +62,12 @@ export default function SettingsPage() {
         {tab === 'profile' && <ProfileTab />}
         {tab === 'connectors' && <ConnectorsTab />}
         {tab === 'workspaces' && <WorkspacesTab onJumpToConnectors={() => setTab('connectors')} />}
-        {tab === 'ai' && <AIProvidersSection />}
+        {tab === 'ai' && (
+          <>
+            <AIProvidersSection />
+            <AITaskBackendsSection />
+          </>
+        )}
         {tab === 'advanced' && <SettingsAdvancedSection />}
       </div>
     </div>

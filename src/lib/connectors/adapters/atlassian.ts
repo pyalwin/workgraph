@@ -20,7 +20,7 @@ function resolveCloudId(opts: Record<string, unknown>, env: NodeJS.ProcessEnv): 
   return (opts.cloudId as string)
     || env.MCP_ATLASSIAN_CLOUD_ID
     || (opts.jiraUrl as string)?.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-    || 'plateiq.atlassian.net';
+    || 'example.atlassian.net';
 }
 
 function resolveBaseUrl(opts: Record<string, unknown>, env: NodeJS.ProcessEnv): string {
@@ -111,7 +111,7 @@ export const atlassianConnector: MCPConnector = {
 
   discover: async (client, listName, env) => {
     if (listName !== 'projects') return [];
-    const cloudId = env.MCP_ATLASSIAN_CLOUD_ID || 'plateiq.atlassian.net';
+    const cloudId = env.MCP_ATLASSIAN_CLOUD_ID || 'example.atlassian.net';
 
     // Atlassian project search returns { values, total, isLast, startAt, maxResults }.
     // Page through every batch — Atlassian caps maxResults at 50.

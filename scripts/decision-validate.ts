@@ -9,10 +9,10 @@ import { summarizeAllWorkstreams } from '../src/lib/workstream/summary';
 
 async function main() {
   console.log('1) Extracting decisions...');
-  const ex = extractDecisions();
+  const ex = await extractDecisions();
   console.log(`   decisions=${ex.decisions}, relations=${ex.relations}`);
 
-  const all = listDecisions();
+  const all = await listDecisions();
   console.log('\n2) Decision records:');
   for (const d of all) {
     console.log(`   [${d.decided_at.slice(0, 10)}] ${d.status.padEnd(12)} (${d.item_count} items) "${d.title.slice(0, 70)}"`);

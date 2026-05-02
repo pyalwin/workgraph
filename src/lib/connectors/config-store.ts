@@ -1,11 +1,30 @@
 import { v4 as uuid } from 'uuid';
-import { getDb } from '../db';
-import { initSchema } from '../schema';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import type { MCPServerConfig, MCPTransport } from './types';
 
 export type ConnectorStatus = 'configured' | 'skipped' | 'error';
 
 export type SyncStatus = 'running' | 'success' | 'error';
+
+export const SYNC_STALE_AFTER_MS = 15 * 60 * 1000;
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
+
+export function isSyncRunActive(cfg: {
+  lastSyncStatus: SyncStatus | null;
+  lastSyncStartedAt: string | null;
+}): boolean {
+  if (cfg.lastSyncStatus !== 'running') return false;
+  if (!cfg.lastSyncStartedAt) return false;
+  const startedMs = Date.parse(cfg.lastSyncStartedAt);
+  if (Number.isNaN(startedMs)) return false;
+  return Date.now() - startedMs < SYNC_STALE_AFTER_MS;
+}
 
 export interface ConnectorConfigRow {
   id: string;
@@ -44,7 +63,6 @@ export interface ConnectorConfig {
   lastSyncItems: number | null;
   lastSyncError: string | null;
   lastSyncLog: string | null;
-  // Secrets are returned but the API layer should redact for non-owner reads.
   config: ConnectorConfigPayload;
   createdAt: string;
   updatedAt: string;
@@ -56,7 +74,6 @@ export interface ConnectorConfigPayload {
   command?: string;
   args?: string[];
   headers?: Record<string, string>;
-  // Adapter-specific knobs (e.g. cloudId for Atlassian, projects filter, etc.)
   options?: Record<string, unknown>;
 }
 
@@ -83,30 +100,32 @@ function rowToConfig(row: ConnectorConfigRow): ConnectorConfig {
   };
 }
 
-export function listConnectorConfigs(workspaceId: string): ConnectorConfig[] {
-  initSchema();
-  const db = getDb();
-  const rows = db
+export async function listConnectorConfigs(workspaceId: string): Promise<ConnectorConfig[]> {
+  await ensureInit();
+  const rows = await getLibsqlDb()
     .prepare('SELECT * FROM workspace_connector_configs WHERE workspace_id = ? ORDER BY slot ASC')
-    .all(workspaceId) as ConnectorConfigRow[];
+    .all<ConnectorConfigRow>(workspaceId);
   return rows.map(rowToConfig);
 }
 
-export function getConnectorConfig(workspaceId: string, slot: string): ConnectorConfig | null {
-  initSchema();
-  const db = getDb();
-  const row = db
+export async function getConnectorConfig(workspaceId: string, slot: string): Promise<ConnectorConfig | null> {
+  await ensureInit();
+  const row = await getLibsqlDb()
     .prepare('SELECT * FROM workspace_connector_configs WHERE workspace_id = ? AND slot = ?')
-    .get(workspaceId, slot) as ConnectorConfigRow | undefined;
+    .get<ConnectorConfigRow>(workspaceId, slot);
   return row ? rowToConfig(row) : null;
 }
 
-export function getConnectorConfigBySource(workspaceId: string, source: string): ConnectorConfig | null {
-  initSchema();
-  const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM workspace_connector_configs WHERE workspace_id = ? AND source = ? ORDER BY updated_at DESC LIMIT 1')
-    .get(workspaceId, source) as ConnectorConfigRow | undefined;
+export async function getConnectorConfigBySource(
+  workspaceId: string,
+  source: string,
+): Promise<ConnectorConfig | null> {
+  await ensureInit();
+  const row = await getLibsqlDb()
+    .prepare(
+      'SELECT * FROM workspace_connector_configs WHERE workspace_id = ? AND source = ? ORDER BY updated_at DESC LIMIT 1',
+    )
+    .get<ConnectorConfigRow>(workspaceId, source);
   return row ? rowToConfig(row) : null;
 }
 
@@ -120,93 +139,114 @@ export interface UpsertInput {
   status?: ConnectorStatus;
 }
 
-export function upsertConnectorConfig(input: UpsertInput): ConnectorConfig {
-  initSchema();
-  const db = getDb();
+export async function upsertConnectorConfig(input: UpsertInput): Promise<ConnectorConfig> {
+  await ensureInit();
+  const db = getLibsqlDb();
   const now = new Date().toISOString();
-  const existing = getConnectorConfig(input.workspaceId, input.slot);
+  const existing = await getConnectorConfig(input.workspaceId, input.slot);
   const id = existing?.id ?? uuid();
   const status = input.status ?? 'configured';
   const configStr = JSON.stringify(input.config ?? {});
 
   if (existing) {
-    db.prepare(
-      `UPDATE workspace_connector_configs SET source = ?, server_id = ?, transport = ?, config = ?, status = ?, updated_at = ? WHERE id = ?`,
-    ).run(input.source, input.serverId, input.transport, configStr, status, now, id);
+    await db
+      .prepare(
+        `UPDATE workspace_connector_configs SET source = ?, server_id = ?, transport = ?, config = ?, status = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(input.source, input.serverId, input.transport, configStr, status, now, id);
   } else {
-    db.prepare(
-      `INSERT INTO workspace_connector_configs (id, workspace_id, slot, source, server_id, transport, config, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, input.workspaceId, input.slot, input.source, input.serverId, input.transport, configStr, status, now, now);
+    await db
+      .prepare(
+        `INSERT INTO workspace_connector_configs (id, workspace_id, slot, source, server_id, transport, config, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, input.workspaceId, input.slot, input.source, input.serverId, input.transport, configStr, status, now, now);
   }
 
-  return getConnectorConfig(input.workspaceId, input.slot)!;
+  const saved = await getConnectorConfig(input.workspaceId, input.slot);
+  if (!saved) throw new Error('upsertConnectorConfig: row vanished after upsert');
+  return saved;
 }
 
-export function deleteConnectorConfig(workspaceId: string, slot: string): boolean {
-  initSchema();
-  const db = getDb();
-  const result = db
+export async function deleteConnectorConfig(workspaceId: string, slot: string): Promise<boolean> {
+  await ensureInit();
+  const result = await getLibsqlDb()
     .prepare('DELETE FROM workspace_connector_configs WHERE workspace_id = ? AND slot = ?')
     .run(workspaceId, slot);
   return result.changes > 0;
 }
 
-export function markConnectorTested(
+export async function markConnectorTested(
   workspaceId: string,
   slot: string,
   result: { ok: boolean; error?: string | null },
-): void {
-  // A failed Test action records the error but MUST NOT downgrade the
-  // connector's status — the connector is still configured, we just couldn't
-  // verify the connection right now (token expired in flight, network blip,
-  // MCP server down, etc.). Touching status would hide the management
-  // buttons in the UI and confuse the user into reinstalling.
-  initSchema();
-  const db = getDb();
+): Promise<void> {
+  await ensureInit();
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE workspace_connector_configs SET last_tested_at = ?, last_error = ?, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
-  ).run(now, result.error ?? null, now, workspaceId, slot);
+  await getLibsqlDb()
+    .prepare(
+      `UPDATE workspace_connector_configs SET last_tested_at = ?, last_error = ?, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
+    )
+    .run(now, result.error ?? null, now, workspaceId, slot);
 }
 
-export function markSyncStarted(workspaceId: string, slot: string): void {
-  initSchema();
-  const db = getDb();
+export async function markSyncStarted(workspaceId: string, slot: string): Promise<void> {
+  await ensureInit();
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE workspace_connector_configs SET last_sync_started_at = ?, last_sync_status = 'running', last_sync_error = NULL, last_sync_log = NULL, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
-  ).run(now, now, workspaceId, slot);
+  await getLibsqlDb()
+    .prepare(
+      `UPDATE workspace_connector_configs SET last_sync_started_at = ?, last_sync_status = 'running', last_sync_error = NULL, last_sync_log = NULL, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
+    )
+    .run(now, now, workspaceId, slot);
 }
 
-export function updateSyncLog(workspaceId: string, slot: string, tail: string): void {
-  initSchema();
-  const db = getDb();
-  // Cap stored log to ~16KB to keep the row light
+export async function updateSyncLog(workspaceId: string, slot: string, tail: string): Promise<void> {
+  await ensureInit();
   const capped = tail.length > 16000 ? tail.slice(-16000) : tail;
-  db.prepare(
-    `UPDATE workspace_connector_configs SET last_sync_log = ? WHERE workspace_id = ? AND slot = ?`,
-  ).run(capped, workspaceId, slot);
+  await getLibsqlDb()
+    .prepare(
+      `UPDATE workspace_connector_configs SET last_sync_log = ? WHERE workspace_id = ? AND slot = ?`,
+    )
+    .run(capped, workspaceId, slot);
 }
 
-export function markSyncFinished(
+export async function markSyncFinished(
   workspaceId: string,
   slot: string,
   result: { ok: boolean; itemsSynced?: number; error?: string | null },
-): void {
-  initSchema();
-  const db = getDb();
+): Promise<void> {
+  await ensureInit();
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE workspace_connector_configs SET last_sync_completed_at = ?, last_sync_status = ?, last_sync_items = ?, last_sync_error = ?, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
-  ).run(
-    now,
-    result.ok ? 'success' : 'error',
-    result.itemsSynced ?? null,
-    result.error ?? null,
-    now,
-    workspaceId,
-    slot,
-  );
+  await getLibsqlDb()
+    .prepare(
+      `UPDATE workspace_connector_configs SET last_sync_completed_at = ?, last_sync_status = ?, last_sync_items = ?, last_sync_error = ?, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
+    )
+    .run(
+      now,
+      result.ok ? 'success' : 'error',
+      result.itemsSynced ?? null,
+      result.error ?? null,
+      now,
+      workspaceId,
+      slot,
+    );
+}
+
+export async function reapStaleSyncs(): Promise<number> {
+  await ensureInit();
+  const cutoff = new Date(Date.now() - SYNC_STALE_AFTER_MS).toISOString();
+  const now = new Date().toISOString();
+  const res = await getLibsqlDb()
+    .prepare(
+      `UPDATE workspace_connector_configs
+       SET last_sync_status = 'error',
+           last_sync_completed_at = ?,
+           last_sync_error = COALESCE(last_sync_error, 'Sync timed out — marked failed by backstop sweep'),
+           updated_at = ?
+       WHERE last_sync_status = 'running'
+         AND (last_sync_started_at IS NULL OR last_sync_started_at < ?)`,
+    )
+    .run(now, now, cutoff);
+  return res.changes ?? 0;
 }
 
 export function toServerConfig(cfg: ConnectorConfig): MCPServerConfig {
@@ -252,11 +292,6 @@ function redactOptions(options: Record<string, unknown> | undefined): Record<str
   return out;
 }
 
-/**
- * When the user updates a connector without re-entering the secret(s),
- * merge the saved secret env entries (--env=KEY=VAL where KEY/VAL look secret)
- * back into the new args so the existing token survives.
- */
 export function mergeStdioSecrets(existing: string[] | undefined, next: string[] | undefined): string[] | undefined {
   if (!Array.isArray(next)) return next;
   if (!Array.isArray(existing) || existing.length === 0) return next;

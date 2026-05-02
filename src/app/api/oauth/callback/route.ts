@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { consumeFlowState, liveStateCount } from '@/lib/oauth/state';
 import {
   describeMissingCreds,
@@ -30,7 +30,7 @@ interface TokenResponse {
  * (sync, discover, panel) can pick the OAuth path automatically.
  */
 export async function GET(req: Request) {
-  initSchema();
+  await ensureSchemaAsync();
   const url = new URL(req.url);
   const code = url.searchParams.get('code');
   const stateParam = url.searchParams.get('state');
@@ -44,9 +44,9 @@ export async function GET(req: Request) {
     return errorPage('missing_params', 'Authorization callback missing code or state.');
   }
 
-  const flow = consumeFlowState(stateParam);
+  const flow = await consumeFlowState(stateParam);
   if (!flow) {
-    const remaining = liveStateCount();
+    const remaining = await liveStateCount();
     return errorPage(
       'invalid_state',
       `Callback state ${stateParam.slice(0, 12)}… was not found in the database.\n\n` +
@@ -79,7 +79,7 @@ export async function GET(req: Request) {
   } else {
     const baseUrl = process.env.OAUTH_REDIRECT_BASE_URL || new URL(req.url).origin;
     const dcrRedirect = `${baseUrl.replace(/\/$/, '')}/api/oauth/callback`;
-    const dcr = getRegisteredClient(provider.source, dcrRedirect);
+    const dcr = await getRegisteredClient(provider.source, dcrRedirect);
     if (!dcr) return errorPage('no_credentials', describeMissingCreds(provider));
     clientId = dcr.clientId;
     clientSecret = dcr.clientSecret;
@@ -171,7 +171,7 @@ export async function GET(req: Request) {
     ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
     : null;
 
-  saveOAuthToken({
+  await saveOAuthToken({
     workspaceId: flow.workspaceId,
     source: flow.source,
     accessToken: tokens.access_token,
@@ -187,10 +187,10 @@ export async function GET(req: Request) {
   // (Slack) we save the preset's stdio command — the OAuth token is
   // injected at spawn time by resolveServerConfig.
   const adapter = getConnector(flow.source);
-  const existing = getConnectorConfig(flow.workspaceId, flow.slot);
+  const existing = await getConnectorConfig(flow.workspaceId, flow.slot);
   const preset = CONNECTOR_PRESETS[flow.source];
   const isStdioOAuth = !!provider.stdioEnvVar && preset?.stdio;
-  upsertConnectorConfig({
+  await upsertConnectorConfig({
     workspaceId: flow.workspaceId,
     slot: flow.slot,
     source: flow.source,

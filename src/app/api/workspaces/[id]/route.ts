@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { deleteWorkspaceConfig, listWorkspaceConfigs, seedWorkspaceConfig, setWorkspaceEnabled } from '@/lib/workspace-config';
 
 export const dynamic = 'force-dynamic';
@@ -9,8 +9,8 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    initSchema();
-    seedWorkspaceConfig();
+    await ensureSchemaAsync();
+    await seedWorkspaceConfig();
     const { id: workspaceId } = await params;
     const body = await req.json();
     const enabled = typeof body.enabled === 'boolean' ? body.enabled : undefined;
@@ -18,7 +18,7 @@ export async function PATCH(
       return NextResponse.json({ ok: false, error: 'enabled field is required' }, { status: 400 });
     }
 
-    const workspace = setWorkspaceEnabled(workspaceId, enabled);
+    const workspace = await setWorkspaceEnabled(workspaceId, enabled);
     return NextResponse.json({ ok: true, workspace });
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
@@ -30,11 +30,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    initSchema();
-    seedWorkspaceConfig();
+    await ensureSchemaAsync();
+    await seedWorkspaceConfig();
     const { id: workspaceId } = await params;
-    deleteWorkspaceConfig(workspaceId);
-    const workspaces = listWorkspaceConfigs();
+    await deleteWorkspaceConfig(workspaceId);
+    const workspaces = await listWorkspaceConfigs();
     return NextResponse.json({
       ok: true,
       workspaces,

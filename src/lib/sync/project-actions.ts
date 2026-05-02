@@ -13,9 +13,15 @@
 import { generateObject } from 'ai';
 import { v4 as uuid } from 'uuid';
 import { z } from 'zod';
-import { getDb } from '../db';
-import { initSchema } from '../schema';
+import { ensureSchemaAsync } from '../db/init-schema-async';
+import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
+
+let _initPromise: Promise<void> | null = null;
+async function ensureInit(): Promise<void> {
+  if (!_initPromise) _initPromise = ensureSchemaAsync();
+  return _initPromise;
+}
 
 const PROMPT_TICKET_LIMIT = 60; // recent active + recent done
 const OUTPUT_LIMIT = 8;
@@ -29,7 +35,7 @@ const ProjectActionItemsSchema = z.object({
           .describe('Concrete next step that moves the project forward. Imperative, specific, owner-actionable.'),
         evidence_source_ids: z
           .array(z.string())
-          .describe('Source IDs (e.g. "PEX-123") of tickets that prompted this action. Empty if cross-cutting.'),
+          .describe('Source IDs (e.g. "ALPHA-123") of tickets that prompted this action. Empty if cross-cutting.'),
         assignee: z
           .string()
           .nullable()
@@ -56,19 +62,19 @@ interface ProjectContext {
   recentDecisions: string[];
 }
 
-function gatherContext(projectKey: string): ProjectContext | null {
-  const db = getDb();
+async function gatherContext(projectKey: string): Promise<ProjectContext | null> {
+  const db = getLibsqlDb();
 
-  const projectRow = db
+  const projectRow = await db
     .prepare(
       `SELECT title FROM work_items
        WHERE source = 'jira' AND source_id = ?`,
     )
-    .get(`project:${projectKey}`) as { title: string } | undefined;
+    .get<{ title: string }>(`project:${projectKey}`);
 
   if (!projectRow) return null;
 
-  const counts = db
+  const counts = await db
     .prepare(
       `SELECT
          SUM(CASE WHEN status IN ('done','closed','resolved') THEN 1 ELSE 0 END) AS done,
@@ -76,10 +82,10 @@ function gatherContext(projectKey: string): ProjectContext | null {
        FROM work_items
        WHERE source='jira' AND json_extract(metadata, '$.entity_key') = ?`,
     )
-    .get(projectKey) as { done: number; open: number };
+    .get<{ done: number; open: number }>(projectKey);
 
   // Pull the most recently active + the just-shipped, both with summaries when present.
-  const tickets = db
+  const tickets = await db
     .prepare(
       `SELECT source_id, title, status, summary, priority,
               json_extract(metadata, '$.last_commented_at') AS last_at
@@ -88,14 +94,14 @@ function gatherContext(projectKey: string): ProjectContext | null {
        ORDER BY COALESCE(updated_at, created_at) DESC
        LIMIT ?`,
     )
-    .all(projectKey, PROMPT_TICKET_LIMIT) as Array<{
+    .all<{
       source_id: string;
       title: string;
       status: string | null;
       summary: string | null;
       priority: string | null;
       last_at: string | null;
-    }>;
+    }>(projectKey, PROMPT_TICKET_LIMIT);
 
   const ticketLines = tickets.map((t) => {
     const status = (t.status ?? 'unknown').padEnd(8);
@@ -104,22 +110,23 @@ function gatherContext(projectKey: string): ProjectContext | null {
     return `[${status}] ${t.source_id}: ${pri}${t.title}${blurb ? ` — ${blurb.slice(0, 200)}` : ''}`;
   });
 
-  const recentDecisions = (
-    db
-      .prepare(
-        `SELECT d.title, d.summary FROM decisions d
-         JOIN work_items wi ON wi.id = d.item_id
-         WHERE wi.source='jira' AND json_extract(wi.metadata, '$.entity_key') = ?
-         ORDER BY d.decided_at DESC LIMIT 5`,
-      )
-      .all(projectKey) as Array<{ title: string; summary: string | null }>
-  ).map((d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`);
+  const decisionRows = await db
+    .prepare(
+      `SELECT d.title, d.summary FROM decisions d
+       JOIN work_items wi ON wi.id = d.item_id
+       WHERE wi.source='jira' AND json_extract(wi.metadata, '$.entity_key') = ?
+       ORDER BY d.decided_at DESC LIMIT 5`,
+    )
+    .all<{ title: string; summary: string | null }>(projectKey);
+  const recentDecisions = decisionRows.map(
+    (d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`,
+  );
 
   return {
     projectKey,
     projectName: projectRow.title,
-    totalOpen: counts.open ?? 0,
-    totalDone: counts.done ?? 0,
+    totalOpen: counts?.open ?? 0,
+    totalDone: counts?.done ?? 0,
     ticketLines,
     recentDecisions,
   };
@@ -157,59 +164,62 @@ ${ctx.recentDecisions.length > 0
   return { system, user };
 }
 
-function persist(projectKey: string, hubId: string, items: ProjectActions['action_items']) {
-  const db = getDb();
+async function persist(projectKey: string, hubId: string, items: ProjectActions['action_items']): Promise<void> {
+  const db = getLibsqlDb();
   // Replace AI-generated open items for this project hub. Keep user-edited
   // items (any non-null user_priority) and items in non-open states.
-  db.prepare(
-    `DELETE FROM action_items
-     WHERE source_item_id = ?
-       AND state = 'open'
-       AND user_priority IS NULL`,
-  ).run(hubId);
+  await db
+    .prepare(
+      `DELETE FROM action_items
+       WHERE source_item_id = ?
+         AND state = 'open'
+         AND user_priority IS NULL`,
+    )
+    .run(hubId);
 
   // Also clean up the legacy per-ticket AI items for tickets in this project.
   // They were the noise the user was seeing — replaced by this project-level set.
-  db.prepare(
-    `DELETE FROM action_items
-     WHERE state = 'open'
-       AND user_priority IS NULL
-       AND source_item_id IN (
-         SELECT id FROM work_items
-         WHERE source='jira'
-           AND json_extract(metadata, '$.entity_key') = ?
-           AND id != ?
-       )`,
-  ).run(projectKey, hubId);
+  await db
+    .prepare(
+      `DELETE FROM action_items
+       WHERE state = 'open'
+         AND user_priority IS NULL
+         AND source_item_id IN (
+           SELECT id FROM work_items
+           WHERE source='jira'
+             AND json_extract(metadata, '$.entity_key') = ?
+             AND id != ?
+         )`,
+    )
+    .run(projectKey, hubId);
 
-  const insert = db.prepare(`
-    INSERT INTO action_items (id, source_item_id, text, assignee, due_at, ai_priority, state)
-    VALUES (?, ?, ?, ?, ?, ?, 'open')
-  `);
-
-  const tx = db.transaction(() => {
-    for (const a of items) {
-      const text = a.text.trim();
-      if (!text) continue;
-      insert.run(uuid(), hubId, text, a.assignee, a.due_at, a.ai_priority);
-    }
-  });
-  tx();
+  // Sequential async — each insert is independent. Atomicity across the loop
+  // isn't required (idempotent project-hub regeneration).
+  for (const a of items) {
+    const text = a.text.trim();
+    if (!text) continue;
+    await db
+      .prepare(
+        `INSERT INTO action_items (id, source_item_id, text, assignee, due_at, ai_priority, state)
+         VALUES (?, ?, ?, ?, ?, ?, 'open')`,
+      )
+      .run(uuid(), hubId, text, a.assignee, a.due_at, a.ai_priority);
+  }
 }
 
 export async function generateProjectActionItems(
   projectKey: string,
 ): Promise<{ ok: true; count: number } | { ok: false; reason: string }> {
-  initSchema();
+  await ensureInit();
 
-  const ctx = gatherContext(projectKey);
+  const ctx = await gatherContext(projectKey);
   if (!ctx) return { ok: false, reason: 'project hub not found' };
   if (ctx.ticketLines.length === 0) return { ok: false, reason: 'no tickets in project' };
 
-  const db = getDb();
-  const hub = db
+  const db = getLibsqlDb();
+  const hub = await db
     .prepare(`SELECT id FROM work_items WHERE source='jira' AND source_id = ?`)
-    .get(`project:${projectKey}`) as { id: string } | undefined;
+    .get<{ id: string }>(`project:${projectKey}`);
   if (!hub) return { ok: false, reason: 'project hub row missing' };
 
   const { system, user } = buildPrompt(ctx);
@@ -227,6 +237,6 @@ export async function generateProjectActionItems(
     return { ok: false, reason: (err as Error).message };
   }
 
-  persist(projectKey, hub.id, result.action_items);
+  await persist(projectKey, hub.id, result.action_items);
   return { ok: true, count: result.action_items.length };
 }

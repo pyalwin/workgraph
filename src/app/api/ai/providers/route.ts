@@ -11,5 +11,5 @@ export async function GET() {
       { status: 500 },
     );
   }
-  return NextResponse.json({ providers: listProviderConfigSummaries() });
+  return NextResponse.json({ providers: await listProviderConfigSummaries() });
 }

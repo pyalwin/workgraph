@@ -1,7 +1,5 @@
-import { sql } from 'drizzle-orm';
-import { initSchema } from '@/lib/schema';
-import { getDrizzle } from '@/lib/db/client';
-import { systemHealth } from '@/lib/db/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
 import { inngest } from '../client';
 
 /**
@@ -22,30 +20,33 @@ export const heartbeat = inngest.createFunction(
     ],
   },
   async ({ event, step }) => {
-    const insertedId = await step.run('record-heartbeat', () => {
-      initSchema();
-      const db = getDrizzle();
+    const insertedId = await step.run('record-heartbeat', async () => {
+      await ensureSchemaAsync();
+      const db = getLibsqlDb();
 
-      const result = db
-        .insert(systemHealth)
-        .values({
-          kind: 'heartbeat',
-          detail: JSON.stringify({
-            trigger: event.name === 'workgraph/heartbeat.tick' ? 'manual' : 'cron',
-            node: process.version,
-          }),
-        })
-        .returning({ id: systemHealth.id })
-        .all();
+      const detail = JSON.stringify({
+        trigger: event.name === 'workgraph/heartbeat.tick' ? 'manual' : 'cron',
+        node: process.version,
+      });
+
+      const result = await db
+        .prepare(
+          `INSERT INTO system_health (kind, detail) VALUES (?, ?) RETURNING id`,
+        )
+        .get<{ id: number }>('heartbeat', detail);
 
       // Bound the table — keep the last 1000 rows.
-      db.run(
-        sql`DELETE FROM system_health WHERE id IN (
-          SELECT id FROM system_health ORDER BY id DESC LIMIT -1 OFFSET 1000
-        )`,
-      );
+      await db
+        .prepare(
+          `DELETE FROM system_health WHERE id IN (
+             SELECT id FROM system_health ORDER BY id DESC LIMIT -1 OFFSET 1000
+           )`,
+        )
+        .run();
 
-      return result[0]?.id ?? null;
+      // libsql can return ids as bigint — coerce so Inngest's JSON serialization
+      // doesn't choke on it.
+      return result?.id != null ? Number(result.id) : null;
     });
 
     return { ok: true, insertedId };

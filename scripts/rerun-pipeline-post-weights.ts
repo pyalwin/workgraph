@@ -21,7 +21,7 @@ async function main() {
 
   console.log('\n2) Multi-signal crossref (new weights)…');
   const t1 = Date.now();
-  const lk = createLinksForAll({});
+  const lk = await createLinksForAll({});
   console.log(`   items=${lk.items}, links=${lk.links}, ${((Date.now() - t1) / 1000).toFixed(1)}s`);
 
   console.log('\n3) Link type distribution:');
@@ -31,7 +31,7 @@ async function main() {
   `).all());
 
   console.log('\n4) Workstream assembly (epic promotion)…');
-  const ws = assembleAll();
+  const ws = await assembleAll();
   console.log(`   workstreams=${ws.workstreams}, items=${ws.items}, seeds=${ws.seeds}, orphans=${ws.orphans}`);
 
   console.log('\n5) Workstream size distribution:');
@@ -50,7 +50,7 @@ async function main() {
   console.table(sizes);
 
   console.log('\n6) Decision extraction (epic-aware)…');
-  const dx = extractDecisions();
+  const dx = await extractDecisions();
   console.log(`   decisions=${dx.decisions}, relations=${dx.relations}`);
 
   console.log('\n7) Workstream narrative summaries (Sonnet)…');

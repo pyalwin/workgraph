@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
-import { initSchema } from '@/lib/schema';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import {
   deleteConnectorConfig,
   getConnectorConfig,
+  isSyncRunActive,
   markConnectorTested,
+  reapStaleSyncs,
   redactConfig,
   upsertConnectorConfig,
 } from '@/lib/connectors/config-store';
@@ -15,10 +17,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string; slot: string }> },
 ) {
   try {
-    initSchema();
+    await ensureSchemaAsync();
+    await reapStaleSyncs();
     const { id: workspaceId, slot } = await params;
     const decodedSlot = decodeURIComponent(slot);
-    const cfg = getConnectorConfig(workspaceId, decodedSlot);
+    const cfg = await getConnectorConfig(workspaceId, decodedSlot);
+    if (cfg && cfg.lastSyncStatus === 'running' && !isSyncRunActive(cfg)) {
+      cfg.lastSyncStatus = 'error';
+      cfg.lastSyncError = cfg.lastSyncError ?? 'Sync did not finish (worker likely crashed)';
+    }
     return NextResponse.json({ ok: true, config: cfg ? redactConfig(cfg) : null });
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
@@ -30,10 +37,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; slot: string }> },
 ) {
   try {
-    initSchema();
+    await ensureSchemaAsync();
     const { id: workspaceId, slot } = await params;
     const decodedSlot = decodeURIComponent(slot);
-    const removed = deleteConnectorConfig(workspaceId, decodedSlot);
+    const removed = await deleteConnectorConfig(workspaceId, decodedSlot);
     return NextResponse.json({ ok: true, removed });
   } catch (error: any) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
@@ -45,15 +52,15 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string; slot: string }> },
 ) {
   try {
-    initSchema();
+    await ensureSchemaAsync();
     const { id: workspaceId, slot } = await params;
     const decodedSlot = decodeURIComponent(slot);
     const body = await req.json();
 
     if (body.action === 'skip') {
-      const existing = getConnectorConfig(workspaceId, decodedSlot);
+      const existing = await getConnectorConfig(workspaceId, decodedSlot);
       if (existing) {
-        upsertConnectorConfig({
+        await upsertConnectorConfig({
           workspaceId,
           slot: decodedSlot,
           source: existing.source,
@@ -63,7 +70,7 @@ export async function PATCH(
           status: 'skipped',
         });
       } else {
-        upsertConnectorConfig({
+        await upsertConnectorConfig({
           workspaceId,
           slot: decodedSlot,
           source: 'manual',
@@ -77,7 +84,7 @@ export async function PATCH(
     }
 
     if (body.action === 'test') {
-      const cfg = getConnectorConfig(workspaceId, decodedSlot);
+      const cfg = await getConnectorConfig(workspaceId, decodedSlot);
       if (!cfg) return NextResponse.json({ ok: false, error: 'No config to test' }, { status: 404 });
       const t0 = Date.now();
       console.error(`[test ${cfg.source}] starting…`);
@@ -101,26 +108,53 @@ export async function PATCH(
         await client.close();
         const ms = Date.now() - t0;
         console.error(`[test ${cfg.source}] ✓ SUCCESS in ${ms}ms${toolCount >= 0 ? ` (${toolCount} tools)` : ''}`);
-        markConnectorTested(workspaceId, decodedSlot, { ok: true });
+        await markConnectorTested(workspaceId, decodedSlot, { ok: true });
         return NextResponse.json({ ok: true, ms });
       } catch (err: any) {
         const ms = Date.now() - t0;
         console.error(`[test ${cfg.source}] ✗ FAILED in ${ms}ms: ${err.message}`);
-        markConnectorTested(workspaceId, decodedSlot, { ok: false, error: err.message });
+        await markConnectorTested(workspaceId, decodedSlot, { ok: false, error: err.message });
         return NextResponse.json({ ok: false, error: err.message }, { status: 200 });
       }
     }
 
     if (body.action === 'sync') {
-      const cfg = getConnectorConfig(workspaceId, decodedSlot);
+      const cfg = await getConnectorConfig(workspaceId, decodedSlot);
       if (!cfg) return NextResponse.json({ ok: false, error: 'No config to sync' }, { status: 404 });
-      const { triggerSync, isSyncRunning } = await import('@/lib/connectors/sync-orchestrator');
-      if (isSyncRunning(workspaceId, decodedSlot)) {
+      const { isSyncRunActive } = await import('@/lib/connectors/config-store');
+      // Reject only if a sync is *actively* running. A stuck-running row
+      // older than the stale threshold is treated as crashed and lets the
+      // user retry — otherwise a worker death would block all future syncs.
+      if (isSyncRunActive(cfg)) {
         return NextResponse.json({ ok: true, alreadyRunning: true });
       }
-      // body.since: 'full' to backfill from scratch, ISO string to override clamp
-      const r = triggerSync(workspaceId, decodedSlot, cfg.source, { since: body.since });
-      return NextResponse.json(r);
+      const { inngest } = await import('@/inngest/client');
+      // The Inngest worker is the sole writer of sync state — it calls
+      // markSyncStarted on entry and markSyncFinished on every exit path
+      // (success, runConnector errors, MCP connect failures, throws).
+      // body.since: 'full' to backfill from scratch, ISO string to override clamp.
+      // For github we also fan out a trails refresh — releases flow through
+      // the regular connector framework, PRs flow as issue_trails.
+      const events: Array<{ name: string; data: any }> = [];
+      if (cfg.source === 'jira') {
+        events.push({
+          name: 'workgraph/jira.sync.workspace',
+          data: { workspaceId, slot: decodedSlot, source: cfg.source, since: body.since ?? null },
+        });
+      } else {
+        events.push({
+          name: 'workgraph/connector.sync.workspace',
+          data: { workspaceId, slot: decodedSlot, source: cfg.source, since: body.since ?? null },
+        });
+      }
+      if (cfg.source === 'github') {
+        events.push({
+          name: 'workgraph/github.trails.refresh',
+          data: { workspaceId, slot: decodedSlot, since: body.since ?? null },
+        });
+      }
+      await Promise.all(events.map((e) => inngest.send(e)));
+      return NextResponse.json({ ok: true, queued: true });
     }
 
     return NextResponse.json({ ok: false, error: 'Unknown action' }, { status: 400 });
