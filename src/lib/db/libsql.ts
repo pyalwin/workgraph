@@ -91,14 +91,17 @@ function makePrepared(client: Client, sql: string): PreparedAdapter {
 
 /**
  * Splits a multi-statement DDL block into individual statements so we can
- * batch them. Naive split — assumes no `;` inside string literals or COMMENTS.
- * Our schema.ts is well-behaved on that front.
+ * batch them. Strips `-- ...` line comments first: leading comment lines
+ * would otherwise cause whole CREATE statements to be filtered as comments,
+ * and a `;` inside a comment would fragment the real statement that follows.
+ * Still naive about `;` inside string literals — our schema doesn't have any.
  */
 function splitStatements(sql: string): string[] {
-  return sql
+  const stripped = sql.replace(/--[^\n]*/g, '');
+  return stripped
     .split(';')
     .map((s) => s.trim())
-    .filter((s) => s.length > 0 && !/^\s*--/.test(s));
+    .filter((s) => s.length > 0);
 }
 
 export function getLibsqlDb(): LibsqlDb {
