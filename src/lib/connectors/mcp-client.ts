@@ -4,17 +4,17 @@ import { ensureFreshAccessToken } from '../oauth/refresh';
 
 export type { MCPClient };
 
-// Lazy import — keeps the SDK off webpack's static graph so the app builds
-// even if @modelcontextprotocol/sdk isn't installed yet.
+// Dynamic imports — @modelcontextprotocol/sdk is listed in serverExternalPackages
+// so webpack externalizes it rather than bundling it. Regular import() is
+// required here so webpack emits proper runtime resolution code; the old
+// `new Function` trick bypassed the bundler entirely, causing "Cannot find
+// package" errors in the Vercel Lambda environment.
 async function loadSdk() {
-  // Indirection via a non-literal specifier prevents Next/webpack from
-  // attempting to resolve these at build time.
-  const dynImport = new Function('s', 'return import(s)') as (s: string) => Promise<any>;
   const [core, stdio, sse, http] = await Promise.all([
-    dynImport('@modelcontextprotocol/sdk/client/index.js'),
-    dynImport('@modelcontextprotocol/sdk/client/stdio.js'),
-    dynImport('@modelcontextprotocol/sdk/client/sse.js').catch(() => null),
-    dynImport('@modelcontextprotocol/sdk/client/streamableHttp.js').catch(() => null),
+    import('@modelcontextprotocol/sdk/client/index.js'),
+    import('@modelcontextprotocol/sdk/client/stdio.js'),
+    import('@modelcontextprotocol/sdk/client/sse.js').catch(() => null),
+    import('@modelcontextprotocol/sdk/client/streamableHttp.js').catch(() => null),
   ]);
   return { Client: core.Client, stdio, sse, http };
 }
