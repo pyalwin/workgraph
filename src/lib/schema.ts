@@ -416,6 +416,50 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_file_lifecycle_status ON file_lifecycle(repo, status);
     CREATE INDEX IF NOT EXISTS idx_file_lifecycle_last_at ON file_lifecycle(repo, last_at DESC);
 
+    -- Almanac Phase 2: modules / functional_units / aliases.
+    CREATE TABLE IF NOT EXISTS modules (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      name TEXT NOT NULL,
+      path_patterns TEXT NOT NULL DEFAULT '[]',
+      detected_from TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      churn INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_modules_workspace_repo ON modules(workspace_id, repo);
+
+    CREATE TABLE IF NOT EXISTS functional_units (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_key TEXT,
+      name TEXT,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      detected_from TEXT NOT NULL,
+      jira_epic_key TEXT,
+      keywords TEXT NOT NULL DEFAULT '[]',
+      file_path_patterns TEXT NOT NULL DEFAULT '[]',
+      file_set_hash TEXT,
+      first_seen_at TEXT,
+      last_active_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_funits_workspace_project ON functional_units(workspace_id, project_key);
+    CREATE INDEX IF NOT EXISTS idx_funits_detected ON functional_units(detected_from);
+    CREATE INDEX IF NOT EXISTS idx_funits_active ON functional_units(workspace_id, last_active_at DESC);
+
+    CREATE TABLE IF NOT EXISTS functional_unit_aliases (
+      unit_id TEXT NOT NULL,
+      alias TEXT NOT NULL,
+      source TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (unit_id, alias)
+    );
+
     -- Inngest heartbeat / pulse log. One row per scheduled tick. Trims
     -- itself to the last 1000 rows on each insert to bound disk use.
     CREATE TABLE IF NOT EXISTS system_health (

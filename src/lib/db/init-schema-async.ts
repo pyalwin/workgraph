@@ -460,6 +460,57 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_file_lifecycle_status ON file_lifecycle(repo, status);
   CREATE INDEX IF NOT EXISTS idx_file_lifecycle_last_at ON file_lifecycle(repo, last_at DESC);
 
+  -- Almanac Phase 2: modules = file-path architecture axis. Auto-detected
+  -- by 2-level path grouping weighted by churn. User-editable.
+  CREATE TABLE IF NOT EXISTS modules (
+    id TEXT PRIMARY KEY,                -- workspace_id:repo:slug
+    workspace_id TEXT NOT NULL,
+    repo TEXT NOT NULL,                 -- module is per-repo
+    name TEXT NOT NULL,                 -- e.g. "src/lib/sync"
+    path_patterns TEXT NOT NULL DEFAULT '[]',  -- JSON: ['src/lib/sync/**']
+    detected_from TEXT NOT NULL,        -- 'auto' | 'manual'
+    status TEXT NOT NULL DEFAULT 'active',     -- 'active' | 'archived'
+    churn INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_modules_workspace_repo ON modules(workspace_id, repo);
+
+  -- Almanac Phase 2: functional units = product-capability axis. The row
+  -- in the Almanac. Each cluster of co-evolving signal events becomes
+  -- a unit; Jira epics in scope are seeded as units up-front.
+  CREATE TABLE IF NOT EXISTS functional_units (
+    id TEXT PRIMARY KEY,                -- deterministic: sha1 of sorted file set OR 'epic:<key>'
+    workspace_id TEXT NOT NULL,
+    project_key TEXT,                   -- Jira project for unit's home project
+    name TEXT,                          -- nullable until CLI naming pass completes
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'active',     -- 'active' | 'archived' | 'merged'
+    detected_from TEXT NOT NULL,        -- 'co_change' | 'jira_epic_alias' | 'manual'
+    jira_epic_key TEXT,                 -- nullable; set when detected_from='jira_epic_alias'
+    keywords TEXT NOT NULL DEFAULT '[]',         -- JSON array
+    file_path_patterns TEXT NOT NULL DEFAULT '[]',  -- JSON array of glob-like patterns
+    file_set_hash TEXT,                 -- sha1 of the canonical file set (for cache invalidation)
+    first_seen_at TEXT,                 -- min(occurred_at) of member events
+    last_active_at TEXT,                -- max(occurred_at) of member events
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_funits_workspace_project ON functional_units(workspace_id, project_key);
+  CREATE INDEX IF NOT EXISTS idx_funits_detected ON functional_units(detected_from);
+  CREATE INDEX IF NOT EXISTS idx_funits_active ON functional_units(workspace_id, last_active_at DESC);
+
+  -- Almanac Phase 2: rename / merge / split history for functional units.
+  -- When two units merge, the surviving unit accumulates aliases pointing
+  -- at the absorbed ones, so historic citations don't break.
+  CREATE TABLE IF NOT EXISTS functional_unit_aliases (
+    unit_id TEXT NOT NULL,
+    alias TEXT NOT NULL,                -- a previous name OR an absorbed unit_id
+    source TEXT NOT NULL,               -- 'rename' | 'merge' | 'split'
+    applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (unit_id, alias)
+  );
+
   CREATE TABLE IF NOT EXISTS system_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
