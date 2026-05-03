@@ -154,22 +154,31 @@ function cosineDistance(a: Float32Array, b: Float32Array): number {
   return 1 - dot / denom;
 }
 
-export async function searchChunks(query: string, k: number = 10): Promise<ChunkSearchHit[]> {
+export async function searchChunks(
+  query: string,
+  k: number = 10,
+  opts: { source?: string } = {},
+): Promise<ChunkSearchHit[]> {
   await ensureInit();
   const db = getLibsqlDb();
   const qvec = await embed(query, TEXT_MODEL);
+  const sourceFilter = opts.source?.trim() || null;
 
   // Try libSQL native vector_distance_cos first — works on Turso and on
   // newer libsql file mode. Falls back to in-process cosine when the
   // function is unavailable (e.g. older libsql build in dev).
   const queryLiteral = JSON.stringify(qvec);
   try {
+    const where = sourceFilter ? 'WHERE wi.source = ?' : '';
+    const args = sourceFilter ? [queryLiteral, sourceFilter, k] : [queryLiteral, k];
     const rows = await db
       .prepare(
         `SELECT cv.chunk_id, ic.item_id, ic.chunk_type, ic.chunk_text,
                 vector_distance_cos(cv.embedding, vector(?)) AS distance
          FROM chunk_vectors cv
          JOIN item_chunks ic ON ic.id = cv.chunk_id
+         JOIN work_items wi ON wi.id = ic.item_id
+         ${where}
          ORDER BY distance ASC
          LIMIT ?`,
       )
@@ -179,7 +188,7 @@ export async function searchChunks(query: string, k: number = 10): Promise<Chunk
         item_id: string;
         chunk_type: string;
         chunk_text: string;
-      }>(queryLiteral, k);
+      }>(...args);
     return rows.map(r => ({
       chunk_id: Number(r.chunk_id),
       item_id: r.item_id,
@@ -194,7 +203,9 @@ export async function searchChunks(query: string, k: number = 10): Promise<Chunk
       .prepare(
         `SELECT cv.chunk_id, cv.embedding, ic.item_id, ic.chunk_type, ic.chunk_text
          FROM chunk_vectors cv
-         JOIN item_chunks ic ON ic.id = cv.chunk_id`,
+         JOIN item_chunks ic ON ic.id = cv.chunk_id
+         JOIN work_items wi ON wi.id = ic.item_id
+         ${sourceFilter ? 'WHERE wi.source = ?' : ''}`,
       )
       .all<{
         chunk_id: number | bigint;
@@ -202,7 +213,7 @@ export async function searchChunks(query: string, k: number = 10): Promise<Chunk
         item_id: string;
         chunk_type: string;
         chunk_text: string;
-      }>();
+      }>(...(sourceFilter ? [sourceFilter] : []));
     const q = new Float32Array(qvec);
     const scored = rows.map((r) => ({
       chunk_id: Number(r.chunk_id),

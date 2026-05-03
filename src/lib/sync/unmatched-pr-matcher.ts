@@ -18,7 +18,7 @@ const MATCH_THRESHOLD = 0.65;
 // noise (random text co-occurrence) so we keep that as the lower floor.
 const REVIEW_THRESHOLD = 0.4;
 const TOP_K_FOR_REVIEW = 3;
-const SEARCH_K = 8;
+const SEARCH_K = 20;
 const RECENT_DAYS_FOR_TEMPORAL = 60;
 
 let _initPromise: Promise<void> | null = null;
@@ -43,7 +43,6 @@ interface UnmatchedRow {
 interface CandidateScore {
   itemId: string;
   embedding: number;
-  author: number;
   repo: number;
   temporal: number;
   total: number;
@@ -84,34 +83,6 @@ async function loadRecentRepoToProjects(): Promise<Map<string, Set<string>>> {
     map.get(r.repo)!.add(r.project);
   }
   return map;
-}
-
-async function loadActiveAssignees(itemIds: string[]): Promise<Map<string, Set<string>>> {
-  if (itemIds.length === 0) return new Map();
-  const db = getLibsqlDb();
-  const placeholders = itemIds.map(() => '?').join(',');
-  const rows = await db
-    .prepare(
-      `SELECT id, author, json_extract(metadata, '$.assignees') AS assignees
-       FROM work_items
-       WHERE id IN (${placeholders})`,
-    )
-    .all<{ id: string; author: string | null; assignees: string | null }>(...itemIds);
-  const out = new Map<string, Set<string>>();
-  for (const r of rows) {
-    const set = new Set<string>();
-    if (r.author) set.add(r.author.toLowerCase());
-    if (r.assignees) {
-      try {
-        const arr = JSON.parse(r.assignees);
-        if (Array.isArray(arr)) for (const a of arr) if (typeof a === 'string') set.add(a.toLowerCase());
-      } catch {
-        // ignore
-      }
-    }
-    out.set(r.id, set);
-  }
-  return out;
 }
 
 async function loadItemMeta(itemIds: string[]): Promise<Map<string, { project: string | null; updated_at: string | null }>> {
@@ -194,7 +165,7 @@ export async function runUnmatchedPrMatcher(): Promise<UnmatchedMatcherResult> {
 
     let hits;
     try {
-      hits = await searchChunks(queryText, SEARCH_K);
+      hits = await searchChunks(queryText, SEARCH_K, { source: 'jira' });
     } catch (err: any) {
       errors.push(`${row.pr_ref}: searchChunks: ${err.message}`);
       continue;
@@ -208,7 +179,9 @@ export async function runUnmatchedPrMatcher(): Promise<UnmatchedMatcherResult> {
     }
     if (byItem.size === 0) continue;
 
-    // Filter to Jira items only.
+    // Filter to Jira items only. The search itself is source-scoped too;
+    // this remains as a defensive guard in case an older search backend
+    // ignores the filter.
     const candidateIds = [...byItem.keys()];
     const placeholders = candidateIds.map(() => '?').join(',');
     const jiraRows = await db
@@ -221,22 +194,18 @@ export async function runUnmatchedPrMatcher(): Promise<UnmatchedMatcherResult> {
     const jiraCandidateIds = [...jiraSet];
 
     const meta = await loadItemMeta(jiraCandidateIds);
-    const assignees = await loadActiveAssignees(jiraCandidateIds);
     const allowedProjects = row.repo ? repoToProjects.get(row.repo) ?? null : null;
-    const actor = row.actor?.toLowerCase() ?? null;
 
     const scored: CandidateScore[] = [];
     for (const itemId of jiraCandidateIds) {
       const distance = byItem.get(itemId)!;
       const m = meta.get(itemId);
-      const ass = assignees.get(itemId);
 
       const embedding = toScore(distance);
-      const author = actor && ass?.has(actor) ? 1 : 0;
       const repo = allowedProjects && m?.project && allowedProjects.has(m.project) ? 1 : 0;
       const temporal = temporalScore(row.occurred_at, m?.updated_at ?? null);
-      const total = embedding * 0.5 + author * 0.15 + repo * 0.15 + temporal * 0.2;
-      scored.push({ itemId, embedding, author, repo, temporal, total });
+      const total = embedding * 0.65 + repo * 0.15 + temporal * 0.2;
+      scored.push({ itemId, embedding, repo, temporal, total });
     }
     scored.sort((a, b) => b.total - a.total);
     const best = scored[0];
@@ -246,7 +215,6 @@ export async function runUnmatchedPrMatcher(): Promise<UnmatchedMatcherResult> {
       const evidence = JSON.stringify({
         source: 'ai_matcher',
         embedding: Number(best.embedding.toFixed(3)),
-        author: best.author,
         repo: best.repo,
         temporal: best.temporal,
         total: Number(best.total.toFixed(3)),
@@ -277,7 +245,6 @@ export async function runUnmatchedPrMatcher(): Promise<UnmatchedMatcherResult> {
         Number(cand.total.toFixed(3)),
         JSON.stringify({
           embedding: Number(cand.embedding.toFixed(3)),
-          author: cand.author,
           repo: cand.repo,
           temporal: cand.temporal,
         }),
