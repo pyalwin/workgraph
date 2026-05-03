@@ -1,6 +1,6 @@
 import { getConnector } from './registry';
 import { connectMCP, resolveServerConfig } from './mcp-client';
-import { getConnectorConfigBySource, markSyncStarted, markSyncFinished } from './config-store';
+import { getConnectorConfigBySource, markSyncStarted, markSyncFinished, upsertConnectorConfig } from './config-store';
 import { runConnector } from './runner';
 import type { SyncResult } from '../sync/types';
 
@@ -67,6 +67,25 @@ export async function runConnectorSync(
   try {
     const client = await connectMCP(server);
     try {
+      // Resolve dynamic options before the list phase (e.g. Atlassian cloudId).
+      // Persists any newly discovered values so subsequent syncs skip discovery.
+      let resolvedOptions = savedOptions;
+      if (connector.resolveOptions) {
+        resolvedOptions = await connector.resolveOptions(client, savedOptions, process.env);
+        const newCloudId = resolvedOptions.cloudId;
+        if (newCloudId && newCloudId !== savedOptions.cloudId && cfg) {
+          await upsertConnectorConfig({
+            workspaceId,
+            slot: cfg.slot,
+            source,
+            serverId: cfg.serverId,
+            transport: cfg.transport,
+            config: { ...cfg.config, options: resolvedOptions },
+            status: cfg.status,
+          });
+        }
+      }
+
       result = await runConnector(connector, {
         client,
         since,
@@ -75,7 +94,7 @@ export async function runConnectorSync(
         pageSize: 100,
         dryRun: false,
         verbose: true,
-        options: savedOptions,
+        options: resolvedOptions,
       });
     } finally {
       try {

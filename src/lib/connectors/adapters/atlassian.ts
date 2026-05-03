@@ -109,6 +109,21 @@ export const atlassianConnector: MCPConnector = {
     },
   ],
 
+  resolveOptions: async (client, current) => {
+    if (current.cloudId) return current;
+    try {
+      const resources = await client.callTool('getAccessibleAtlassianResources', {});
+      const arr = Array.isArray(resources)
+        ? resources
+        : ((resources as any)?.resources ?? []);
+      const cloudId: string | null = arr[0]?.id ?? null;
+      if (cloudId) return { ...current, cloudId };
+    } catch {
+      // non-fatal — list phase will use the fallback and log its own error
+    }
+    return current;
+  },
+
   discover: async (client, listName, env, opts = {}) => {
     if (listName !== 'projects') return [];
     const cloudId = resolveCloudId(opts, env);
