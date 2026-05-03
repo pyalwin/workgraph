@@ -343,6 +343,46 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_agents_user ON workspace_agents(user_id);
   CREATE INDEX IF NOT EXISTS idx_agents_workspace ON workspace_agents(workspace_id);
 
+  -- Almanac Phase 0: device-code style pair flow.
+  -- /api/agent/pair/start mints (pairing_id, code_hash). The user runs
+  -- "workgraph login" on their laptop, sees a short user code, opens it in
+  -- the web app, and confirms while authed. The agent polls /pair/poll until
+  -- status flips from 'pending' to 'confirmed'; at that point /pair/poll
+  -- returns the agent_id + agent_token to write to the local config.
+  CREATE TABLE IF NOT EXISTS agent_pairings (
+    pairing_id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL,            -- sha256(user_code), never store the code itself
+    user_id TEXT,                       -- filled at confirm time
+    agent_id TEXT,                      -- filled at confirm time, references workspace_agents
+    agent_token_enc TEXT,               -- agent token (encrypted) returned to the agent on next poll
+    status TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'confirmed' | 'consumed' | 'expired'
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_pairings_code ON agent_pairings(code_hash);
+  CREATE INDEX IF NOT EXISTS idx_agent_pairings_status ON agent_pairings(status);
+
+  -- Almanac Phase 0: server-side job queue the local agent drains.
+  -- agent picks up rows where status='queued' AND agent_id matches its id,
+  -- moves them to 'running' on poll, and posts back result/error -> 'done'/'failed'.
+  CREATE TABLE IF NOT EXISTS agent_jobs (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL,                 -- e.g. 'noop', 'almanac.code_events.extract'
+    params TEXT NOT NULL DEFAULT '{}',  -- JSON
+    status TEXT NOT NULL DEFAULT 'queued',  -- 'queued'|'running'|'done'|'failed'|'cancelled'
+    idempotency_key TEXT,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    result TEXT,                        -- JSON
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    completed_at TEXT,
+    UNIQUE(agent_id, idempotency_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_agent_status ON agent_jobs(agent_id, status);
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_status ON agent_jobs(status);
+
   CREATE TABLE IF NOT EXISTS system_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,

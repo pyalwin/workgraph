@@ -319,6 +319,39 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_agents_user ON workspace_agents(user_id);
     CREATE INDEX IF NOT EXISTS idx_agents_workspace ON workspace_agents(workspace_id);
 
+    -- Almanac Phase 0: device-code style pair flow.
+    CREATE TABLE IF NOT EXISTS agent_pairings (
+      pairing_id TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL,
+      user_id TEXT,
+      agent_id TEXT,
+      agent_token_enc TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',  -- 'pending'|'confirmed'|'consumed'|'expired'
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_pairings_code ON agent_pairings(code_hash);
+    CREATE INDEX IF NOT EXISTS idx_agent_pairings_status ON agent_pairings(status);
+
+    -- Almanac Phase 0: server-side job queue the local agent drains.
+    CREATE TABLE IF NOT EXISTS agent_jobs (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      params TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'queued',  -- 'queued'|'running'|'done'|'failed'|'cancelled'
+      idempotency_key TEXT,
+      attempt INTEGER NOT NULL DEFAULT 0,
+      result TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      UNIQUE(agent_id, idempotency_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_jobs_agent_status ON agent_jobs(agent_id, status);
+    CREATE INDEX IF NOT EXISTS idx_agent_jobs_status ON agent_jobs(status);
+
     -- Inngest heartbeat / pulse log. One row per scheduled tick. Trims
     -- itself to the last 1000 rows on each insert to bound disk use.
     CREATE TABLE IF NOT EXISTS system_health (
