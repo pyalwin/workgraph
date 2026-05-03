@@ -1,16 +1,16 @@
 import { InferenceClient } from '@huggingface/inference';
 
 const HF_TOKEN = process.env.HF_TOKEN ?? '';
-const HF_MODEL = process.env.HF_EMBED_MODEL || 'BAAI/bge-small-en-v1.5';
+const HF_MODEL = process.env.HF_EMBED_MODEL || 'BAAI/bge-large-en-v1.5';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-// BAAI/bge-small-en-v1.5 outputs 1024-dim vectors; cap input at ~6000 chars
+// BAAI/bge-large-en-v1.5 outputs 1024-dim vectors; cap input at ~6000 chars
 const MAX_EMBED_CHARS = 6000;
 
 export type EmbeddingModel = string;
 
 export const TEXT_MODEL = HF_MODEL;
-export const TEXT_DIM = 384;
+export const TEXT_DIM = 1024;
 
 let _client: InferenceClient | null = null;
 
