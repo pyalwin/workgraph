@@ -430,6 +430,26 @@ const DDL = `
     last_error TEXT
   );
 
+  -- Almanac Phase 1.5: birth -> rename -> deletion timeline for every path
+  -- that has ever existed in a repo. Without this, evolution narratives are
+  -- blind to deleted/renamed code (which is exactly the interesting cases).
+  -- Populated by the local agent's 'almanac.file-lifecycle.extract' job.
+  CREATE TABLE IF NOT EXISTS file_lifecycle (
+    repo TEXT NOT NULL,
+    path TEXT NOT NULL,                 -- current path (or last path before deletion)
+    first_sha TEXT,
+    first_at TEXT,
+    last_sha TEXT,
+    last_at TEXT,
+    status TEXT NOT NULL,               -- 'extant' | 'deleted'
+    rename_chain TEXT NOT NULL DEFAULT '[]',  -- JSON array of prior paths, oldest -> most-recent
+    churn INTEGER NOT NULL DEFAULT 0,   -- count of code_events that touched this path or any prior name
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (repo, path)
+  );
+  CREATE INDEX IF NOT EXISTS idx_file_lifecycle_status ON file_lifecycle(repo, status);
+  CREATE INDEX IF NOT EXISTS idx_file_lifecycle_last_at ON file_lifecycle(repo, last_at DESC);
+
   CREATE TABLE IF NOT EXISTS system_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,

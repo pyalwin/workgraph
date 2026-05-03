@@ -74,6 +74,10 @@ async function main() {
     '../packages/agent/src/jobs/almanac-code-events-extract'
   );
 
+  // Drop any stale rows from prior failed runs (smoke tests share repo).
+  await db.prepare(`DELETE FROM code_events WHERE repo = ?`).run(SMOKE_REPO);
+  await db.prepare(`DELETE FROM code_events_backfill_state WHERE repo = ?`).run(SMOKE_REPO);
+
   console.log(`[1/5] running extract handler on ${process.cwd()}`);
   const result1 = await almanacCodeEventsExtractHandler({
     workspaceId: SMOKE_WORKSPACE,

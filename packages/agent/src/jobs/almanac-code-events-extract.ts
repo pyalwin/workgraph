@@ -368,8 +368,11 @@ async function streamCommits(
     branch,
     // tab-separated fields; sentinel prefix makes boundary detection reliable
     `--pretty=format:${COMMIT_SENTINEL}%H\t%aI\t%aL\t%aE\t%s\t%b`,
-    "--shortstat",
-    "--name-only",
+    // --numstat gives per-file `add\tdel\tpath` lines. We previously tried
+    // --shortstat --name-only together but git only honors one — name-only
+    // wins, so files_touched filled but additions/deletions stayed 0. With
+    // --numstat we get both: parser sums adds/dels and collects filenames.
+    "--numstat",
   ];
 
   if (sinceIso) {
@@ -424,43 +427,28 @@ async function streamCommits(
 
       const trimmed = rawLine.trim();
 
-      if (current.state === "body") {
-        if (trimmed === "") {
-          // Blank line after body — check whether next non-blank will be stat
-          // or another commit. We don't change state here; rely on shortstat
-          // pattern to transition.
-          return;
-        }
-        // Shortstat line starts with " N file" or "N file"
-        if (/^\s*\d+ files? changed/.test(rawLine)) {
-          const { additions, deletions } = parseShortstat(rawLine);
-          current.additions = additions;
-          current.deletions = deletions;
-          current.seenStat = true;
-          current.state = "files";
-          return;
-        }
-        // Otherwise it's body text — append
-        current.body += (current.body ? "\n" : "") + rawLine;
+      // numstat lines look like: "<add>\t<del>\t<path>" or "-\t-\t<path>" (binary).
+      // They have exactly two tabs and a non-empty path component.
+      const numstatMatch = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(rawLine);
+      if (numstatMatch) {
+        const adds = numstatMatch[1] === "-" ? 0 : parseInt(numstatMatch[1]!, 10);
+        const dels = numstatMatch[2] === "-" ? 0 : parseInt(numstatMatch[2]!, 10);
+        const filePath = numstatMatch[3]!;
+        current.additions += adds;
+        current.deletions += dels;
+        current.files.push(filePath);
+        // First numstat line implicitly closes the body — body text never
+        // starts with a number followed by tab.
         return;
       }
 
-      if (current.state === "files") {
-        if (trimmed === "") {
-          // End of file list for this commit — stay in files state until
-          // next sentinel resets.
-          return;
-        }
-        if (/^\s*\d+ files? changed/.test(rawLine)) {
-          // Rare: stat line appeared after a blank, still the same commit
-          const { additions, deletions } = parseShortstat(rawLine);
-          current.additions = additions;
-          current.deletions = deletions;
-          return;
-        }
-        // A non-blank, non-stat line in "files" state is a filename
-        current.files.push(trimmed);
-      }
+      if (trimmed === "") return;
+
+      // Anything else while we haven't seen numstat yet is body text.
+      // (A numstat line for a file with literal tab-numbers in the body
+      // is essentially impossible because git wraps body text and
+      // wouldn't emit `<num>\t<num>\t<text>`.)
+      current.body += (current.body ? "\n" : "") + rawLine;
     });
 
     rl.on("close", () => {

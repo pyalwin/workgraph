@@ -141,7 +141,47 @@ export const almanacCodeEventsBackfill = inngest.createFunction(
       return inserted;
     });
 
+    // Step 6 — enqueue file-lifecycle jobs (INSERT OR IGNORE — idempotent per repo per day)
+    // Lifecycle's churn read may race code-events on cold start; weekly idempotent re-run reconverges.
+    const lifecycleEnqueued = await step.run('enqueue-lifecycle-jobs', async () => {
+      const db = getLibsqlDb();
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      let inserted = 0;
+
+      for (const repo of repos) {
+        const params = {
+          workspaceId,
+          repo: repo.id,
+          repoPath: null, // Agent resolves repoPath from env or default ~/code/<name> — v1 convention
+          branch: 'main',
+        };
+
+        // Key prefix "almanac-file-lifecycle-" is distinct from "almanac-code-events-"
+        // so both jobs can be enqueued on the same day without colliding.
+        const idempotencyKey = `almanac-file-lifecycle-${repo.id}-${today}`;
+
+        const result = await db
+          .prepare(
+            `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
+             VALUES (?, ?, ?, ?, 'queued', ?, datetime('now'))`,
+          )
+          .run(uuidv4(), agentId, 'almanac.file-lifecycle.extract', JSON.stringify(params), idempotencyKey);
+
+        if (result.changes > 0) inserted++;
+      }
+
+      return inserted;
+    });
+
     const skippedExisting = repos.length - enqueued;
-    return { ok: true, repos: repos.length, enqueued, skipped_existing: skippedExisting };
+    const lifecycleSkippedExisting = repos.length - lifecycleEnqueued;
+    return {
+      ok: true,
+      repos: repos.length,
+      code_events_enqueued: enqueued,
+      code_events_skipped_existing: skippedExisting,
+      lifecycle_enqueued: lifecycleEnqueued,
+      lifecycle_skipped_existing: lifecycleSkippedExisting,
+    };
   },
 );

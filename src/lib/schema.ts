@@ -391,6 +391,23 @@ export function initSchema() {
       last_error TEXT
     );
 
+    -- Almanac Phase 1.5: per-path lifecycle (birth -> renames -> deletion).
+    CREATE TABLE IF NOT EXISTS file_lifecycle (
+      repo TEXT NOT NULL,
+      path TEXT NOT NULL,
+      first_sha TEXT,
+      first_at TEXT,
+      last_sha TEXT,
+      last_at TEXT,
+      status TEXT NOT NULL,
+      rename_chain TEXT NOT NULL DEFAULT '[]',
+      churn INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (repo, path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_file_lifecycle_status ON file_lifecycle(repo, status);
+    CREATE INDEX IF NOT EXISTS idx_file_lifecycle_last_at ON file_lifecycle(repo, last_at DESC);
+
     -- Inngest heartbeat / pulse log. One row per scheduled tick. Trims
     -- itself to the last 1000 rows on each insert to bound disk use.
     CREATE TABLE IF NOT EXISTS system_health (
