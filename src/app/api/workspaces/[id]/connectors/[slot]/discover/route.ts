@@ -51,6 +51,17 @@ export async function POST(
     }
     const client = await connectMCP(server);
 
+    const discoverOptions = { ...(cfg.config.options ?? {}) };
+    if (cfg.source === 'github' && (discoverOptions as any).oauth === true) {
+      const { ensureFreshAccessToken } = await import('@/lib/oauth/refresh');
+      const token = await ensureFreshAccessToken(workspaceId, cfg.source);
+      if (token?.accessToken) {
+        // Server-only hint consumed by the GitHub adapter. It is never
+        // persisted back into connector config.
+        (discoverOptions as any).__oauthAccessToken = token.accessToken;
+      }
+    }
+
     let discovered;
     try {
       // Pass saved options so adapters that need user-provided context
@@ -59,7 +70,7 @@ export async function POST(
         client,
         target,
         process.env,
-        cfg.config.options ?? {},
+        discoverOptions,
       );
     } finally {
       await client.close();
