@@ -141,7 +141,7 @@ export async function resolveServerConfig(
     }
     if (cfg) {
       const usesOAuth = (cfg.config.options as any)?.oauth === true;
-      console.error(`[resolveServerConfig] ${workspaceId}/${source} found: oauth=${usesOAuth} transport=${cfg.transport} url=${cfg.config.url || '(none)'}`);
+      console.log(`[resolveServerConfig] ${workspaceId}/${source} found: oauth=${usesOAuth} transport=${cfg.transport} url=${cfg.config.url || '(none)'}`);
       if (usesOAuth) {
         try {
           const token = await ensureFreshAccessToken(workspaceId, source);
@@ -166,7 +166,7 @@ export async function resolveServerConfig(
               if (source === 'slack' && (meta as any).slack_team_id) {
                 tokenEnv['SLACK_TEAM_ID'] = String((meta as any).slack_team_id);
               }
-              console.error(`[resolveServerConfig] ${workspaceId}/${source} stdio OAuth: injecting ${envVar} (len=${token.accessToken.length})${tokenEnv.SLACK_TEAM_ID ? ' + SLACK_TEAM_ID' : ''}`);
+              console.log(`[resolveServerConfig] ${workspaceId}/${source} stdio OAuth: injecting ${envVar} (len=${token.accessToken.length})${tokenEnv.SLACK_TEAM_ID ? ' + SLACK_TEAM_ID' : ''}`);
               return {
                 id: cfg.serverId,
                 label: cfg.serverId,
@@ -180,7 +180,7 @@ export async function resolveServerConfig(
             }
             // HTTP OAuth: bearer token in Authorization header.
             const url = cfg.config.url || '';
-            console.error(`[resolveServerConfig] ${workspaceId}/${source} attaching OAuth bearer (token len=${token.accessToken.length}) to ${url}`);
+            console.log(`[resolveServerConfig] ${workspaceId}/${source} attaching OAuth bearer (token len=${token.accessToken.length}) to ${url}`);
             // Always normalize the scheme to canonical "Bearer" — RFC 6750
             // technically allows case-insensitive schemes but real-world
             // resource servers (Atlassian's MCP, others) reject the lowercase
