@@ -109,9 +109,9 @@ export const atlassianConnector: MCPConnector = {
     },
   ],
 
-  discover: async (client, listName, env) => {
+  discover: async (client, listName, env, opts = {}) => {
     if (listName !== 'projects') return [];
-    const cloudId = env.MCP_ATLASSIAN_CLOUD_ID || 'example.atlassian.net';
+    const cloudId = resolveCloudId(opts, env);
 
     // Atlassian project search returns { values, total, isLast, startAt, maxResults }.
     // Page through every batch — Atlassian caps maxResults at 50.
