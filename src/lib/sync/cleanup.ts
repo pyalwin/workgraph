@@ -87,117 +87,106 @@ export async function cleanupSourceData(source: string): Promise<CleanupResult> 
     return Boolean(r);
   };
 
-  const ids = await db
-    .prepare('SELECT id FROM work_items WHERE source = ?')
-    .all<{ id: string }>(source);
-  if (ids.length === 0) return result;
+  // Disable FK constraints so deletes don't cascade-order-depend on FK graph
+  await db.exec('PRAGMA foreign_keys = OFF');
 
-  const idList = ids.map((r) => r.id);
-  const chunks: string[][] = [];
-  for (let i = 0; i < idList.length; i += 500) chunks.push(idList.slice(i, i + 500));
+  try {
+    const ids = await db
+      .prepare('SELECT id FROM work_items WHERE source = ?')
+      .all<{ id: string }>(source);
+    if (ids.length === 0) { await db.exec('PRAGMA foreign_keys = ON'); return result; }
 
-  // Step 1: collect derived IDs (chunks and links).
-  const chunkIds: number[] = [];
-  const linkIds: string[] = [];
-  if (await tableExists('item_chunks')) {
-    for (const chunk of chunks) {
-      const placeholders = chunk.map(() => '?').join(',');
-      const rows = await db
-        .prepare(`SELECT id FROM item_chunks WHERE item_id IN (${placeholders})`)
-        .all<{ id: number }>(...chunk);
-      for (const r of rows) chunkIds.push(r.id);
-    }
-  }
-  if (await tableExists('links')) {
-    for (const chunk of chunks) {
-      const placeholders = chunk.map(() => '?').join(',');
-      const rows = await db
-        .prepare(
-          `SELECT id FROM links WHERE source_item_id IN (${placeholders}) OR target_item_id IN (${placeholders})`,
-        )
-        .all<{ id: string }>(...chunk, ...chunk);
-      for (const r of rows) linkIds.push(r.id);
-    }
-  }
+    const idList = ids.map((r) => r.id);
+    const chunks: string[][] = [];
+    for (let i = 0; i < idList.length; i += 500) chunks.push(idList.slice(i, i + 500));
 
-  // Step 2: delete the join table that references chunks/links.
-  if ((await tableExists('item_links_chunks')) && (chunkIds.length || linkIds.length)) {
-    const splitter = <T>(arr: T[]): T[][] => {
-      const out: T[][] = [];
-      for (let i = 0; i < arr.length; i += 500) out.push(arr.slice(i, i + 500));
-      return out;
-    };
-    for (const c of splitter(chunkIds)) {
-      const ph = c.map(() => '?').join(',');
-      await db
-        .prepare(
-          `DELETE FROM item_links_chunks WHERE source_chunk_id IN (${ph}) OR target_chunk_id IN (${ph})`,
-        )
-        .run(...c, ...c);
-    }
-    for (const c of splitter(linkIds)) {
-      const ph = c.map(() => '?').join(',');
-      await db.prepare(`DELETE FROM item_links_chunks WHERE link_id IN (${ph})`).run(...c);
-    }
-  }
-
-  // Step 3: delete tables that reference work_items directly.
-  const childDeletes: Array<{ table: string; counter: keyof CleanupResult }> = [
-    { table: 'work_item_versions', counter: 'versionsDeleted' },
-    { table: 'item_tags', counter: 'tagsDeleted' },
-    { table: 'item_chunks', counter: 'chunksDeleted' },
-    { table: 'workstream_items', counter: 'workstreamItemsDeleted' },
-    { table: 'decision_items', counter: 'decisionItemsDeleted' },
-    { table: 'entity_mentions', counter: 'entityMentionsDeleted' },
-    { table: 'orphan_pr_candidates', counter: 'itemsDeleted' },
-    { table: 'issue_trails', counter: 'itemsDeleted' },
-    { table: 'chunk_embeddings_meta', counter: 'chunksDeleted' },
-  ];
-  for (const { table, counter } of childDeletes) {
-    if (!(await tableExists(table))) continue;
-    for (const chunk of chunks) {
-      const placeholders = chunk.map(() => '?').join(',');
-      let sql: string;
-      if (table === 'orphan_pr_candidates') {
-        sql = `DELETE FROM ${table} WHERE candidate_item_id IN (${placeholders})`;
-      } else if (table === 'issue_trails') {
-        sql = `DELETE FROM ${table} WHERE issue_item_id IN (${placeholders})`;
-      } else {
-        sql = `DELETE FROM ${table} WHERE item_id IN (${placeholders})`;
+    // Collect derived IDs for cleanup
+    const chunkIds: number[] = [];
+    const linkIds: string[] = [];
+    if (await tableExists('item_chunks')) {
+      for (const chunk of chunks) {
+        const placeholders = chunk.map(() => '?').join(',');
+        const rows = await db
+          .prepare(`SELECT id FROM item_chunks WHERE item_id IN (${placeholders})`)
+          .all<{ id: number }>(...chunk);
+        for (const r of rows) chunkIds.push(r.id);
       }
-      const r = await db.prepare(sql).run(...chunk);
-      (result[counter] as number) += r.changes;
     }
+    if (await tableExists('links')) {
+      for (const chunk of chunks) {
+        const placeholders = chunk.map(() => '?').join(',');
+        const rows = await db
+          .prepare(
+            `SELECT id FROM links WHERE source_item_id IN (${placeholders}) OR target_item_id IN (${placeholders})`,
+          )
+          .all<{ id: string }>(...chunk, ...chunk);
+        for (const r of rows) linkIds.push(r.id);
+      }
+    }
+
+    // Delete join table referencing chunks/links
+    if ((await tableExists('item_links_chunks')) && (chunkIds.length || linkIds.length)) {
+      const splitter = <T>(arr: T[]): T[][] => {
+        const out: T[][] = [];
+        for (let i = 0; i < arr.length; i += 500) out.push(arr.slice(i, i + 500));
+        return out;
+      };
+      for (const c of splitter(chunkIds)) {
+        const ph = c.map(() => '?').join(',');
+        await db
+          .prepare(
+            `DELETE FROM item_links_chunks WHERE source_chunk_id IN (${ph}) OR target_chunk_id IN (${ph})`,
+          )
+          .run(...c, ...c);
+      }
+      for (const c of splitter(linkIds)) {
+        const ph = c.map(() => '?').join(',');
+        await db.prepare(`DELETE FROM item_links_chunks WHERE link_id IN (${ph})`).run(...c);
+      }
+    }
+
+    // Delete all child tables
+    const childTables = [
+      'work_item_versions', 'item_tags', 'item_chunks', 'workstream_items',
+      'decision_items', 'entity_mentions', 'orphan_pr_candidates', 'issue_trails',
+      'chunk_embeddings_meta', 'links', 'anomalies', 'ai_task_backends',
+      'chat_messages', 'chat_threads', 'goals', 'metrics_snapshots',
+      'schema_migrations', 'sync_log', 'tags', 'decisions',
+    ];
+    for (const table of childTables) {
+      if (!(await tableExists(table))) continue;
+      for (const chunk of chunks) {
+        const placeholders = chunk.map(() => '?').join(',');
+        let sql = `DELETE FROM ${table} WHERE item_id IN (${placeholders})`;
+        if (table === 'orphan_pr_candidates') sql = `DELETE FROM ${table} WHERE candidate_item_id IN (${placeholders})`;
+        else if (table === 'issue_trails') sql = `DELETE FROM ${table} WHERE issue_item_id IN (${placeholders})`;
+        const r = await db.prepare(sql).run(...chunk);
+        if (table === 'item_chunks') result.chunksDeleted += r.changes;
+      }
+    }
+
+    // Delete chunk_vectors directly (FK via chunk_id → item_chunks.id)
+    if (await tableExists('chunk_vectors') && chunkIds.length > 0) {
+      for (const c of chunkIds) {
+        await db.prepare('DELETE FROM chunk_vectors WHERE chunk_id = ?').run(c);
+      }
+    }
+
+    // Finally delete work_items
+    const r = await db.prepare('DELETE FROM work_items WHERE source = ?').run(source);
+    result.itemsDeleted = r.changes;
+  } finally {
+    await db.exec('PRAGMA foreign_keys = ON');
   }
 
-  // Step 4: links (two FK columns).
-  if (await tableExists('links')) {
-    for (const chunk of chunks) {
-      const placeholders = chunk.map(() => '?').join(',');
-      const r = await db
-        .prepare(
-          `DELETE FROM links WHERE source_item_id IN (${placeholders}) OR target_item_id IN (${placeholders})`,
-        )
-        .run(...chunk, ...chunk);
-      result.linksDeleted += r.changes;
-    }
-  }
-
-  // Step 5: work_items themselves.
-  const r = await db.prepare('DELETE FROM work_items WHERE source = ?').run(source);
-  result.itemsDeleted = r.changes;
-
-  // Step 6: clear cached last-sync counters.
+  // Clear sync stats
   if (await tableExists('workspace_connector_configs')) {
     await db
       .prepare(
         `UPDATE workspace_connector_configs
-         SET last_sync_items = 0,
-             last_sync_completed_at = NULL,
-             last_sync_started_at = NULL,
-             last_sync_status = NULL,
-             last_sync_error = NULL,
-             last_sync_log = NULL,
+         SET last_sync_items = 0, last_sync_completed_at = NULL,
+             last_sync_started_at = NULL, last_sync_status = NULL,
+             last_sync_error = NULL, last_sync_log = NULL,
              updated_at = datetime('now')
          WHERE source = ?`,
       )
