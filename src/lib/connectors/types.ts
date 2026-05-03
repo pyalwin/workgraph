@@ -145,6 +145,17 @@ export interface MCPConnector {
     env: NodeJS.ProcessEnv,
     options?: Record<string, unknown>,
   ) => Promise<DiscoveryOption[]>;
+
+  // Optional: called once before the list phase to resolve any options that
+  // can only be determined at runtime (e.g. Atlassian cloudId discovery via
+  // getAccessibleAtlassianResources). Returns a (possibly enriched) copy of
+  // current options. Connectors that implement this should be idempotent —
+  // skip discovery when the required value is already present.
+  resolveOptions?: (
+    client: MCPClient,
+    current: Record<string, unknown>,
+    env: NodeJS.ProcessEnv,
+  ) => Promise<Record<string, unknown>>;
 }
 
 export type MCPTransport =
