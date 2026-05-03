@@ -607,6 +607,23 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_orphan_pr_candidates_open
       ON orphan_pr_candidates(pr_ref) WHERE dismissed_at IS NULL;
 
+    -- Almanac Phase 3: ticket-first matcher candidates (inverse of orphan_pr).
+    CREATE TABLE IF NOT EXISTS orphan_ticket_candidates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issue_item_id TEXT NOT NULL REFERENCES work_items(id),
+      evidence_kind TEXT NOT NULL,
+      tier_reached TEXT NOT NULL,
+      candidate_ref TEXT NOT NULL,
+      score REAL NOT NULL,
+      signals TEXT NOT NULL DEFAULT '{}',
+      computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      dismissed_at TEXT,
+      accepted_at TEXT,
+      UNIQUE(issue_item_id, candidate_ref)
+    );
+    CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_issue ON orphan_ticket_candidates(issue_item_id);
+    CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_open ON orphan_ticket_candidates(issue_item_id, dismissed_at, accepted_at);
+
     -- AI-extracted decisions surfaced from PR review threads. Distinct from
     -- the existing decisions table (which has UNIQUE(item_id) — one per
     -- ticket). One Jira ticket can produce N decisions across its review

@@ -8,6 +8,7 @@ import { Markdown } from '@/components/chat/prompt-kit/markdown';
 import { ItemDetailDrawer } from '@/components/items/item-detail-drawer';
 import { AnomalyActionPanel } from '@/components/anomalies/anomaly-action-panel';
 import { OrphanPrReviewModal } from '@/components/anomalies/orphan-pr-review-modal';
+import { OrphanTicketsSection } from '@/components/projects/orphan-tickets-section';
 
 type Tab = 'overview' | 'goals' | 'actions' | 'activity';
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -340,6 +341,9 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
           )}
         </div>
       </section>
+
+      {/* ───── Orphan-ticket code matcher ───── */}
+      <OrphanTicketsSection projectKey={projectKey} />
 
       {/* ───── Anomalies (only when present) ───── */}
       {anomalyCount > 0 && (

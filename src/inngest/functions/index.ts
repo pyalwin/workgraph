@@ -15,12 +15,14 @@ import { chunkEmbedRun } from './chunk-embed';
 import { almanacCodeEventsBackfill } from './almanac-code-events-backfill';
 import { almanacNoiseClassify } from './almanac-noise-classify';
 import { almanacDetectModulesAndUnits } from './almanac-detect-modules-and-units';
+import { almanacTicketsMatch } from './almanac-tickets-match';
 
 export const functions = [
   heartbeat,
   almanacCodeEventsBackfill,
   almanacNoiseClassify,
   almanacDetectModulesAndUnits,
+  almanacTicketsMatch,
   jiraSyncTick,
   jiraSyncWorkspace,
   connectorSyncWorkspace,

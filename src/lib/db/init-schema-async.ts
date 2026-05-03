@@ -643,6 +643,26 @@ const DDL = `
   );
   CREATE INDEX IF NOT EXISTS idx_orphan_pr_candidates_ref ON orphan_pr_candidates(pr_ref);
 
+  -- Almanac Phase 3: inverse of orphan_pr_candidates. For Jira tickets
+  -- without an issue_trails row, the ticket-first matcher proposes code
+  -- evidence (PR/branch/commit). Tier A (PR) auto-attaches at >= 0.75;
+  -- Tier B (branch) and Tier C (commit) always queue for human review.
+  CREATE TABLE IF NOT EXISTS orphan_ticket_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_item_id TEXT NOT NULL REFERENCES work_items(id),
+    evidence_kind TEXT NOT NULL,                 -- 'pr' | 'branch' | 'commit'
+    tier_reached TEXT NOT NULL,                  -- 'A' | 'B' | 'C'
+    candidate_ref TEXT NOT NULL,                 -- e.g. 'owner/repo#123' or 'owner/repo@sha'
+    score REAL NOT NULL,
+    signals TEXT NOT NULL DEFAULT '{}',          -- JSON: which evidence contributed
+    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    dismissed_at TEXT,
+    accepted_at TEXT,
+    UNIQUE(issue_item_id, candidate_ref)
+  );
+  CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_issue ON orphan_ticket_candidates(issue_item_id);
+  CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_open ON orphan_ticket_candidates(issue_item_id, dismissed_at, accepted_at);
+
   CREATE TABLE IF NOT EXISTS issue_decisions (
     id TEXT PRIMARY KEY,
     issue_item_id TEXT NOT NULL REFERENCES work_items(id),
