@@ -149,14 +149,23 @@ export async function cleanupSourceData(source: string): Promise<CleanupResult> 
     { table: 'workstream_items', counter: 'workstreamItemsDeleted' },
     { table: 'decision_items', counter: 'decisionItemsDeleted' },
     { table: 'entity_mentions', counter: 'entityMentionsDeleted' },
+    { table: 'orphan_pr_candidates', counter: 'itemsDeleted' },
+    { table: 'issue_trails', counter: 'itemsDeleted' },
+    { table: 'chunk_embeddings_meta', counter: 'chunksDeleted' },
   ];
   for (const { table, counter } of childDeletes) {
     if (!(await tableExists(table))) continue;
     for (const chunk of chunks) {
       const placeholders = chunk.map(() => '?').join(',');
-      const r = await db
-        .prepare(`DELETE FROM ${table} WHERE item_id IN (${placeholders})`)
-        .run(...chunk);
+      let sql: string;
+      if (table === 'orphan_pr_candidates') {
+        sql = `DELETE FROM ${table} WHERE candidate_item_id IN (${placeholders})`;
+      } else if (table === 'issue_trails') {
+        sql = `DELETE FROM ${table} WHERE issue_item_id IN (${placeholders})`;
+      } else {
+        sql = `DELETE FROM ${table} WHERE item_id IN (${placeholders})`;
+      }
+      const r = await db.prepare(sql).run(...chunk);
       (result[counter] as number) += r.changes;
     }
   }
