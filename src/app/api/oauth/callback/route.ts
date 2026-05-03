@@ -207,7 +207,12 @@ export async function GET(req: Request) {
       : {
           url: provider.mcpServerUrl,
           // No token in args/url — runtime fetches from oauth_tokens table.
-          options: { ...(existing?.config.options || {}), oauth: true },
+          options: {
+            ...(existing?.config.options || {}),
+            oauth: true,
+            // Persist Atlassian cloud identifier so discover() can scope requests.
+            ...(metadata.primary_cloud_id ? { cloudId: metadata.primary_cloud_id } : {}),
+          },
         },
     status: 'configured',
   });
