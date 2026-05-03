@@ -57,7 +57,8 @@ const TICKET_NO_PR_MIN_COUNT = 5;
 // signal that either the matcher is misfiring or the repo isn't using Jira
 // keys in PR titles/branches.
 const ORPHAN_PR_MIN_BATCH = 5;
-const ORPHAN_PR_MIN_AGE_DAYS = 7; // give the AI matcher a week to attach
+// give the AI matcher a week to attach in production; 0 for dev so orphan batches surface immediately
+const ORPHAN_PR_MIN_AGE_DAYS = parseInt(process.env.ORPHAN_PR_MIN_AGE_DAYS ?? '0', 10);
 
 async function listEnabledWorkspaces(): Promise<string[]> {
   await ensureInit();
