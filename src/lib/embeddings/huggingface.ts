@@ -1,44 +1,58 @@
-import { featureExtraction } from '@huggingface/inference';
-
 const HF_TOKEN = process.env.HF_TOKEN;
-const HF_MODEL = process.env.HF_EMBED_MODEL || 'Octen/Octen-Embedding-0.6B';
-const HF_PROVIDER = process.env.HF_EMBED_PROVIDER; // optional, defaults to auto
+const HF_MODEL = process.env.HF_EMBED_MODEL || 'sentence-transformers/all-MiniLM-L6-v2';
+const HF_ROUTER_URL = 'https://router.huggingface.co/hf-inference';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-// Octen-Embedding-0.6B outputs 768-dim vectors; cap input at ~6000 chars
-// (≈ 1500 tokens) to stay well within context limits
+// all-MiniLM-L6-v2 outputs 384-dim vectors; cap input at ~6000 chars
 const MAX_EMBED_CHARS = 6000;
 
-export type EmbeddingModel = string; // HF model ID
+export type EmbeddingModel = string;
 
 export const TEXT_MODEL = HF_MODEL;
-export const TEXT_DIM = 768;
+export const TEXT_DIM = 384;
+
+function makeUrl(model: string): string {
+  const encodedModel = encodeURIComponent(model);
+  return `${HF_ROUTER_URL}/v1/models/${encodedModel}/pipeline/feature-extraction`;
+}
 
 export async function embed(text: string, _model: EmbeddingModel = TEXT_MODEL): Promise<number[]> {
+  if (!HF_TOKEN) throw new Error('HF_TOKEN environment variable is not set');
   const input = text.length > MAX_EMBED_CHARS ? text.slice(0, MAX_EMBED_CHARS) : text;
+  const url = makeUrl(HF_MODEL);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  let response: Response;
   try {
-    if (!HF_TOKEN) throw new Error('HF_TOKEN environment variable is not set');
-    const result = await featureExtraction({
-      model: HF_MODEL,
-      inputs: input,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    provider: (HF_PROVIDER ?? 'auto') as any,
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${HF_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ inputs: input }),
+      signal: controller.signal,
     });
-    // result is number[][] — single string input returns number[][]
-    // extract the first embedding
-    if (!Array.isArray(result) || result.length === 0) {
-      throw new Error(`HF embed returned no embedding for model ${HF_MODEL}`);
-    }
-    const embedding = Array.isArray(result[0]) ? result[0] : result;
-    if (!Array.isArray(embedding) || embedding.length === 0) {
-      throw new Error(`HF embed returned empty embedding for model ${HF_MODEL}`);
-    }
-    return embedding as number[];
   } finally {
     clearTimeout(timer);
   }
+  if (!response.ok) {
+    const contentType = response.headers.get('Content-Type') ?? '';
+    let errDetail = '';
+    if (contentType.includes('application/json')) {
+      try {
+        const body = await response.json();
+        errDetail = body.error ?? body.detail ?? JSON.stringify(body);
+      } catch { /* ignore */ }
+    }
+    throw new Error(`HF embed HTTP ${response.status}: ${errDetail || response.statusText}`);
+  }
+  const json = await response.json() as number[] | number[][];
+  // feature-extraction returns number[][] (batch) even for single input
+  if (!Array.isArray(json) || json.length === 0) {
+    throw new Error(`HF embed returned no embedding for model ${HF_MODEL}`);
+  }
+  return Array.isArray(json[0]) ? (json[0] as number[]) : (json as number[]);
 }
 
 export async function embedWithRetry(text: string, model: EmbeddingModel = TEXT_MODEL, attempts = 3): Promise<number[]> {
