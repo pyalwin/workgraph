@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { verifyAgentRequest } from '@/lib/agent-auth';
+import { classifyMechanical } from '@/lib/almanac/noise-classifier';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,11 +86,18 @@ export async function POST(req: Request) {
   if (events.length > 0) {
     // libsql supports multi-row positional inserts — batch in one statement
     const placeholders = events
-      .map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(\'now\'))')
       .join(', ');
 
     const args: (string | number | null)[] = [];
     for (const e of events) {
+      const { noise_class, is_feature_evolution } = classifyMechanical({
+        message: e.message ?? '',
+        files: e.files_touched ?? [],
+        additions: e.additions ?? 0,
+        deletions: e.deletions ?? 0,
+      });
+
       args.push(
         e.id,
         e.workspace_id,
@@ -104,6 +112,9 @@ export async function POST(req: Request) {
         JSON.stringify(e.files_touched),
         e.additions ?? 0,
         e.deletions ?? 0,
+        noise_class,
+        is_feature_evolution,
+        // classifier_run_at is inlined as datetime('now') in the placeholder
       );
     }
 
@@ -112,7 +123,8 @@ export async function POST(req: Request) {
         `INSERT OR IGNORE INTO code_events
            (id, workspace_id, repo, sha, pr_number, kind,
             author_login, author_email, occurred_at, message,
-            files_touched, additions, deletions)
+            files_touched, additions, deletions,
+            noise_class, is_feature_evolution, classifier_run_at)
          VALUES ${placeholders}`,
       )
       .run(...args);

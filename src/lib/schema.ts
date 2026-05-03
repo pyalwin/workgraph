@@ -370,6 +370,12 @@ export function initSchema() {
       module_id TEXT,
       functional_unit_id TEXT,
       classified_as TEXT,
+      noise_class TEXT,
+      intent TEXT,
+      architectural_significance TEXT,
+      is_feature_evolution INTEGER NOT NULL DEFAULT 0,
+      evolution_override INTEGER,
+      classifier_run_at TEXT,
       ticket_link_status TEXT NOT NULL DEFAULT 'unlinked',
       linked_item_id TEXT,
       link_confidence REAL,
@@ -380,6 +386,8 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_code_events_workspace ON code_events(workspace_id);
     CREATE INDEX IF NOT EXISTS idx_code_events_repo_occurred ON code_events(repo, occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_code_events_pr ON code_events(pr_number);
+    CREATE INDEX IF NOT EXISTS idx_code_events_noise ON code_events(repo, noise_class);
+    CREATE INDEX IF NOT EXISTS idx_code_events_signal ON code_events(repo, is_feature_evolution);
 
     CREATE TABLE IF NOT EXISTS code_events_backfill_state (
       repo TEXT PRIMARY KEY,

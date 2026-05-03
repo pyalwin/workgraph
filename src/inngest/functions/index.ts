@@ -13,10 +13,12 @@ import { projectOkrsRefresh } from './project-okrs';
 import { githubTrailsRefreshWorkspace, issuePrSummaryRefresh, unmatchedPrAiMatcher } from './github-trails';
 import { chunkEmbedRun } from './chunk-embed';
 import { almanacCodeEventsBackfill } from './almanac-code-events-backfill';
+import { almanacNoiseClassify } from './almanac-noise-classify';
 
 export const functions = [
   heartbeat,
   almanacCodeEventsBackfill,
+  almanacNoiseClassify,
   jiraSyncTick,
   jiraSyncWorkspace,
   connectorSyncWorkspace,

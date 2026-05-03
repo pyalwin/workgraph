@@ -404,7 +404,14 @@ const DDL = `
     deletions INTEGER NOT NULL DEFAULT 0,
     module_id TEXT,                     -- nullable until Phase 2
     functional_unit_id TEXT,            -- nullable until Phase 2
-    classified_as TEXT,                 -- nullable until Phase 1.6 noise classifier
+    classified_as TEXT,                 -- (kept for now; Phase 1.6 added richer fields below)
+    -- Phase 1.6 noise classifier columns
+    noise_class TEXT,                   -- 'dependency_bump'|'tooling'|'docs_only'|'test_only'|'ci_only'|'tiny_change'|'revert'|'signal'
+    intent TEXT,                        -- 'introduce'|'extend'|'refactor'|'fix'|'revert'|'mixed'
+    architectural_significance TEXT,    -- 'low'|'medium'|'high'
+    is_feature_evolution INTEGER NOT NULL DEFAULT 0,  -- gate to dossier
+    evolution_override INTEGER,         -- nullable: human-set 1=force-include, 0=force-exclude (never overwritten by classifier)
+    classifier_run_at TEXT,
     ticket_link_status TEXT NOT NULL DEFAULT 'unlinked',
     linked_item_id TEXT,
     link_confidence REAL,
@@ -415,6 +422,9 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_code_events_workspace ON code_events(workspace_id);
   CREATE INDEX IF NOT EXISTS idx_code_events_repo_occurred ON code_events(repo, occurred_at DESC);
   CREATE INDEX IF NOT EXISTS idx_code_events_pr ON code_events(pr_number);
+  -- noise/signal indexes are created in the Phase 1.6 migration after ALTER TABLE
+  -- adds the columns; for fresh installs the columns exist on the CREATE TABLE
+  -- above and the migration is a no-op except for the index creation.
 
   -- Per-repo backfill state — last_sha is the resume cursor for incremental
   -- re-runs. Re-running the extract is idempotent (INSERT OR IGNORE on
@@ -652,11 +662,57 @@ const DDL = `
   );
 `;
 
+/**
+ * Sentinel-keyed migrations for libSQL. Each entry is a one-shot ALTER
+ * statement (or set of them) keyed by an id; we record the id in
+ * `schema_migrations` after running so re-runs skip. Idempotent.
+ *
+ * Use this for ALTER TABLE ADD COLUMN — SQLite's CREATE TABLE IF NOT
+ * EXISTS doesn't add columns to existing tables.
+ */
+const MIGRATIONS: { id: string; statements: string[] }[] = [
+  {
+    id: 'almanac_phase_1_6_code_events_classifier_columns',
+    statements: [
+      `ALTER TABLE code_events ADD COLUMN noise_class TEXT`,
+      `ALTER TABLE code_events ADD COLUMN intent TEXT`,
+      `ALTER TABLE code_events ADD COLUMN architectural_significance TEXT`,
+      `ALTER TABLE code_events ADD COLUMN is_feature_evolution INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE code_events ADD COLUMN evolution_override INTEGER`,
+      `ALTER TABLE code_events ADD COLUMN classifier_run_at TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_code_events_noise ON code_events(repo, noise_class)`,
+      `CREATE INDEX IF NOT EXISTS idx_code_events_signal ON code_events(repo, is_feature_evolution)`,
+    ],
+  },
+];
+
+async function runMigrations(): Promise<void> {
+  const db = getLibsqlDb();
+  for (const m of MIGRATIONS) {
+    const seen = await db
+      .prepare(`SELECT 1 as ok FROM schema_migrations WHERE id = ?`)
+      .get<{ ok: number }>(m.id);
+    if (seen) continue;
+    for (const stmt of m.statements) {
+      try {
+        await db.exec(stmt);
+      } catch (err) {
+        // Tolerate "duplicate column" if a previous partial run added some
+        // columns — the sentinel only records once everything succeeded.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/duplicate column/i.test(msg)) throw err;
+      }
+    }
+    await db.prepare(`INSERT OR IGNORE INTO schema_migrations (id) VALUES (?)`).run(m.id);
+  }
+}
+
 export async function ensureSchemaAsync(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
     const db = getLibsqlDb();
     await db.exec(DDL);
+    await runMigrations();
   })();
   return _initPromise;
 }
