@@ -383,6 +383,53 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_agent_status ON agent_jobs(agent_id, status);
   CREATE INDEX IF NOT EXISTS idx_agent_jobs_status ON agent_jobs(status);
 
+  -- Almanac Phase 1: one row per merged PR + direct-to-main commit per repo.
+  -- Populated by the local agent's 'almanac.code-events.extract' job; this is
+  -- the substrate the rest of the Almanac pipeline (lifecycle, clustering,
+  -- narrative) operates on. Many fields are nullable on extract and filled in
+  -- later phases (module_id, functional_unit_id, classified_as).
+  CREATE TABLE IF NOT EXISTS code_events (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    repo TEXT NOT NULL,                 -- "owner/name"
+    sha TEXT NOT NULL,
+    pr_number INTEGER,
+    kind TEXT NOT NULL,                 -- 'pr_merged' | 'direct_commit' | 'release'
+    author_login TEXT,
+    author_email TEXT,
+    occurred_at TEXT NOT NULL,
+    message TEXT,
+    files_touched TEXT NOT NULL DEFAULT '[]',  -- JSON array of paths (signal-only, skip patterns applied)
+    additions INTEGER NOT NULL DEFAULT 0,
+    deletions INTEGER NOT NULL DEFAULT 0,
+    module_id TEXT,                     -- nullable until Phase 2
+    functional_unit_id TEXT,            -- nullable until Phase 2
+    classified_as TEXT,                 -- nullable until Phase 1.6 noise classifier
+    ticket_link_status TEXT NOT NULL DEFAULT 'unlinked',
+    linked_item_id TEXT,
+    link_confidence REAL,
+    link_evidence TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(repo, sha)
+  );
+  CREATE INDEX IF NOT EXISTS idx_code_events_workspace ON code_events(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_code_events_repo_occurred ON code_events(repo, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_code_events_pr ON code_events(pr_number);
+
+  -- Per-repo backfill state — last_sha is the resume cursor for incremental
+  -- re-runs. Re-running the extract is idempotent (INSERT OR IGNORE on
+  -- (repo, sha)) but the state row lets us short-circuit at the cursor
+  -- instead of streaming the full history every week.
+  CREATE TABLE IF NOT EXISTS code_events_backfill_state (
+    repo TEXT PRIMARY KEY,
+    last_sha TEXT,
+    last_occurred_at TEXT,
+    total_events INTEGER NOT NULL DEFAULT 0,
+    last_run_at TEXT,
+    last_status TEXT,                   -- 'ok' | 'error' | 'partial'
+    last_error TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS system_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,

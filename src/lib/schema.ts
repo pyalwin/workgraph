@@ -352,6 +352,45 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_agent_jobs_agent_status ON agent_jobs(agent_id, status);
     CREATE INDEX IF NOT EXISTS idx_agent_jobs_status ON agent_jobs(status);
 
+    -- Almanac Phase 1: code_events extracted from git by the local agent.
+    CREATE TABLE IF NOT EXISTS code_events (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      sha TEXT NOT NULL,
+      pr_number INTEGER,
+      kind TEXT NOT NULL,
+      author_login TEXT,
+      author_email TEXT,
+      occurred_at TEXT NOT NULL,
+      message TEXT,
+      files_touched TEXT NOT NULL DEFAULT '[]',
+      additions INTEGER NOT NULL DEFAULT 0,
+      deletions INTEGER NOT NULL DEFAULT 0,
+      module_id TEXT,
+      functional_unit_id TEXT,
+      classified_as TEXT,
+      ticket_link_status TEXT NOT NULL DEFAULT 'unlinked',
+      linked_item_id TEXT,
+      link_confidence REAL,
+      link_evidence TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(repo, sha)
+    );
+    CREATE INDEX IF NOT EXISTS idx_code_events_workspace ON code_events(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_code_events_repo_occurred ON code_events(repo, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_code_events_pr ON code_events(pr_number);
+
+    CREATE TABLE IF NOT EXISTS code_events_backfill_state (
+      repo TEXT PRIMARY KEY,
+      last_sha TEXT,
+      last_occurred_at TEXT,
+      total_events INTEGER NOT NULL DEFAULT 0,
+      last_run_at TEXT,
+      last_status TEXT,
+      last_error TEXT
+    );
+
     -- Inngest heartbeat / pulse log. One row per scheduled tick. Trims
     -- itself to the last 1000 rows on each insert to bound disk use.
     CREATE TABLE IF NOT EXISTS system_health (

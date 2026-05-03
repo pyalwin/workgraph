@@ -12,9 +12,11 @@ import { projectReadmeRefresh } from './project-readme';
 import { projectOkrsRefresh } from './project-okrs';
 import { githubTrailsRefreshWorkspace, issuePrSummaryRefresh, unmatchedPrAiMatcher } from './github-trails';
 import { chunkEmbedRun } from './chunk-embed';
+import { almanacCodeEventsBackfill } from './almanac-code-events-backfill';
 
 export const functions = [
   heartbeat,
+  almanacCodeEventsBackfill,
   jiraSyncTick,
   jiraSyncWorkspace,
   connectorSyncWorkspace,
