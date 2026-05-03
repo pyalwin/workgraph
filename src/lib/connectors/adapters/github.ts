@@ -108,6 +108,54 @@ export const githubConnector: MCPConnector = {
   discover: async (client, listName, _env, options): Promise<DiscoveryOption[]> => {
     if (listName !== 'repos') return [];
 
+    const oauthAccessToken = (options?.__oauthAccessToken as string | undefined)?.trim();
+    if (oauthAccessToken) {
+      const seen = new Set<string>();
+      const results: DiscoveryOption[] = [];
+      const MAX = 500;
+
+      for (let page = 1; page <= 5 && results.length < MAX; page++) {
+        let resp: Response;
+        try {
+          resp = await fetch(
+            `https://api.github.com/user/repos?visibility=all&affiliation=owner,collaborator,organization_member&sort=updated&per_page=100&page=${page}`,
+            {
+              headers: {
+                Authorization: `Bearer ${oauthAccessToken}`,
+                Accept: 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+              },
+            },
+          );
+        } catch {
+          break;
+        }
+        if (!resp.ok) break;
+
+        const repos: any[] = await resp.json();
+        if (repos.length === 0) break;
+
+        for (const r of repos) {
+          const fullName: string = r.full_name || `${r.owner?.login}/${r.name}`;
+          if (!fullName || seen.has(fullName)) continue;
+          seen.add(fullName);
+          const visibility = r.private ? 'private' : 'public';
+          const lang = r.language ? ` · ${r.language}` : '';
+          const desc = r.description ? ` — ${String(r.description).slice(0, 80)}` : '';
+          results.push({
+            id: fullName,
+            label: fullName,
+            hint: `${visibility}${lang}${desc}`,
+          });
+          if (results.length >= MAX) break;
+        }
+
+        if (repos.length < 100) break;
+      }
+
+      if (results.length > 0) return results;
+    }
+
     // The official @modelcontextprotocol/server-github only exposes
     // search_repositories — there's no list_user_orgs / list_user_repos.
     // So we explicitly iterate the user's own repos plus each org the
