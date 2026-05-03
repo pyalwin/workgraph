@@ -1,6 +1,6 @@
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
-import { embed, TEXT_MODEL, type EmbeddingModel } from './ollama';
+import { embed, TEXT_MODEL, TEXT_DIM, type EmbeddingModel } from './huggingface';
 
 let _initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
