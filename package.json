@@ -45,6 +45,7 @@
     "marked": "^18.0.0",
     "mcp-atlassian": "^2.1.0",
     "next": "^16.2.4",
+    "next-axiom": "^1.10.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-force-graph-2d": "^1.29.1",

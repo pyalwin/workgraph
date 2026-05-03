@@ -1,6 +1,7 @@
 import '@/styles/globals.css';
 import { AuthKitProvider } from '@workos-inc/authkit-nextjs/components';
 import { withAuth } from '@workos-inc/authkit-nextjs';
+import { AxiomWebVitals } from 'next-axiom';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
@@ -15,6 +16,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en" suppressHydrationWarning>
       <body suppressHydrationWarning>
+        <AxiomWebVitals />
         <AuthKitProvider initialAuth={initialAuth}>{children}</AuthKitProvider>
       </body>
     </html>
