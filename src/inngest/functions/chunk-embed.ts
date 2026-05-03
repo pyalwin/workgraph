@@ -60,6 +60,7 @@ export const chunkEmbedRun = inngest.createFunction(
       chunked_chunks: chunked.chunks,
       embedded_chunks: embedded.embedded,
       failed_chunks: embedded.failed,
+      embedding_errors: embedded.errors.slice(0, 10),
     };
   },
 );

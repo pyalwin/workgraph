@@ -53,7 +53,7 @@ export async function POST(req: Request) {
   const startedAt = Date.now();
   const result: {
     chunked: { items: number; chunks: number } | null;
-    embedded: { embedded: number; skipped: number; failed: number } | null;
+    embedded: { embedded: number; skipped: number; failed: number; errors?: string[] } | null;
     enriched: { scanned: number; enriched: number; failed: number } | null;
     matcher: {
       scanned: number;
@@ -84,7 +84,8 @@ export async function POST(req: Request) {
   // Step 2 — embed
   try {
     const r = await embedAllPending({ concurrency: 4 });
-    result.embedded = { embedded: r.embedded, skipped: r.skipped, failed: r.failed };
+    result.embedded = { embedded: r.embedded, skipped: r.skipped, failed: r.failed, errors: r.errors };
+    if (r.errors.length > 0) result.errors.push(...r.errors.slice(0, 3).map((e) => `embed: ${e}`));
   } catch (err) {
     result.errors.push(`embed: ${(err as Error).message}`);
   }

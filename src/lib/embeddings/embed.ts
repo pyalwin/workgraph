@@ -33,6 +33,7 @@ export interface EmbedResult {
   embedded: number;
   skipped: number;
   failed: number;
+  errors: string[];
 }
 
 /** Pack a Float32Array into a Uint8Array suitable for INSERT into chunk_vectors.embedding. */
@@ -49,7 +50,7 @@ export async function embedChunkIds(
   const db = getLibsqlDb();
   const force = opts.force ?? false;
   const concurrency = Math.max(1, opts.concurrency ?? 4);
-  const result: EmbedResult = { embedded: 0, skipped: 0, failed: 0 };
+  const result: EmbedResult = { embedded: 0, skipped: 0, failed: 0, errors: [] };
   if (chunkIds.length === 0) return result;
 
   const getChunkSql = 'SELECT id, item_id, chunk_type, chunk_text FROM item_chunks WHERE id = ?';
@@ -87,7 +88,9 @@ export async function embedChunkIds(
 
     for (const s of settled) {
       if (s.status !== 'fulfilled') {
-        console.error(`  embed FAIL: ${s.reason?.message ?? s.reason}`);
+        const message = `embed: ${s.reason?.message ?? s.reason}`;
+        console.error(`  embed FAIL: ${message}`);
+        if (result.errors.length < 10) result.errors.push(message);
         result.failed++;
         continue;
       }
@@ -98,7 +101,9 @@ export async function embedChunkIds(
         await db.prepare(upsertMetaSql).run(chunk.id, model, vec.length);
         result.embedded++;
       } catch (err: any) {
-        console.error(`  embed-store FAIL chunk ${chunk.id}: ${err.message}`);
+        const message = `embed-store chunk ${chunk.id}: ${err.message}`;
+        console.error(`  embed-store FAIL ${message}`);
+        if (result.errors.length < 10) result.errors.push(message);
         result.failed++;
       }
     }
