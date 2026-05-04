@@ -209,12 +209,27 @@ export async function enqueueNoiseClassify(
         workspaceId,
         repo: repo.id,
         cli: opts.cli ?? 'codex',
-        events: batch.map((e) => ({
-          id: e.id,
-          sha: e.sha,
-          message: e.message ?? '',
-          files_touched: e.files_touched,
-        })),
+        events: batch.map((e) => {
+          // files_touched lands in DB as a JSON string; agent's strict
+          // parser wants a parsed array of strings. Parse defensively —
+          // a malformed row produces an empty array rather than failing
+          // the whole batch.
+          let filesTouched: string[] = [];
+          try {
+            const parsed = JSON.parse(e.files_touched);
+            if (Array.isArray(parsed)) {
+              filesTouched = parsed.filter((p): p is string => typeof p === 'string');
+            }
+          } catch {
+            // ignore — leave as []
+          }
+          return {
+            id: e.id,
+            sha: e.sha,
+            message: e.message ?? '',
+            files_touched: filesTouched,
+          };
+        }),
       };
       if (opts.model) params.model = opts.model;
       const idemKey = `almanac-noise-classify-${repo.id}-${today}-batch${Math.floor(i / NOISE_BATCH_SIZE)}`;
