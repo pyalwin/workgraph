@@ -171,18 +171,37 @@ export async function runCliJson(opts: CliOptions): Promise<string> {
 
     switch (opts.cli) {
       case "codex": {
-        // Support both flat { type, … } and wrapped { msg: { type, … } }
+        // Codex event shapes have evolved — support all of them:
+        //   v0.x flat:    { type: "agent_message", message }
+        //                 { type: "agent_message_delta", delta }
+        //   v0.x wrapped: { msg: { type: "agent_message", message } }
+        //   v0.128+ item: { type: "item.completed",
+        //                   item: { type: "agent_message", text } }
+        //                 { type: "turn.completed", usage } (no text)
+        const t = evt.type as string | undefined;
+
+        // New 0.128+ envelope
+        if (t === "item.completed" && typeof evt.item === "object" && evt.item !== null) {
+          const item = evt.item as Record<string, unknown>;
+          const itemType = item.type as string | undefined;
+          if (itemType === "agent_message" && typeof item.text === "string") {
+            parts.push(item.text);
+          }
+          break;
+        }
+
+        // Legacy: support both flat and wrapped envelopes
         const msg = (typeof evt.msg === "object" && evt.msg !== null
           ? evt.msg
           : evt) as Record<string, unknown>;
-        const t = (msg.type ?? evt.type) as string | undefined;
-
-        if (t === "agent_message_delta" && typeof msg.delta === "string") {
+        const lt = (msg.type ?? evt.type) as string | undefined;
+        if (lt === "agent_message_delta" && typeof msg.delta === "string") {
           parts.push(msg.delta);
-        } else if (t === "agent_message" && typeof msg.message === "string") {
-          parts.push(msg.message);
+        } else if (lt === "agent_message") {
+          // Either { message } (legacy) or { text } (newer flat form)
+          if (typeof msg.message === "string") parts.push(msg.message);
+          else if (typeof msg.text === "string") parts.push(msg.text);
         }
-        // task_complete / turn_complete — no text to extract, just stop signals
         break;
       }
 
