@@ -176,7 +176,7 @@ workgraph/
 │   │   ├── connectors/       Source adapters + sync orchestrator
 │   │   ├── sync/             Ingest, enrich, extract, cleanup
 │   │   ├── chunking/         Per-source content chunkers
-│   │   ├── embeddings/       Embedding generation (Anthropic / Ollama)
+│   │   ├── embeddings/       Embedding generation (Hugging Face Inference)
 │   │   ├── decision/         Decision extraction + summarization
 │   │   ├── workstream/       Workstream assembly + narrative
 │   │   ├── oauth/            OAuth provider definitions, tokens, refresh
@@ -230,7 +230,7 @@ Every step is incremental and resumable — re-running any phase only touches wh
 ## Roadmap
 
 - [ ] Self-hosted deployment guide (Docker + reverse proxy)
-- [ ] Local embeddings via Ollama (currently optional, becoming default)
+- [x] Embeddings via Hugging Face Inference (BAAI/bge-large-en-v1.5, 1024-dim)
 - [ ] Plugin API for community-contributed connectors
 - [ ] Export to Markdown / Obsidian
 - [ ] Mobile-friendly UI
