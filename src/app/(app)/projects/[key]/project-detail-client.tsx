@@ -161,27 +161,36 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
       </header>
 
       {/* ───── Tabs ───── */}
-      <nav className="proj-tabs" role="tablist" aria-label="Project sections">
-        {TABS.map((t) => {
-          const count = tabCount(t.id, { okrsCount, actionCount, anomalyCount, ticketCount: d.tickets.length });
-          const active = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className={`proj-tab ${active ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              <span>{t.label}</span>
-              {typeof count === 'number' && count > 0 && (
-                <span className="proj-tab-count">{count}</span>
-              )}
-            </button>
-          );
-        })}
-      </nav>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
+        <nav className="proj-tabs" role="tablist" aria-label="Project sections" style={{ margin: 0 }}>
+          {TABS.map((t) => {
+            const count = tabCount(t.id, { okrsCount, actionCount, anomalyCount, ticketCount: d.tickets.length });
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`proj-tab ${active ? 'active' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                <span>{t.label}</span>
+                {typeof count === 'number' && count > 0 && (
+                  <span className="proj-tab-count">{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+        <Link
+          href={`/projects/${projectKey}/almanac`}
+          className="proj-tab"
+          style={{ textDecoration: 'none' }}
+        >
+          Almanac
+        </Link>
+      </div>
 
       {tab === 'overview' && (<>
       {/* ───── Recap (rolling status) ───── */}
