@@ -523,23 +523,29 @@ function validateMarkdown(markdown: string, dossier: Dossier): ValidationResult 
 
 interface IngestBody {
   workspaceId: string;
-  projectKey: string;
-  anchor: string;
-  kind: string;
-  title: string;
-  markdown: string;
-  sourceHash: string;
+  // Server expects { workspaceId, sections: [...] }. Even single posts
+  // must use the array form, with snake_case section keys.
+  sections: Array<{
+    project_key: string;
+    anchor: string;
+    title: string;
+    markdown: string;
+    source_hash: string;
+  }>;
 }
 
 async function postSection(params: NarrateParams, markdown: string): Promise<void> {
   const body: IngestBody = {
     workspaceId: params.workspaceId,
-    projectKey: params.projectKey,
-    anchor: params.anchor,
-    kind: params.kind,
-    title: params.title,
-    markdown,
-    sourceHash: params.sourceHash,
+    sections: [
+      {
+        project_key: params.projectKey,
+        anchor: params.anchor,
+        title: params.title,
+        markdown,
+        source_hash: params.sourceHash,
+      },
+    ],
   };
   await apiFetch("/api/almanac/sections/ingest", { method: "POST", body });
 }

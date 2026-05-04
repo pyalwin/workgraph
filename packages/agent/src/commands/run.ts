@@ -90,6 +90,7 @@ export async function run(): Promise<void> {
   }
 
   async function pollLoop(): Promise<void> {
+    let idleTicks = 0;
     while (running) {
       let pollData: PollResponse;
       try {
@@ -106,7 +107,16 @@ export async function run(): Promise<void> {
         continue;
       }
 
-      if (!pollData.job) continue;
+      if (!pollData.job) {
+        // Print an "idle" heartbeat every ~2 minutes so the user knows
+        // the agent is alive and polling, not silently dead.
+        idleTicks++;
+        if (idleTicks % 5 === 0) {
+          console.log(`… agent idle (${idleTicks * (POLL_WAIT_MS / 1000)}s, waiting for jobs)`);
+        }
+        continue;
+      }
+      idleTicks = 0;
 
       const job = pollData.job;
       const handler = getHandler(job.kind);
@@ -131,16 +141,34 @@ export async function run(): Promise<void> {
         continue;
       }
 
+      const startedAt = Date.now();
+      console.log(
+        `▶ Job ${job.id.slice(0, 8)} (${job.kind}) started${
+          job.attempt ? ` [attempt ${job.attempt}]` : ""
+        }`,
+      );
       try {
         const result = await handler(job.params);
         await apiFetch("/api/agent/jobs/result", {
           method: "POST",
           body: { job_id: job.id, status: "done", result },
         });
-        console.log(`Job ${job.id} (${job.kind}) completed.`);
+        const ms = Date.now() - startedAt;
+        const summary = (() => {
+          const r = result as Record<string, unknown> | undefined;
+          if (!r || typeof r !== "object") return "";
+          const k = Object.entries(r)
+            .filter(([, v]) => typeof v === "number" || typeof v === "string")
+            .slice(0, 5)
+            .map(([k, v]) => `${k}=${v}`)
+            .join(" ");
+          return k ? ` ${k}` : "";
+        })();
+        console.log(`✓ Job ${job.id.slice(0, 8)} (${job.kind}) done in ${ms}ms${summary}`);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        console.error(`Job ${job.id} (${job.kind}) failed: ${error}`);
+        const ms = Date.now() - startedAt;
+        console.error(`✗ Job ${job.id.slice(0, 8)} (${job.kind}) failed after ${ms}ms: ${error}`);
         try {
           await apiFetch("/api/agent/jobs/result", {
             method: "POST",
