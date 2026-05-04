@@ -66,7 +66,10 @@ export function RunAlmanacSyncCard() {
       const res = await fetch('/api/admin/almanac/sync-all', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ workspaceId: 'default' }),
+        // Empty body — server auto-discovers the workspace that has a
+        // configured GitHub connector (see resolveWorkspaceId in
+        // /api/admin/almanac/sync-all/route.ts).
+        body: JSON.stringify({}),
       });
       const data = (await res.json()) as {
         ok?: boolean;
