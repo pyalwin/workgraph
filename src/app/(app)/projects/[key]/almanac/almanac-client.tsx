@@ -1,0 +1,198 @@
+'use client';
+
+import { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
+import { AlmanacToc } from '@/components/almanac/toc';
+import { AlmanacRenderer } from '@/components/almanac/almanac-renderer';
+
+export interface SectionRow {
+  id: string;
+  workspace_id: string;
+  project_key: string;
+  unit_id: string | null;
+  kind: string;
+  anchor: string;
+  position: number;
+  title: string;
+  markdown: string;
+  diagram_blocks: string;
+  source_hash: string | null;
+  generated_at: string;
+}
+
+export function AlmanacClient({ projectKey }: { projectKey: string }) {
+  const [sections, setSections] = useState<SectionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [unauthorized, setUnauthorized] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [activeAnchor, setActiveAnchor] = useState('');
+  const mainRef = useRef<HTMLDivElement>(null);
+
+  const fetchSections = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/almanac/sections?project_key=${projectKey}`);
+      if (res.status === 401) {
+        setUnauthorized(true);
+        setSections([]);
+        return;
+      }
+      const json = await res.json() as { sections: SectionRow[] };
+      setSections(json.sections ?? []);
+      setUnauthorized(false);
+    } catch {
+      setSections([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [projectKey]);
+
+  useEffect(() => {
+    fetchSections();
+  }, [fetchSections]);
+
+  // IntersectionObserver: track active anchor from section headings
+  useEffect(() => {
+    if (sections.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveAnchor(entry.target.id);
+            break;
+          }
+        }
+      },
+      { rootMargin: '-10% 0px -80% 0px' },
+    );
+    const headings = document.querySelectorAll('.almanac-section-heading');
+    headings.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [sections]);
+
+  const handleRegenerate = async () => {
+    setRegenerating(true);
+    try {
+      await fetch('/api/admin/almanac/sections/regenerate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectKey, forceAll: true }),
+      });
+      await fetchSections();
+    } catch {
+      // ignore
+    }
+    setRegenerating(false);
+  };
+
+  const maxGeneratedAt =
+    sections.length > 0
+      ? sections.reduce((max, s) => (s.generated_at > max ? s.generated_at : max), sections[0].generated_at)
+      : null;
+
+  if (loading) {
+    return (
+      <div className="almanac-page">
+        <div className="almanac-skeleton">
+          <div className="almanac-skeleton-line" style={{ width: '40%' }} />
+          <div className="almanac-skeleton-line" style={{ width: '60%' }} />
+          <div className="almanac-skeleton-line" style={{ width: '50%' }} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="almanac-page">
+      {unauthorized && (
+        <div className="almanac-banner">
+          Read-only — ask an admin to refresh the almanac.
+        </div>
+      )}
+
+      <div className="almanac-header">
+        <div className="almanac-header-left">
+          <Link href={`/projects/${projectKey}`} className="almanac-back">
+            ← Back to project
+          </Link>
+          <div className="almanac-header-meta">
+            <span className="almanac-project-key">{projectKey}</span>
+            <h1 className="almanac-title">Almanac</h1>
+            {maxGeneratedAt && (
+              <span className="almanac-generated-at">
+                Last generated: {new Date(maxGeneratedAt).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <Link
+            href={`/projects/${projectKey}/almanac/units`}
+            style={{
+              fontSize: '0.82rem',
+              color: 'var(--ink-4, #7a7670)',
+              textDecoration: 'none',
+              padding: '0.38rem 0.7rem',
+              border: '1px solid var(--rule-2, rgba(21,20,15,.14))',
+              borderRadius: '5px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Edit units
+          </Link>
+          <button
+            type="button"
+            className="almanac-regen-btn"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+          >
+            {regenerating ? 'Regenerating…' : 'Regenerate'}
+          </button>
+        </div>
+      </div>
+
+      {sections.length === 0 ? (
+        <div className="almanac-empty-card">
+          <h2>No almanac sections yet</h2>
+          <p>
+            The almanac is generated by pairing an agent with this project and running the
+            regenerate pipeline. Click <strong>Regenerate</strong> above, or ask a team member
+            with admin access to run it.
+          </p>
+        </div>
+      ) : (
+        <div className="almanac-layout" ref={mainRef}>
+          <aside className="almanac-toc-col">
+            <AlmanacToc sections={sections} activeAnchor={activeAnchor} />
+          </aside>
+          <main className="almanac-content-col">
+            {sections.map((section) => (
+              <section key={section.id} className="almanac-section">
+                <h2
+                  id={section.anchor}
+                  className="almanac-section-heading"
+                >
+                  {section.title}
+                </h2>
+                <AlmanacRenderer
+                  markdown={section.markdown}
+                  diagramBlocks={parseDiagramBlocks(section.diagram_blocks)}
+                />
+              </section>
+            ))}
+          </main>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function parseDiagramBlocks(raw: string): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}

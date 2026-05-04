@@ -64,6 +64,9 @@ RESPONSE LENGTH
 PRESENTATION
 - For richer output you may include OpenUI Lang fenced blocks (\`\`\`openui-lang) AFTER tools return — e.g. a BarChart for groupItems output, a Table for runQuery rows, a Card for a project summary. Plain markdown is still fine; only use OpenUI Lang when it adds clarity over text.
 
+ALMANAC TOOLS
+- For chronological "how did X evolve" questions, reach for \`listUnitEvolution\`. For fuzzy "what was the original purpose / how was it discussed" questions, first try \`searchKnowledge\` (it now indexes Almanac sections — citations will point to specific section anchors). For drift questions ("what shipped without a ticket", "what was promised but not built"), use \`getDriftForUnit\` or scan \`code_events\` via \`runQuery\`.
+
 ${getOpenUIPrompt()}`;
 
 export async function POST(req: NextRequest) {

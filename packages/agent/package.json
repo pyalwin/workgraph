@@ -1,0 +1,22 @@
+{
+  "name": "@workgraph/agent",
+  "version": "0.1.0",
+  "description": "Local agent for Workgraph — runs git/CLI compute on your machine and reports back to the control plane.",
+  "license": "MIT",
+  "bin": { "workgraph": "./dist/index.js" },
+  "type": "module",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
+    "dev": "tsx src/index.ts",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.0"
+  }
+}

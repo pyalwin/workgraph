@@ -343,6 +343,174 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_agents_user ON workspace_agents(user_id);
   CREATE INDEX IF NOT EXISTS idx_agents_workspace ON workspace_agents(workspace_id);
 
+  -- Almanac Phase 0: device-code style pair flow.
+  -- /api/agent/pair/start mints (pairing_id, code_hash). The user runs
+  -- "workgraph login" on their laptop, sees a short user code, opens it in
+  -- the web app, and confirms while authed. The agent polls /pair/poll until
+  -- status flips from 'pending' to 'confirmed'; at that point /pair/poll
+  -- returns the agent_id + agent_token to write to the local config.
+  CREATE TABLE IF NOT EXISTS agent_pairings (
+    pairing_id TEXT PRIMARY KEY,
+    code_hash TEXT NOT NULL,            -- sha256(user_code), never store the code itself
+    user_id TEXT,                       -- filled at confirm time
+    agent_id TEXT,                      -- filled at confirm time, references workspace_agents
+    agent_token_enc TEXT,               -- agent token (encrypted) returned to the agent on next poll
+    status TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'confirmed' | 'consumed' | 'expired'
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_pairings_code ON agent_pairings(code_hash);
+  CREATE INDEX IF NOT EXISTS idx_agent_pairings_status ON agent_pairings(status);
+
+  -- Almanac Phase 0: server-side job queue the local agent drains.
+  -- agent picks up rows where status='queued' AND agent_id matches its id,
+  -- moves them to 'running' on poll, and posts back result/error -> 'done'/'failed'.
+  CREATE TABLE IF NOT EXISTS agent_jobs (
+    id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL,                 -- e.g. 'noop', 'almanac.code_events.extract'
+    params TEXT NOT NULL DEFAULT '{}',  -- JSON
+    status TEXT NOT NULL DEFAULT 'queued',  -- 'queued'|'running'|'done'|'failed'|'cancelled'
+    idempotency_key TEXT,
+    attempt INTEGER NOT NULL DEFAULT 0,
+    result TEXT,                        -- JSON
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    completed_at TEXT,
+    UNIQUE(agent_id, idempotency_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_agent_status ON agent_jobs(agent_id, status);
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_status ON agent_jobs(status);
+
+  -- Almanac Phase 1: one row per merged PR + direct-to-main commit per repo.
+  -- Populated by the local agent's 'almanac.code-events.extract' job; this is
+  -- the substrate the rest of the Almanac pipeline (lifecycle, clustering,
+  -- narrative) operates on. Many fields are nullable on extract and filled in
+  -- later phases (module_id, functional_unit_id, classified_as).
+  CREATE TABLE IF NOT EXISTS code_events (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    repo TEXT NOT NULL,                 -- "owner/name"
+    sha TEXT NOT NULL,
+    pr_number INTEGER,
+    kind TEXT NOT NULL,                 -- 'pr_merged' | 'direct_commit' | 'release'
+    author_login TEXT,
+    author_email TEXT,
+    occurred_at TEXT NOT NULL,
+    message TEXT,
+    files_touched TEXT NOT NULL DEFAULT '[]',  -- JSON array of paths (signal-only, skip patterns applied)
+    additions INTEGER NOT NULL DEFAULT 0,
+    deletions INTEGER NOT NULL DEFAULT 0,
+    module_id TEXT,                     -- nullable until Phase 2
+    functional_unit_id TEXT,            -- nullable until Phase 2
+    classified_as TEXT,                 -- (kept for now; Phase 1.6 added richer fields below)
+    -- Phase 1.6 noise classifier columns
+    noise_class TEXT,                   -- 'dependency_bump'|'tooling'|'docs_only'|'test_only'|'ci_only'|'tiny_change'|'revert'|'signal'
+    intent TEXT,                        -- 'introduce'|'extend'|'refactor'|'fix'|'revert'|'mixed'
+    architectural_significance TEXT,    -- 'low'|'medium'|'high'
+    is_feature_evolution INTEGER NOT NULL DEFAULT 0,  -- gate to dossier
+    evolution_override INTEGER,         -- nullable: human-set 1=force-include, 0=force-exclude (never overwritten by classifier)
+    classifier_run_at TEXT,
+    ticket_link_status TEXT NOT NULL DEFAULT 'unlinked',
+    linked_item_id TEXT,
+    link_confidence REAL,
+    link_evidence TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(repo, sha)
+  );
+  CREATE INDEX IF NOT EXISTS idx_code_events_workspace ON code_events(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_code_events_repo_occurred ON code_events(repo, occurred_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_code_events_pr ON code_events(pr_number);
+  -- noise/signal indexes are created in the Phase 1.6 migration after ALTER TABLE
+  -- adds the columns; for fresh installs the columns exist on the CREATE TABLE
+  -- above and the migration is a no-op except for the index creation.
+
+  -- Per-repo backfill state — last_sha is the resume cursor for incremental
+  -- re-runs. Re-running the extract is idempotent (INSERT OR IGNORE on
+  -- (repo, sha)) but the state row lets us short-circuit at the cursor
+  -- instead of streaming the full history every week.
+  CREATE TABLE IF NOT EXISTS code_events_backfill_state (
+    repo TEXT PRIMARY KEY,
+    last_sha TEXT,
+    last_occurred_at TEXT,
+    total_events INTEGER NOT NULL DEFAULT 0,
+    last_run_at TEXT,
+    last_status TEXT,                   -- 'ok' | 'error' | 'partial'
+    last_error TEXT
+  );
+
+  -- Almanac Phase 1.5: birth -> rename -> deletion timeline for every path
+  -- that has ever existed in a repo. Without this, evolution narratives are
+  -- blind to deleted/renamed code (which is exactly the interesting cases).
+  -- Populated by the local agent's 'almanac.file-lifecycle.extract' job.
+  CREATE TABLE IF NOT EXISTS file_lifecycle (
+    repo TEXT NOT NULL,
+    path TEXT NOT NULL,                 -- current path (or last path before deletion)
+    first_sha TEXT,
+    first_at TEXT,
+    last_sha TEXT,
+    last_at TEXT,
+    status TEXT NOT NULL,               -- 'extant' | 'deleted'
+    rename_chain TEXT NOT NULL DEFAULT '[]',  -- JSON array of prior paths, oldest -> most-recent
+    churn INTEGER NOT NULL DEFAULT 0,   -- count of code_events that touched this path or any prior name
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (repo, path)
+  );
+  CREATE INDEX IF NOT EXISTS idx_file_lifecycle_status ON file_lifecycle(repo, status);
+  CREATE INDEX IF NOT EXISTS idx_file_lifecycle_last_at ON file_lifecycle(repo, last_at DESC);
+
+  -- Almanac Phase 2: modules = file-path architecture axis. Auto-detected
+  -- by 2-level path grouping weighted by churn. User-editable.
+  CREATE TABLE IF NOT EXISTS modules (
+    id TEXT PRIMARY KEY,                -- workspace_id:repo:slug
+    workspace_id TEXT NOT NULL,
+    repo TEXT NOT NULL,                 -- module is per-repo
+    name TEXT NOT NULL,                 -- e.g. "src/lib/sync"
+    path_patterns TEXT NOT NULL DEFAULT '[]',  -- JSON: ['src/lib/sync/**']
+    detected_from TEXT NOT NULL,        -- 'auto' | 'manual'
+    status TEXT NOT NULL DEFAULT 'active',     -- 'active' | 'archived'
+    churn INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_modules_workspace_repo ON modules(workspace_id, repo);
+
+  -- Almanac Phase 2: functional units = product-capability axis. The row
+  -- in the Almanac. Each cluster of co-evolving signal events becomes
+  -- a unit; Jira epics in scope are seeded as units up-front.
+  CREATE TABLE IF NOT EXISTS functional_units (
+    id TEXT PRIMARY KEY,                -- deterministic: sha1 of sorted file set OR 'epic:<key>'
+    workspace_id TEXT NOT NULL,
+    project_key TEXT,                   -- Jira project for unit's home project
+    name TEXT,                          -- nullable until CLI naming pass completes
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'active',     -- 'active' | 'archived' | 'merged'
+    detected_from TEXT NOT NULL,        -- 'co_change' | 'jira_epic_alias' | 'manual'
+    jira_epic_key TEXT,                 -- nullable; set when detected_from='jira_epic_alias'
+    keywords TEXT NOT NULL DEFAULT '[]',         -- JSON array
+    file_path_patterns TEXT NOT NULL DEFAULT '[]',  -- JSON array of glob-like patterns
+    file_set_hash TEXT,                 -- sha1 of the canonical file set (for cache invalidation)
+    first_seen_at TEXT,                 -- min(occurred_at) of member events
+    last_active_at TEXT,                -- max(occurred_at) of member events
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_funits_workspace_project ON functional_units(workspace_id, project_key);
+  CREATE INDEX IF NOT EXISTS idx_funits_detected ON functional_units(detected_from);
+  CREATE INDEX IF NOT EXISTS idx_funits_active ON functional_units(workspace_id, last_active_at DESC);
+
+  -- Almanac Phase 2: rename / merge / split history for functional units.
+  -- When two units merge, the surviving unit accumulates aliases pointing
+  -- at the absorbed ones, so historic citations don't break.
+  CREATE TABLE IF NOT EXISTS functional_unit_aliases (
+    unit_id TEXT NOT NULL,
+    alias TEXT NOT NULL,                -- a previous name OR an absorbed unit_id
+    source TEXT NOT NULL,               -- 'rename' | 'merge' | 'split'
+    applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (unit_id, alias)
+  );
+
   CREATE TABLE IF NOT EXISTS system_health (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -475,6 +643,51 @@ const DDL = `
   );
   CREATE INDEX IF NOT EXISTS idx_orphan_pr_candidates_ref ON orphan_pr_candidates(pr_ref);
 
+  -- Almanac Phase 3: inverse of orphan_pr_candidates. For Jira tickets
+  -- without an issue_trails row, the ticket-first matcher proposes code
+  -- evidence (PR/branch/commit). Tier A (PR) auto-attaches at >= 0.75;
+  -- Tier B (branch) and Tier C (commit) always queue for human review.
+  CREATE TABLE IF NOT EXISTS orphan_ticket_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_item_id TEXT NOT NULL REFERENCES work_items(id),
+    evidence_kind TEXT NOT NULL,                 -- 'pr' | 'branch' | 'commit'
+    tier_reached TEXT NOT NULL,                  -- 'A' | 'B' | 'C'
+    candidate_ref TEXT NOT NULL,                 -- e.g. 'owner/repo#123' or 'owner/repo@sha'
+    score REAL NOT NULL,
+    signals TEXT NOT NULL DEFAULT '{}',          -- JSON: which evidence contributed
+    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    dismissed_at TEXT,
+    accepted_at TEXT,
+    UNIQUE(issue_item_id, candidate_ref)
+  );
+  CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_issue ON orphan_ticket_candidates(issue_item_id);
+  CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_open ON orphan_ticket_candidates(issue_item_id, dismissed_at, accepted_at);
+
+  -- Almanac Phase 4: per-section markdown content. One row per section per
+  -- project. anchor is a stable, human-friendly slug (e.g. 'cover',
+  -- 'summary', 'unit-<unit_id>', 'drift-unticketed'). source_hash is sha1
+  -- of the deterministic dossier inputs; matching hash on regen = no-op.
+  -- diagram_blocks is a JSON array of { kind, params, position } records
+  -- the renderer expands; markdown still embeds :::diagram::: fences inline.
+  CREATE TABLE IF NOT EXISTS almanac_sections (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    unit_id TEXT,                       -- nullable for cross-cutting sections
+    kind TEXT NOT NULL,                 -- 'cover'|'summary'|'unit'|'drift_unticketed'|'drift_unbuilt'|'decisions'|'appendix'
+    anchor TEXT NOT NULL,               -- stable slug, unique per project
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    markdown TEXT NOT NULL,
+    diagram_blocks TEXT NOT NULL DEFAULT '[]',
+    source_hash TEXT NOT NULL,
+    generated_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(project_key, anchor)
+  );
+  CREATE INDEX IF NOT EXISTS idx_almanac_sections_project ON almanac_sections(workspace_id, project_key, position);
+  CREATE INDEX IF NOT EXISTS idx_almanac_sections_unit ON almanac_sections(unit_id);
+
   CREATE TABLE IF NOT EXISTS issue_decisions (
     id TEXT PRIMARY KEY,
     issue_item_id TEXT NOT NULL REFERENCES work_items(id),
@@ -545,11 +758,57 @@ const DDL = `
   );
 `;
 
+/**
+ * Sentinel-keyed migrations for libSQL. Each entry is a one-shot ALTER
+ * statement (or set of them) keyed by an id; we record the id in
+ * `schema_migrations` after running so re-runs skip. Idempotent.
+ *
+ * Use this for ALTER TABLE ADD COLUMN — SQLite's CREATE TABLE IF NOT
+ * EXISTS doesn't add columns to existing tables.
+ */
+const MIGRATIONS: { id: string; statements: string[] }[] = [
+  {
+    id: 'almanac_phase_1_6_code_events_classifier_columns',
+    statements: [
+      `ALTER TABLE code_events ADD COLUMN noise_class TEXT`,
+      `ALTER TABLE code_events ADD COLUMN intent TEXT`,
+      `ALTER TABLE code_events ADD COLUMN architectural_significance TEXT`,
+      `ALTER TABLE code_events ADD COLUMN is_feature_evolution INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE code_events ADD COLUMN evolution_override INTEGER`,
+      `ALTER TABLE code_events ADD COLUMN classifier_run_at TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_code_events_noise ON code_events(repo, noise_class)`,
+      `CREATE INDEX IF NOT EXISTS idx_code_events_signal ON code_events(repo, is_feature_evolution)`,
+    ],
+  },
+];
+
+async function runMigrations(): Promise<void> {
+  const db = getLibsqlDb();
+  for (const m of MIGRATIONS) {
+    const seen = await db
+      .prepare(`SELECT 1 as ok FROM schema_migrations WHERE id = ?`)
+      .get<{ ok: number }>(m.id);
+    if (seen) continue;
+    for (const stmt of m.statements) {
+      try {
+        await db.exec(stmt);
+      } catch (err) {
+        // Tolerate "duplicate column" if a previous partial run added some
+        // columns — the sentinel only records once everything succeeded.
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!/duplicate column/i.test(msg)) throw err;
+      }
+    }
+    await db.prepare(`INSERT OR IGNORE INTO schema_migrations (id) VALUES (?)`).run(m.id);
+  }
+}
+
 export async function ensureSchemaAsync(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
     const db = getLibsqlDb();
     await db.exec(DDL);
+    await runMigrations();
   })();
   return _initPromise;
 }

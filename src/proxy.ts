@@ -17,6 +17,22 @@ export default authkitProxy({
       '/auth/callback',
       '/auth/signout',
       '/api/inngest',
+      // Almanac local-agent pair flow + job protocol — these endpoints
+      // authenticate themselves via Bearer token (verifyAgentRequest) or
+      // are device-code pairing endpoints that must be reachable without a
+      // browser session.
+      '/api/agent/pair/start',
+      '/api/agent/pair/poll',
+      '/api/agent/heartbeat',
+      '/api/agent/jobs/poll',
+      '/api/agent/jobs/result',
+      // Almanac ingest endpoints — Bearer-token auth via verifyAgentRequest
+      '/api/almanac/code-events/ingest',
+      '/api/almanac/file-lifecycle/ingest',
+      '/api/almanac/noise/classify/ingest',
+      '/api/almanac/clusters/ingest',
+      '/api/almanac/units/ingest',
+      '/api/almanac/sections/ingest',
     ],
   },
   debug: false,

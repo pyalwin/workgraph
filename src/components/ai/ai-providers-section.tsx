@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { AIBudgetBar } from '@/components/ai/ai-budget-bar';
 import { LocalAgentCard } from '@/components/workspace/local-agent-card';
+import { AlmanacBackfillCard } from '@/components/workspace/almanac-backfill-card';
+import { RunAlmanacSyncCard } from '@/components/workspace/run-almanac-sync-card';
 
 interface ProviderSummary {
   providerId: string;
@@ -157,6 +159,8 @@ export function AIProvidersSection() {
         <>
         <AIBudgetBar />
         <LocalAgentCard />
+        <RunAlmanacSyncCard />
+        <AlmanacBackfillCard />
         {SUPPORTED_PROVIDERS.map((provider) => {
           const summary = summaries[provider.id];
           const draft = getDraft(provider.id);

@@ -7,6 +7,18 @@ export const dynamic = 'force-dynamic';
 
 const ALLOWED_TYPES = new Set(['note', 'task', 'idea']);
 
+export async function GET(req: NextRequest) {
+  await ensureSchemaAsync();
+  const sourceId = req.nextUrl.searchParams.get('source_id');
+  if (!sourceId) return NextResponse.json({ error: 'source_id required' }, { status: 400 });
+  const db = getLibsqlDb();
+  const row = await db
+    .prepare('SELECT id FROM work_items WHERE source_id = ? LIMIT 1')
+    .get<{ id: string }>(sourceId);
+  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  return NextResponse.json({ id: row.id });
+}
+
 export async function POST(req: NextRequest) {
   await ensureSchemaAsync();
   const body = await req.json().catch(() => null) as { title?: string; body?: string; item_type?: string } | null;

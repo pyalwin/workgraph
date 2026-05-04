@@ -12,9 +12,19 @@ import { projectReadmeRefresh } from './project-readme';
 import { projectOkrsRefresh } from './project-okrs';
 import { githubTrailsRefreshWorkspace, issuePrSummaryRefresh, unmatchedPrAiMatcher } from './github-trails';
 import { chunkEmbedRun } from './chunk-embed';
+import { almanacCodeEventsBackfill } from './almanac-code-events-backfill';
+import { almanacNoiseClassify } from './almanac-noise-classify';
+import { almanacDetectModulesAndUnits } from './almanac-detect-modules-and-units';
+import { almanacTicketsMatch } from './almanac-tickets-match';
+import { almanacNarrativeRegen } from './almanac-narrative-regen';
 
 export const functions = [
   heartbeat,
+  almanacCodeEventsBackfill,
+  almanacNoiseClassify,
+  almanacDetectModulesAndUnits,
+  almanacTicketsMatch,
+  almanacNarrativeRegen,
   jiraSyncTick,
   jiraSyncWorkspace,
   connectorSyncWorkspace,

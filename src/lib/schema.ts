@@ -319,6 +319,147 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_agents_user ON workspace_agents(user_id);
     CREATE INDEX IF NOT EXISTS idx_agents_workspace ON workspace_agents(workspace_id);
 
+    -- Almanac Phase 0: device-code style pair flow.
+    CREATE TABLE IF NOT EXISTS agent_pairings (
+      pairing_id TEXT PRIMARY KEY,
+      code_hash TEXT NOT NULL,
+      user_id TEXT,
+      agent_id TEXT,
+      agent_token_enc TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',  -- 'pending'|'confirmed'|'consumed'|'expired'
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_pairings_code ON agent_pairings(code_hash);
+    CREATE INDEX IF NOT EXISTS idx_agent_pairings_status ON agent_pairings(status);
+
+    -- Almanac Phase 0: server-side job queue the local agent drains.
+    CREATE TABLE IF NOT EXISTS agent_jobs (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      params TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'queued',  -- 'queued'|'running'|'done'|'failed'|'cancelled'
+      idempotency_key TEXT,
+      attempt INTEGER NOT NULL DEFAULT 0,
+      result TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT,
+      UNIQUE(agent_id, idempotency_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_jobs_agent_status ON agent_jobs(agent_id, status);
+    CREATE INDEX IF NOT EXISTS idx_agent_jobs_status ON agent_jobs(status);
+
+    -- Almanac Phase 1: code_events extracted from git by the local agent.
+    CREATE TABLE IF NOT EXISTS code_events (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      sha TEXT NOT NULL,
+      pr_number INTEGER,
+      kind TEXT NOT NULL,
+      author_login TEXT,
+      author_email TEXT,
+      occurred_at TEXT NOT NULL,
+      message TEXT,
+      files_touched TEXT NOT NULL DEFAULT '[]',
+      additions INTEGER NOT NULL DEFAULT 0,
+      deletions INTEGER NOT NULL DEFAULT 0,
+      module_id TEXT,
+      functional_unit_id TEXT,
+      classified_as TEXT,
+      noise_class TEXT,
+      intent TEXT,
+      architectural_significance TEXT,
+      is_feature_evolution INTEGER NOT NULL DEFAULT 0,
+      evolution_override INTEGER,
+      classifier_run_at TEXT,
+      ticket_link_status TEXT NOT NULL DEFAULT 'unlinked',
+      linked_item_id TEXT,
+      link_confidence REAL,
+      link_evidence TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(repo, sha)
+    );
+    CREATE INDEX IF NOT EXISTS idx_code_events_workspace ON code_events(workspace_id);
+    CREATE INDEX IF NOT EXISTS idx_code_events_repo_occurred ON code_events(repo, occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_code_events_pr ON code_events(pr_number);
+    CREATE INDEX IF NOT EXISTS idx_code_events_noise ON code_events(repo, noise_class);
+    CREATE INDEX IF NOT EXISTS idx_code_events_signal ON code_events(repo, is_feature_evolution);
+
+    CREATE TABLE IF NOT EXISTS code_events_backfill_state (
+      repo TEXT PRIMARY KEY,
+      last_sha TEXT,
+      last_occurred_at TEXT,
+      total_events INTEGER NOT NULL DEFAULT 0,
+      last_run_at TEXT,
+      last_status TEXT,
+      last_error TEXT
+    );
+
+    -- Almanac Phase 1.5: per-path lifecycle (birth -> renames -> deletion).
+    CREATE TABLE IF NOT EXISTS file_lifecycle (
+      repo TEXT NOT NULL,
+      path TEXT NOT NULL,
+      first_sha TEXT,
+      first_at TEXT,
+      last_sha TEXT,
+      last_at TEXT,
+      status TEXT NOT NULL,
+      rename_chain TEXT NOT NULL DEFAULT '[]',
+      churn INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (repo, path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_file_lifecycle_status ON file_lifecycle(repo, status);
+    CREATE INDEX IF NOT EXISTS idx_file_lifecycle_last_at ON file_lifecycle(repo, last_at DESC);
+
+    -- Almanac Phase 2: modules / functional_units / aliases.
+    CREATE TABLE IF NOT EXISTS modules (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      repo TEXT NOT NULL,
+      name TEXT NOT NULL,
+      path_patterns TEXT NOT NULL DEFAULT '[]',
+      detected_from TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      churn INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_modules_workspace_repo ON modules(workspace_id, repo);
+
+    CREATE TABLE IF NOT EXISTS functional_units (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_key TEXT,
+      name TEXT,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      detected_from TEXT NOT NULL,
+      jira_epic_key TEXT,
+      keywords TEXT NOT NULL DEFAULT '[]',
+      file_path_patterns TEXT NOT NULL DEFAULT '[]',
+      file_set_hash TEXT,
+      first_seen_at TEXT,
+      last_active_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_funits_workspace_project ON functional_units(workspace_id, project_key);
+    CREATE INDEX IF NOT EXISTS idx_funits_detected ON functional_units(detected_from);
+    CREATE INDEX IF NOT EXISTS idx_funits_active ON functional_units(workspace_id, last_active_at DESC);
+
+    CREATE TABLE IF NOT EXISTS functional_unit_aliases (
+      unit_id TEXT NOT NULL,
+      alias TEXT NOT NULL,
+      source TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (unit_id, alias)
+    );
+
     -- Inngest heartbeat / pulse log. One row per scheduled tick. Trims
     -- itself to the last 1000 rows on each insert to bound disk use.
     CREATE TABLE IF NOT EXISTS system_health (
@@ -465,6 +606,44 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_orphan_pr_candidates_ref ON orphan_pr_candidates(pr_ref);
     CREATE INDEX IF NOT EXISTS idx_orphan_pr_candidates_open
       ON orphan_pr_candidates(pr_ref) WHERE dismissed_at IS NULL;
+
+    -- Almanac Phase 3: ticket-first matcher candidates (inverse of orphan_pr).
+    CREATE TABLE IF NOT EXISTS orphan_ticket_candidates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      issue_item_id TEXT NOT NULL REFERENCES work_items(id),
+      evidence_kind TEXT NOT NULL,
+      tier_reached TEXT NOT NULL,
+      candidate_ref TEXT NOT NULL,
+      score REAL NOT NULL,
+      signals TEXT NOT NULL DEFAULT '{}',
+      computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      dismissed_at TEXT,
+      accepted_at TEXT,
+      UNIQUE(issue_item_id, candidate_ref)
+    );
+    CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_issue ON orphan_ticket_candidates(issue_item_id);
+    CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_open ON orphan_ticket_candidates(issue_item_id, dismissed_at, accepted_at);
+
+    -- Almanac Phase 4: per-section markdown content. UNIQUE(project_key, anchor)
+    -- enforces single canonical version per section; source_hash gates regen.
+    CREATE TABLE IF NOT EXISTS almanac_sections (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      unit_id TEXT,
+      kind TEXT NOT NULL,
+      anchor TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      diagram_blocks TEXT NOT NULL DEFAULT '[]',
+      source_hash TEXT NOT NULL,
+      generated_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(project_key, anchor)
+    );
+    CREATE INDEX IF NOT EXISTS idx_almanac_sections_project ON almanac_sections(workspace_id, project_key, position);
+    CREATE INDEX IF NOT EXISTS idx_almanac_sections_unit ON almanac_sections(unit_id);
 
     -- AI-extracted decisions surfaced from PR review threads. Distinct from
     -- the existing decisions table (which has UNIQUE(item_id) — one per
