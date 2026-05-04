@@ -1,0 +1,26 @@
+services:
+  # Local libsql-server. Vector functions (vector_distance_cos) work — required
+  # for Phase 7 RAG search. Data persists in ./data/libsql/.
+  #
+  # Connect from the app:
+  #   DATABASE_URL=http://127.0.0.1:8081
+  #   (no auth token in dev — leave TURSO_AUTH_TOKEN unset)
+  #
+  # Host port is 8081 (not 8080) to avoid conflicting with common dev servers.
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:latest
+    container_name: workgraph-libsql
+    ports:
+      - "8081:8080"   # HTTP (read/write API the @libsql/client uses)
+    environment:
+      # Single-node dev. HTTP is the only API the app uses; the gRPC primary
+      # listener (replica replication) is left at its default 5001 inside the
+      # container but not exposed. Admin API is disabled — `turso db shell`
+      # against this server isn't supported in dev; use `sqlite3 data/libsql/dbs/default/data` instead.
+      SQLD_HTTP_LISTEN_ADDR: 0.0.0.0:8080
+      RUST_LOG: info
+    volumes:
+      - ./data/libsql:/var/lib/sqld
+    # No healthcheck — the libsql-server image is minimal (no wget/curl/nc).
+    # The reset script probes http://127.0.0.1:8081/health from the host instead.
+    restart: unless-stopped

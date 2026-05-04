@@ -15,7 +15,11 @@
     "lint": "next lint",
     "gen:openui": "node scripts/build-openui-prompt.mjs",
     "predev": "node scripts/build-openui-prompt.mjs",
-    "prebuild": "node scripts/build-openui-prompt.mjs"
+    "prebuild": "node scripts/build-openui-prompt.mjs",
+    "db:up": "docker compose up -d libsql",
+    "db:down": "docker compose stop libsql",
+    "db:reset": "bash scripts/db-local-reset.sh",
+    "db:logs": "docker compose logs -f libsql"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.175",
