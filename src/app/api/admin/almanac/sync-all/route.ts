@@ -20,6 +20,8 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from '@workos-inc/authkit-nextjs';
 import { inngest } from '@/inngest/client';
+import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
+import { getLibsqlDb } from '@/lib/db/libsql';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,12 +39,30 @@ interface PhaseSpec {
   data: Record<string, unknown>;
 }
 
+/**
+ * If the caller didn't pass workspaceId, pick the workspace that actually
+ * has a configured GitHub connector. Falls back to 'default'. Without this
+ * the sync silently no-ops because the cron functions chase the wrong ID.
+ */
+async function resolveWorkspaceId(explicit: string | undefined): Promise<string> {
+  if (explicit) return explicit;
+  await ensureSchemaAsync();
+  const db = getLibsqlDb();
+  const row = await db.prepare(
+    `SELECT workspace_id FROM workspace_connector_configs
+     WHERE source = 'github' AND status IN ('configured', 'connected', 'ok')
+     ORDER BY last_sync_completed_at DESC NULLS LAST
+     LIMIT 1`,
+  ).get<{ workspace_id: string }>();
+  return row?.workspace_id ?? 'default';
+}
+
 export async function POST(req: Request) {
   const { user } = await withAuth();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = (await req.json().catch(() => ({}))) as SyncAllBody;
-  const workspaceId = body.workspaceId ?? 'default';
+  const workspaceId = await resolveWorkspaceId(body.workspaceId);
   const repo = body.repo;
   const cli = body.cli;
   const model = body.model;
@@ -87,10 +107,34 @@ export async function POST(req: Request) {
     }
   }
 
+  // Surface diagnostic info so the UI can show "we're syncing workspace X
+  // with N connectors" — the most common failure mode is a workspace
+  // mismatch where the agent is paired to one ID but data lives in another.
+  await ensureSchemaAsync();
+  const db = getLibsqlDb();
+  const ctx = await db.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM workspace_connector_configs WHERE workspace_id = ?) as connectors,
+       (SELECT COUNT(*) FROM workspace_agents WHERE (workspace_id = ? OR workspace_id = 'all') AND status = 'online') as online_agents,
+       (SELECT COUNT(*) FROM workspace_agents WHERE workspace_id = ? OR workspace_id = 'all') as paired_agents`,
+  ).get<{ connectors: number; online_agents: number; paired_agents: number }>(workspaceId, workspaceId, workspaceId);
+
   return NextResponse.json({
     ok: true,
     workspaceId,
+    workspaceId_resolved_from: body.workspaceId ? 'request' : 'auto-discovery (first github connector)',
     started_at: new Date(now).toISOString(),
     dispatched,
+    diagnostics: {
+      connectors_in_workspace: ctx?.connectors ?? 0,
+      paired_agents: ctx?.paired_agents ?? 0,
+      online_agents: ctx?.online_agents ?? 0,
+      hint:
+        (ctx?.online_agents ?? 0) === 0
+          ? 'No online agent. Run `workgraph run` in another terminal so the agent picks up jobs.'
+          : (ctx?.connectors ?? 0) === 0
+            ? `No connectors in workspace '${workspaceId}'. Connect a GitHub repo first.`
+            : null,
+    },
   });
 }

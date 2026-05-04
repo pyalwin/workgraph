@@ -31,6 +31,8 @@ export function RunAlmanacSyncCard() {
   const [running, setRunning] = useState(false);
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [resolvedWorkspace, setResolvedWorkspace] = useState<string | null>(null);
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -43,7 +45,8 @@ export function RunAlmanacSyncCard() {
 
   async function fetchStatus() {
     try {
-      const res = await fetch('/api/admin/almanac/sync-status?workspaceId=default');
+      const ws = resolvedWorkspace ?? 'default';
+      const res = await fetch(`/api/admin/almanac/sync-status?workspaceId=${encodeURIComponent(ws)}`);
       if (!res.ok) return;
       const data = (await res.json()) as SyncStatus;
       setStatus(data);
@@ -65,15 +68,28 @@ export function RunAlmanacSyncCard() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ workspaceId: 'default' }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string; started_at?: string };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        started_at?: string;
+        workspaceId?: string;
+        diagnostics?: {
+          connectors_in_workspace?: number;
+          online_agents?: number;
+          paired_agents?: number;
+          hint?: string | null;
+        };
+      };
       if (!res.ok || !data.ok) {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
       setStartedAt(data.started_at ?? new Date().toISOString());
+      setResolvedWorkspace(data.workspaceId ?? 'default');
+      setDiagnostic(data.diagnostics?.hint ?? null);
       setRunning(true);
       startPolling();
-      toast.success('Almanac sync queued', {
-        description: 'All 6 phases will run over the next ~12 minutes. Watch progress below.',
+      toast.success(`Almanac sync queued (workspace: ${data.workspaceId})`, {
+        description: data.diagnostics?.hint ?? 'All 6 phases will run over the next ~12 minutes.',
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -105,8 +121,16 @@ export function RunAlmanacSyncCard() {
 
       {startedAt && (
         <p style={timestampStyle}>
-          Started {new Date(startedAt).toLocaleTimeString()} — auto-refresh every 5s.
+          Started {new Date(startedAt).toLocaleTimeString()}
+          {resolvedWorkspace && <> · workspace <code style={inlineCodeStyle}>{resolvedWorkspace}</code></>}
+          {' — auto-refresh every 5s.'}
         </p>
+      )}
+
+      {diagnostic && (
+        <div style={warningStyle}>
+          ⚠ {diagnostic}
+        </div>
       )}
 
       <div style={gridStyle}>
@@ -254,6 +278,24 @@ const timestampStyle: React.CSSProperties = {
   margin: '0 0 12px',
   fontSize: 12,
   color: 'var(--ink-3, #888)',
+};
+
+const inlineCodeStyle: React.CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+  fontSize: '0.92em',
+  background: 'var(--bg-2, #f5f5f5)',
+  padding: '1px 5px',
+  borderRadius: 3,
+};
+
+const warningStyle: React.CSSProperties = {
+  margin: '0 0 12px',
+  padding: '8px 12px',
+  fontSize: 13,
+  color: '#92400e',
+  background: '#fef3c7',
+  borderRadius: 6,
+  border: '1px solid #fde68a',
 };
 
 const gridStyle: React.CSSProperties = {
