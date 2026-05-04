@@ -19,9 +19,13 @@
  */
 import { NextResponse } from 'next/server';
 import { withAuth } from '@workos-inc/authkit-nextjs';
-import { inngest } from '@/inngest/client';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import {
+  enqueueBackfill,
+  enqueueNoiseClassify,
+  runDetectUnits,
+} from '@/lib/almanac/sync/phase-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,13 +34,6 @@ interface SyncAllBody {
   repo?: string;
   cli?: string;
   model?: string;
-}
-
-interface PhaseSpec {
-  name: string;
-  event: string;
-  delaySec: number;
-  data: Record<string, unknown>;
 }
 
 /**
@@ -64,48 +61,14 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as SyncAllBody;
   const workspaceId = await resolveWorkspaceId(body.workspaceId);
   const repo = body.repo;
-  const cli = body.cli;
-  const model = body.model;
-
-  const baseData = { workspaceId } as Record<string, unknown>;
-  if (repo) baseData.repo = repo;
-  if (cli) baseData.cli = cli;
-  if (model) baseData.model = model;
-
-  const phases: PhaseSpec[] = [
-    { name: 'phase1-backfill',          event: 'workgraph/almanac.backfill',         delaySec: 0,    data: baseData },
-    { name: 'phase1.6-noise-classify',  event: 'workgraph/almanac.noise-classify',   delaySec: 300,  data: baseData },
-    { name: 'phase2-detect-units',      event: 'workgraph/almanac.detect-units',     delaySec: 360,  data: baseData },
-    { name: 'phase3-tickets-match',     event: 'workgraph/almanac.tickets.match',    delaySec: 540,  data: baseData },
-    { name: 'phase4-narrative-regen',   event: 'workgraph/almanac.narrative.regen',  delaySec: 600,  data: baseData },
-    { name: 'phase7-chunk-embed',       event: 'workgraph/chunk-embed.run',          delaySec: 720,  data: {} },
-  ];
 
   const now = Date.now();
-  const dispatched: { phase: string; event: string; scheduled_at: string }[] = [];
 
-  for (const p of phases) {
-    const ts = now + p.delaySec * 1000;
-    try {
-      await inngest.send({ name: p.event, data: p.data, ts });
-      dispatched.push({
-        phase: p.name,
-        event: p.event,
-        scheduled_at: new Date(ts).toISOString(),
-      });
-    } catch (err) {
-      // Inngest dev server tolerates missing event keys; in prod misconfiguration
-      // would surface here. Bail out partial — the user can re-run.
-      const msg = err instanceof Error ? err.message : String(err);
-      return NextResponse.json(
-        {
-          error: `Failed to enqueue ${p.event}: ${msg}`,
-          dispatched,
-        },
-        { status: 502 },
-      );
-    }
-  }
+  // Phase 1 enqueue — runs inline so jobs land in agent_jobs immediately,
+  // bypassing Inngest event dispatch (which is unreliable in dev when the
+  // dev-server / app start in different orders). Phases 1.6 / 2 are kicked
+  // off in the background once Phase 1 jobs drain (see /sync-status).
+  const phase1 = await enqueueBackfill(workspaceId, { repo });
 
   // Surface diagnostic info so the UI can show "we're syncing workspace X
   // with N connectors" — the most common failure mode is a workspace
@@ -124,7 +87,7 @@ export async function POST(req: Request) {
     workspaceId,
     workspaceId_resolved_from: body.workspaceId ? 'request' : 'auto-discovery (first github connector)',
     started_at: new Date(now).toISOString(),
-    dispatched,
+    phase1_enqueue: phase1,
     diagnostics: {
       connectors_in_workspace: ctx?.connectors ?? 0,
       paired_agents: ctx?.paired_agents ?? 0,
@@ -134,7 +97,10 @@ export async function POST(req: Request) {
           ? 'No online agent. Run `workgraph run` in another terminal so the agent picks up jobs.'
           : (ctx?.connectors ?? 0) === 0
             ? `No connectors in workspace '${workspaceId}'. Connect a GitHub repo first.`
-            : null,
+            : phase1.reason
+              ? `Phase 1: ${phase1.reason}`
+              : `Phase 1 enqueued ${phase1.enqueued ?? 0} jobs across ${phase1.repos ?? 0} repos. Watch the agent_jobs counter — Phases 1.6/2/3/4/7 advance automatically as each one drains.`,
     },
   });
 }
+

@@ -8,8 +8,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@workos-inc/authkit-nextjs';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import { enqueueNoiseClassify, runDetectUnits } from '@/lib/almanac/sync/phase-helpers';
+import { matchTicket, findOrphanTickets } from '@/lib/sync/ticket-code-matcher';
+import { regenerateSections } from '@/lib/almanac/section-runner';
 
 export const dynamic = 'force-dynamic';
+
+// Advancement guard — never re-fire a phase within this many seconds even
+// if the prior pipeline appears drained.
+const MIN_ADVANCE_INTERVAL_MS = 30_000;
+const lastAdvancedAt: Record<string, Record<string, number>> = {};
+function markAdvanced(workspaceId: string, phase: string): void {
+  lastAdvancedAt[workspaceId] = lastAdvancedAt[workspaceId] ?? {};
+  lastAdvancedAt[workspaceId][phase] = Date.now();
+}
+function recentlyAdvanced(workspaceId: string, phase: string): boolean {
+  const t = lastAdvancedAt[workspaceId]?.[phase];
+  return t !== undefined && Date.now() - t < MIN_ADVANCE_INTERVAL_MS;
+}
 
 interface CountRow {
   c: number;
@@ -115,6 +131,65 @@ export async function GET(req: NextRequest) {
      WHERE kind LIKE 'almanac.%'
      GROUP BY status`,
   ).all<JobBucket>();
+  const jobsByStatus: Record<string, number> = Object.fromEntries(
+    jobBuckets.map((b) => [b.status, b.c]),
+  );
+
+  // Pipeline advancement — when prior phase has data and no jobs are still
+  // queued/running, kick the next phase. Each advance is rate-limited so we
+  // don't re-fire on every poll. Errors here are non-fatal (logged + ignored).
+  const advanced: string[] = [];
+  async function tryAdvance(name: string, fn: () => Promise<unknown>): Promise<void> {
+    if (recentlyAdvanced(workspaceId, name)) return;
+    try {
+      await fn();
+      markAdvanced(workspaceId, name);
+      advanced.push(name);
+    } catch (err) {
+      console.error(`[sync-status] advance ${name} failed:`, err);
+    }
+  }
+
+  const queuedOrRunning = (jobsByStatus.queued ?? 0) + (jobsByStatus.running ?? 0);
+  const phase1Done = (eventsTotal?.c ?? 0) > 0 && queuedOrRunning === 0;
+  const phase16Done = phase1Done && (eventsClassified?.c ?? 0) > 0;
+  const phase2Done = phase16Done && (unitsTotal?.c ?? 0) > 0 && (unitsNamed?.c ?? 0) > 0;
+
+  // Phase 1.6 — fire when Phase 1 events exist but none classified yet
+  if ((eventsTotal?.c ?? 0) > 0 && (eventsClassified?.c ?? 0) === 0 && queuedOrRunning === 0) {
+    await tryAdvance('phase1.6-noise', () => enqueueNoiseClassify(workspaceId));
+  }
+
+  // Phase 2 — fire when classified events exist but no units yet
+  if (phase16Done && (unitsTotal?.c ?? 0) === 0 && queuedOrRunning === 0) {
+    await tryAdvance('phase2-detect-units', () => runDetectUnits(workspaceId));
+  }
+
+  // Phase 3 — server-side matcher, fires once units exist and no candidates yet
+  if (phase2Done && (candidatesTotal?.c ?? 0) === 0) {
+    await tryAdvance('phase3-tickets-match', async () => {
+      const orphans = await findOrphanTickets(workspaceId);
+      for (const t of orphans.slice(0, 50)) {
+        await matchTicket(workspaceId, t).catch((e) => console.error('matchTicket', e));
+      }
+    });
+  }
+
+  // Phase 4 — server-side narrative regen, fires once units exist and no sections yet
+  if (phase2Done && (sectionsTotal?.c ?? 0) === 0) {
+    await tryAdvance('phase4-narrative', async () => {
+      // Find every project_key that has units, regenerate per project
+      const projects = await db.prepare(
+        `SELECT DISTINCT project_key FROM functional_units
+         WHERE workspace_id = ? AND status = 'active' AND project_key IS NOT NULL`,
+      ).all<{ project_key: string }>(workspaceId);
+      for (const p of projects) {
+        await regenerateSections(workspaceId, p.project_key).catch((e) =>
+          console.error('regenerateSections', p.project_key, e),
+        );
+      }
+    });
+  }
 
   return NextResponse.json({
     workspaceId,
@@ -151,7 +226,8 @@ export async function GET(req: NextRequest) {
       chunks_embedded: chunksEmbedded?.c ?? 0,
     },
     agent_jobs: {
-      by_status: Object.fromEntries(jobBuckets.map((b) => [b.status, b.c])),
+      by_status: jobsByStatus,
     },
+    advanced_phases_this_poll: advanced,
   });
 }
