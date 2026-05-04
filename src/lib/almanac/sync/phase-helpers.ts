@@ -45,19 +45,25 @@ const NOISE_BATCH_SIZE = 50;
 
 /**
  * Re-queue any 'failed' job for an idempotency key so a manual retry
- * (Run sync click) acts as a real retry. Returns true if a row was reset,
- * meaning the caller should NOT also INSERT (the unique constraint would
- * collide and INSERT OR IGNORE skips silently — losing the retry).
+ * (Run sync click) acts as a real retry. ALSO overwrites the params
+ * column with the freshly-built ones — the stale params are usually
+ * what made the job fail in the first place (null fields the agent's
+ * strict validators reject), so blindly re-queuing the same row would
+ * just fail again. Returns true if a row was reset, meaning the caller
+ * should NOT also INSERT (the unique constraint would collide and
+ * INSERT OR IGNORE skips silently — losing the retry).
  */
 async function requeueFailedJob(
   agentId: string,
   idempotencyKey: string,
+  freshParamsJson: string,
 ): Promise<boolean> {
   const db = getLibsqlDb();
   const result = await db
     .prepare(
       `UPDATE agent_jobs
          SET status = 'queued',
+             params = ?,
              error = NULL,
              attempt = COALESCE(attempt, 0) + 1,
              started_at = NULL,
@@ -65,7 +71,7 @@ async function requeueFailedJob(
              created_at = datetime('now')
        WHERE agent_id = ? AND idempotency_key = ? AND status = 'failed'`,
     )
-    .run(agentId, idempotencyKey);
+    .run(freshParamsJson, agentId, idempotencyKey);
   return (result.changes ?? 0) > 0;
 }
 
@@ -119,38 +125,40 @@ export async function enqueueBackfill(
       .prepare(`SELECT last_sha, last_occurred_at FROM code_events_backfill_state WHERE repo = ?`)
       .get<BackfillCursor>(repo.id)) ?? { last_sha: null, last_occurred_at: null };
 
+    // Build the params object first — omit null/empty optional keys so
+    // the agent's strict assertString doesn't reject "defined but invalid".
+    const ceParams: Record<string, unknown> = {
+      workspaceId,
+      repo: repo.id,
+      branch: 'main',
+    };
+    if (cursor.last_occurred_at) ceParams.sinceIso = cursor.last_occurred_at;
+    const ceParamsJson = JSON.stringify(ceParams);
     const ceKey = `almanac-code-events-${repo.id}-${today}`;
-    if (await requeueFailedJob(agentId, ceKey)) {
+    if (await requeueFailedJob(agentId, ceKey, ceParamsJson)) {
       requeued++;
     } else {
-      // Build the params object — omit null/empty optional keys so the
-      // agent's strict assertString doesn't reject "defined but invalid".
-      const ceParams: Record<string, unknown> = {
-        workspaceId,
-        repo: repo.id,
-        branch: 'main',
-      };
-      if (cursor.last_occurred_at) ceParams.sinceIso = cursor.last_occurred_at;
       const ceResult = await db
         .prepare(
           `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
            VALUES (?, ?, 'almanac.code-events.extract', ?, 'queued', ?, datetime('now'))`,
         )
-        .run(uuidv4(), agentId, JSON.stringify(ceParams), ceKey);
+        .run(uuidv4(), agentId, ceParamsJson, ceKey);
       if ((ceResult.changes ?? 0) > 0) enqueued++;
     }
 
+    const flParams: Record<string, unknown> = { workspaceId, repo: repo.id, branch: 'main' };
+    const flParamsJson = JSON.stringify(flParams);
     const flKey = `almanac-file-lifecycle-${repo.id}-${today}`;
-    if (await requeueFailedJob(agentId, flKey)) {
+    if (await requeueFailedJob(agentId, flKey, flParamsJson)) {
       requeued++;
     } else {
-      const flParams: Record<string, unknown> = { workspaceId, repo: repo.id, branch: 'main' };
       const flResult = await db
         .prepare(
           `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
            VALUES (?, ?, 'almanac.file-lifecycle.extract', ?, 'queued', ?, datetime('now'))`,
         )
-        .run(uuidv4(), agentId, JSON.stringify(flParams), flKey);
+        .run(uuidv4(), agentId, flParamsJson, flKey);
       if ((flResult.changes ?? 0) > 0) enqueued++;
     }
   }
@@ -210,7 +218,8 @@ export async function enqueueNoiseClassify(
       };
       if (opts.model) params.model = opts.model;
       const idemKey = `almanac-noise-classify-${repo.id}-${today}-batch${Math.floor(i / NOISE_BATCH_SIZE)}`;
-      if (await requeueFailedJob(agentId, idemKey)) {
+      const paramsJson = JSON.stringify(params);
+      if (await requeueFailedJob(agentId, idemKey, paramsJson)) {
         enqueued++;
         continue;
       }
@@ -219,7 +228,7 @@ export async function enqueueNoiseClassify(
           `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
            VALUES (?, ?, 'almanac.noise.classify', ?, 'queued', ?, datetime('now'))`,
         )
-        .run(uuidv4(), agentId, JSON.stringify(params), idemKey);
+        .run(uuidv4(), agentId, paramsJson, idemKey);
       if ((result.changes ?? 0) > 0) enqueued++;
     }
   }
@@ -268,8 +277,9 @@ export async function runDetectUnits(
 
   for (const repo of repos) {
     const params = { workspaceId, repo: repo.id };
+    const paramsJson = JSON.stringify(params);
     const idemKey = `almanac-units-cluster-${repo.id}-${today}`;
-    if (await requeueFailedJob(agentId, idemKey)) {
+    if (await requeueFailedJob(agentId, idemKey, paramsJson)) {
       enqueued++;
       continue;
     }
@@ -278,7 +288,7 @@ export async function runDetectUnits(
         `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
          VALUES (?, ?, 'almanac.units.cluster', ?, 'queued', ?, datetime('now'))`,
       )
-      .run(uuidv4(), agentId, JSON.stringify(params), idemKey);
+      .run(uuidv4(), agentId, paramsJson, idemKey);
     if ((result.changes ?? 0) > 0) enqueued++;
   }
 
