@@ -50,11 +50,22 @@ export function RunAlmanacSyncCard() {
 
   async function fetchStatus() {
     try {
-      const ws = resolvedWorkspace ?? 'default';
-      const res = await fetch(`/api/admin/almanac/sync-status?workspaceId=${encodeURIComponent(ws)}`);
+      // Don't pass workspaceId — let the server auto-discover the
+      // workspace that has a configured GitHub connector. If we were
+      // syncing a specific workspace earlier, pass that to keep the
+      // card consistent across re-renders.
+      const url = resolvedWorkspace
+        ? `/api/admin/almanac/sync-status?workspaceId=${encodeURIComponent(resolvedWorkspace)}`
+        : `/api/admin/almanac/sync-status`;
+      const res = await fetch(url);
       if (!res.ok) return;
       const data = (await res.json()) as SyncStatus;
       setStatus(data);
+      // Pin the workspace once we discover it, so subsequent polls are
+      // consistent even if the user adds connectors elsewhere.
+      if (!resolvedWorkspace && data.workspaceId) {
+        setResolvedWorkspace(data.workspaceId);
+      }
     } catch {
       // ignore
     }

@@ -48,7 +48,21 @@ export async function GET(req: NextRequest) {
   await ensureSchemaAsync();
   const db = getLibsqlDb();
 
-  const workspaceId = req.nextUrl.searchParams.get('workspaceId') ?? 'default';
+  // If the caller explicitly passes ?workspaceId=X, use it. Otherwise
+  // auto-discover the workspace that has a configured GitHub connector
+  // (same heuristic as sync-all/route.ts) so the card doesn't end up
+  // staring at workspace='default' (empty) when the data lives in
+  // 'engineering'. Defaults to 'default' if no connector is found.
+  const explicit = req.nextUrl.searchParams.get('workspaceId');
+  const workspaceId = explicit ?? (await (async () => {
+    const row = await db.prepare(
+      `SELECT workspace_id FROM workspace_connector_configs
+       WHERE source = 'github' AND status IN ('configured', 'connected', 'ok')
+       ORDER BY last_sync_completed_at DESC NULLS LAST
+       LIMIT 1`,
+    ).get<{ workspace_id: string }>();
+    return row?.workspace_id ?? 'default';
+  })());
 
   // Phase 1 — code_events
   const eventsTotal = await db.prepare(
