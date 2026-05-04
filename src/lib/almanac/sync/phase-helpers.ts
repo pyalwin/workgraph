@@ -80,15 +80,23 @@ async function requeueFailedJob(
          AND idempotency_key = ?
          AND (
            status = 'failed'
+           -- noise.classify: classified=0 with batch_size>0
            OR (
              status = 'done'
              AND COALESCE(CAST(json_extract(result, '$.classified') AS INTEGER), -1) = 0
              AND COALESCE(CAST(json_extract(result, '$.batch_size') AS INTEGER), 0) > 0
            )
+           -- units.name: named=0 with batch_size>0
            OR (
              status = 'done'
              AND COALESCE(CAST(json_extract(result, '$.named') AS INTEGER), -1) = 0
              AND COALESCE(CAST(json_extract(result, '$.batch_size') AS INTEGER), 0) > 0
+           )
+           -- units.cluster: clusters=0 (couldn't fetch events / produced nothing)
+           OR (
+             status = 'done'
+             AND COALESCE(CAST(json_extract(result, '$.clusters') AS INTEGER), -1) = 0
+             AND COALESCE(CAST(json_extract(result, '$.events_in') AS INTEGER), -1) = 0
            )
          )`,
     )
@@ -312,7 +320,41 @@ export async function runDetectUnits(
   let enqueued = 0;
 
   for (const repo of repos) {
-    const params = { workspaceId, repo: repo.id };
+    // Pull the signal events the agent needs to cluster. The agent has a
+    // fallback that fetches them via /api/almanac/clusters/source-events,
+    // but that route is auth-gated and silently 404s the agent's request
+    // (returning HTML), so we always inline the events here.
+    interface SourceEvent {
+      sha: string;
+      files_touched: string[];
+      occurred_at: string;
+    }
+    interface SourceRow {
+      sha: string;
+      files_touched: string;
+      occurred_at: string;
+    }
+    const sourceRows = await db
+      .prepare(
+        `SELECT sha, files_touched, occurred_at FROM code_events
+         WHERE workspace_id = ? AND repo = ? AND is_feature_evolution = 1
+         ORDER BY occurred_at ASC`,
+      )
+      .all<SourceRow>(workspaceId, repo.id);
+    const events: SourceEvent[] = sourceRows.map((r) => {
+      let files: string[] = [];
+      try {
+        const parsed = JSON.parse(r.files_touched);
+        if (Array.isArray(parsed)) {
+          files = parsed.filter((p): p is string => typeof p === 'string');
+        }
+      } catch {
+        // skip malformed
+      }
+      return { sha: r.sha, files_touched: files, occurred_at: r.occurred_at };
+    });
+
+    const params = { workspaceId, repo: repo.id, events };
     const paramsJson = JSON.stringify(params);
     const idemKey = `almanac-units-cluster-${repo.id}-${today}`;
     if (await requeueFailedJob(agentId, idemKey, paramsJson)) {
