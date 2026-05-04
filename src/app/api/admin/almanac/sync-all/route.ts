@@ -26,6 +26,8 @@ import {
   enqueueNoiseClassify,
   runDetectUnits,
 } from '@/lib/almanac/sync/phase-helpers';
+import { matchTicket, findOrphanTickets } from '@/lib/sync/ticket-code-matcher';
+import { regenerateSections } from '@/lib/almanac/section-runner';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,18 +66,94 @@ export async function POST(req: Request) {
 
   const now = Date.now();
 
-  // Phase 1 enqueue — runs inline so jobs land in agent_jobs immediately,
-  // bypassing Inngest event dispatch (which is unreliable in dev when the
-  // dev-server / app start in different orders). Phases 1.6 / 2 are kicked
-  // off in the background once Phase 1 jobs drain (see /sync-status).
+  // Run every applicable phase inline. Each helper is idempotent + gated
+  // by data state, so calling them all on every click is safe — phases
+  // whose prerequisites aren't met return { ok:true, enqueued:0 }.
+  // This lets a single 'Run sync' click push the pipeline forward
+  // regardless of where it's currently stuck.
   const phase1 = await enqueueBackfill(workspaceId, { repo });
+
+  await ensureSchemaAsync();
+  const dbForPeek = getLibsqlDb();
+  const phase16 = await dbForPeek.prepare(
+    `SELECT COUNT(*) AS c FROM code_events
+     WHERE workspace_id = ? AND noise_class = 'signal' AND intent IS NULL`,
+  ).get<{ c: number }>(workspaceId);
+  const queuedOrRunning = await dbForPeek.prepare(
+    `SELECT COUNT(*) AS c FROM agent_jobs
+     WHERE kind LIKE 'almanac.%' AND status IN ('queued','running')`,
+  ).get<{ c: number }>();
+
+  let phase16Result: unknown = null;
+  let phase2Result: unknown = null;
+  let phase3Result: unknown = null;
+  let phase4Result: unknown = null;
+
+  if ((phase16?.c ?? 0) > 0 && (queuedOrRunning?.c ?? 0) === 0) {
+    phase16Result = await enqueueNoiseClassify(workspaceId).catch((e) => ({
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    }));
+  }
+
+  // Phase 2 / 3 / 4 — fire only if Phase 1.6 has produced LLM-classified
+  // events (intent IS NOT NULL). Phase 2 enqueues an agent job; 3 and 4
+  // run server-side immediately.
+  const llmDoneRow = await dbForPeek.prepare(
+    `SELECT COUNT(*) AS c FROM code_events WHERE workspace_id = ? AND intent IS NOT NULL`,
+  ).get<{ c: number }>(workspaceId);
+
+  if ((llmDoneRow?.c ?? 0) > 0) {
+    const unitsRow = await dbForPeek.prepare(
+      `SELECT COUNT(*) AS c FROM functional_units WHERE workspace_id = ? AND status = 'active'`,
+    ).get<{ c: number }>(workspaceId);
+    if ((unitsRow?.c ?? 0) === 0) {
+      phase2Result = await runDetectUnits(workspaceId).catch((e) => ({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+    } else {
+      // Phase 3 — server-side ticket matcher
+      phase3Result = await (async () => {
+        try {
+          const orphans = await findOrphanTickets(workspaceId);
+          let matched = 0;
+          for (const t of orphans.slice(0, 50)) {
+            await matchTicket(workspaceId, t).catch(() => null);
+            matched++;
+          }
+          return { ok: true, orphans: orphans.length, matched };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      })();
+
+      // Phase 4 — server-side narrative regen for each project_key
+      phase4Result = await (async () => {
+        try {
+          const projects = await dbForPeek.prepare(
+            `SELECT DISTINCT project_key FROM functional_units
+             WHERE workspace_id = ? AND status = 'active' AND project_key IS NOT NULL`,
+          ).all<{ project_key: string }>(workspaceId);
+          const summaries: unknown[] = [];
+          for (const p of projects) {
+            const s = await regenerateSections(workspaceId, p.project_key).catch((e) => ({
+              error: e instanceof Error ? e.message : String(e),
+            }));
+            summaries.push({ project_key: p.project_key, ...(s as object) });
+          }
+          return { ok: true, projects: summaries };
+        } catch (e) {
+          return { ok: false, error: e instanceof Error ? e.message : String(e) };
+        }
+      })();
+    }
+  }
 
   // Surface diagnostic info so the UI can show "we're syncing workspace X
   // with N connectors" — the most common failure mode is a workspace
   // mismatch where the agent is paired to one ID but data lives in another.
-  await ensureSchemaAsync();
-  const db = getLibsqlDb();
-  const ctx = await db.prepare(
+  const ctx = await dbForPeek.prepare(
     `SELECT
        (SELECT COUNT(*) FROM workspace_connector_configs WHERE workspace_id = ?) as connectors,
        (SELECT COUNT(*) FROM workspace_agents WHERE (workspace_id = ? OR workspace_id = 'all') AND status = 'online') as online_agents,
@@ -88,6 +166,10 @@ export async function POST(req: Request) {
     workspaceId_resolved_from: body.workspaceId ? 'request' : 'auto-discovery (first github connector)',
     started_at: new Date(now).toISOString(),
     phase1_enqueue: phase1,
+    phase1_6_enqueue: phase16Result,
+    phase2_enqueue: phase2Result,
+    phase3_match: phase3Result,
+    phase4_narrate: phase4Result,
     diagnostics: {
       connectors_in_workspace: ctx?.connectors ?? 0,
       paired_agents: ctx?.paired_agents ?? 0,
