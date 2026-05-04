@@ -188,21 +188,22 @@ export default async function LandingPage() {
               Your database is one file. Pick it up and move it. No analytics, no telemetry,
               no cloud reach-back. Encrypted OAuth tokens at rest.
             </p>
-            <code className="landing-card-code">~/.workgraph/workgraph.db</code>
+            <code className="landing-card-code">./data/workgraph.db</code>
           </article>
 
           <article className="landing-card landing-card-stack">
             <span className="landing-card-tag">BYOAI</span>
             <h3>Bring your own model.</h3>
             <p>
-              Vercel AI SDK under the hood. OpenRouter by default. Anthropic, OpenAI,
-              Google, or local Ollama with a single setting change.
+              Vercel AI SDK under the hood. AI Gateway by default — swap to OpenRouter
+              for any model (Anthropic, OpenAI, Google, Mistral). Embeddings via Hugging
+              Face Inference.
             </p>
             <ul className="landing-card-pills">
+              <li>Gateway</li>
               <li>OpenRouter</li>
               <li>Anthropic</li>
-              <li>OpenAI</li>
-              <li>Ollama</li>
+              <li>HuggingFace</li>
             </ul>
           </article>
 
