@@ -23,6 +23,7 @@ import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { buildDossier, buildProjectDossier } from './dossier-builder';
 import { rechunkAlmanacSection } from './chunks';
+import { resolveAgentForWorkspace } from './agent-resolver';
 import { buildCoverSection, sourcehash } from './sections/cover';
 import { buildSummarySection } from './sections/summary';
 import { buildUnitSection } from './sections/unit';
@@ -51,10 +52,6 @@ interface ExistingSection {
   source_hash: string;
 }
 
-interface AgentRow {
-  agent_id: string;
-}
-
 interface UnitRow {
   id: string;
 }
@@ -80,15 +77,7 @@ export async function regenerateSections(
   const db = getLibsqlDb();
 
   // Resolve active agent (optional — skeletons write regardless)
-  const agentRow = await db
-    .prepare(
-      `SELECT agent_id FROM workspace_agents
-       WHERE workspace_id = ? AND status = 'online'
-       ORDER BY last_seen_at DESC
-       LIMIT 1`,
-    )
-    .get<AgentRow>(workspaceId);
-  const agentId = agentRow?.agent_id ?? null;
+  const agentId = await resolveAgentForWorkspace(workspaceId);
   if (!agentId) {
     console.warn(
       `[section-runner] No online agent for workspace ${workspaceId}. ` +

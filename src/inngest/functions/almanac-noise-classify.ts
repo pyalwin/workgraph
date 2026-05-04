@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { getConnectorConfigBySource } from '@/lib/connectors/config-store';
+import { resolveAgentForWorkspace } from '@/lib/almanac/agent-resolver';
 import { inngest } from '../client';
 
 /**
@@ -20,10 +21,6 @@ import { inngest } from '../client';
 
 interface RepoEntry {
   id: string; // "owner/name"
-}
-
-interface AgentRow {
-  agent_id: string;
 }
 
 interface PendingEvent {
@@ -59,7 +56,10 @@ export const almanacNoiseClassify = inngest.createFunction(
         console.log('[almanac-noise-classify] No github connector configured for workspace', workspaceId);
         return [] as RepoEntry[];
       }
-      const all = (cfg.config.options?.repos as RepoEntry[] | undefined) ?? [];
+      const opts = cfg.config.options as
+        | { repos?: RepoEntry[]; discovered?: { repos?: RepoEntry[] } }
+        | undefined;
+      const all = opts?.repos ?? opts?.discovered?.repos ?? [];
       const filterRepo = (event.data as { repo?: string })?.repo;
       if (filterRepo) {
         return all.filter((r) => r.id === filterRepo);
@@ -71,18 +71,9 @@ export const almanacNoiseClassify = inngest.createFunction(
       return { ok: true, repos: 0 };
     }
 
-    // Step 3 — pick the most recently-seen online agent; v1 picker (single-agent per workspace)
+    // Step 3 — pick the most recently-seen online agent (or 'all' slot)
     const agentId = await step.run('resolve-agent', async () => {
-      const db = getLibsqlDb();
-      const row = await db
-        .prepare(
-          `SELECT agent_id FROM workspace_agents
-           WHERE workspace_id = ? AND status = 'online'
-           ORDER BY last_seen_at DESC
-           LIMIT 1`,
-        )
-        .get<AgentRow>(workspaceId);
-      return row?.agent_id ?? null;
+      return resolveAgentForWorkspace(workspaceId);
     });
 
     if (!agentId) {

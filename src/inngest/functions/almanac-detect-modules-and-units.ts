@@ -4,6 +4,7 @@ import { getLibsqlDb } from '@/lib/db/libsql';
 import { getConnectorConfigBySource } from '@/lib/connectors/config-store';
 import { detectModulesForRepo } from '@/lib/almanac/module-detector';
 import { seedJiraEpicAliases } from '@/lib/almanac/jira-epic-aliases';
+import { resolveAgentForWorkspace } from '@/lib/almanac/agent-resolver';
 import { inngest } from '../client';
 
 /**
@@ -26,10 +27,6 @@ const CLUSTER_LOOKBACK_MONTHS = 12;
 
 interface RepoEntry {
   id: string;
-}
-
-interface AgentRow {
-  agent_id: string;
 }
 
 interface UnnamedUnit {
@@ -65,7 +62,10 @@ export const almanacDetectModulesAndUnits = inngest.createFunction(
         console.log('[almanac-detect-modules] No github connector for workspace', workspaceId);
         return [] as RepoEntry[];
       }
-      const all = (cfg.config.options?.repos as RepoEntry[] | undefined) ?? [];
+      const opts = cfg.config.options as
+        | { repos?: RepoEntry[]; discovered?: { repos?: RepoEntry[] } }
+        | undefined;
+      const all = opts?.repos ?? opts?.discovered?.repos ?? [];
       const filterRepo = (event.data as { repo?: string })?.repo;
       if (filterRepo) return all.filter((r) => r.id === filterRepo);
       return all;
@@ -73,18 +73,9 @@ export const almanacDetectModulesAndUnits = inngest.createFunction(
 
     if (repos.length === 0) return { ok: true, repos: 0 };
 
-    // Step 3 — resolve the most recently-seen online agent
+    // Step 3 — resolve the most recently-seen online agent (or 'all' slot)
     const agentId = await step.run('resolve-agent', async () => {
-      const db = getLibsqlDb();
-      const row = await db
-        .prepare(
-          `SELECT agent_id FROM workspace_agents
-           WHERE workspace_id = ? AND status = 'online'
-           ORDER BY last_seen_at DESC
-           LIMIT 1`,
-        )
-        .get<AgentRow>(workspaceId);
-      return row?.agent_id ?? null;
+      return resolveAgentForWorkspace(workspaceId);
     });
 
     if (!agentId) return { ok: false, reason: 'no_online_agent' };
