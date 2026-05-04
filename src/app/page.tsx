@@ -163,7 +163,7 @@ export default async function LandingPage() {
       <section className="landing-features" id="features">
         <header className="landing-section-head">
           <p className="landing-section-eyebrow">Built different</p>
-          <h2 className="landing-section-title">No cloud. No lock-in. No surprises.</h2>
+          <h2 className="landing-section-title">No lock-in. No telemetry. No surprises.</h2>
         </header>
 
         <div className="landing-bento">
@@ -185,8 +185,9 @@ export default async function LandingPage() {
             <span className="landing-card-tag">Local</span>
             <h3>SQLite + sqlite-vec.</h3>
             <p>
-              Your database is one file. Pick it up and move it. No analytics, no telemetry,
-              no cloud reach-back. Encrypted OAuth tokens at rest.
+              Your database is one file. Pick it up and move it. No analytics, no
+              telemetry. Outbound traffic goes only to your connected sources and
+              the AI provider you configure. Encrypted OAuth tokens at rest.
             </p>
             <code className="landing-card-code">./data/workgraph.db</code>
           </article>
@@ -229,8 +230,8 @@ export default async function LandingPage() {
         <p className="landing-section-eyebrow">Ready when you are</p>
         <h2>Ship the truth, not the chase.</h2>
         <p>
-          Stop reconstructing context across a dozen tabs. Run WorkGraph on your machine
-          and see the work as it actually moves.
+          Stop reconstructing context across a dozen tabs. Connect WorkGraph to your
+          stack and see the work as it actually moves.
         </p>
         <Link href={ctaHref} className="landing-cta-primary landing-cta-final">
           {ctaLabel}
