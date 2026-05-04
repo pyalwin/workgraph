@@ -227,27 +227,68 @@ export const almanacNoiseClassifyHandler: JobHandler = async (
     model: p.model,
   });
 
-  // Parse JSONL output — silently skip lines that don't parse or have wrong shape
+  // Parse output. Codex / Claude / Gemini all sometimes deviate from
+  // strict JSONL — common shapes we accept:
+  //   1. JSONL (one JSON object per line)
+  //   2. ```json … ``` fenced blocks (containing JSONL or a single array)
+  //   3. A single JSON array
+  //   4. Mixed: any of the above embedded in chatty preamble/postamble
   const knownShas = new Set(p.events.map((e) => e.sha));
   const results: ClassifyResult[] = [];
   const seen = new Set<string>();
+  const candidates: unknown[] = [];
 
-  for (const line of rawOutput.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      // Chatty CLIs may print preamble or explanation text — skip silently
-      continue;
+  // Strip ```json``` and ``` fences (keep inner content)
+  let stripped = rawOutput.replace(/```(?:json)?\s*\n?/gi, "").replace(/```/g, "");
+
+  // Try whole output as a JSON array first
+  try {
+    const arr = JSON.parse(stripped.trim());
+    if (Array.isArray(arr)) for (const o of arr) candidates.push(o);
+  } catch {
+    // fall through to line-by-line + per-object scan
+  }
+
+  // Line-by-line JSONL
+  if (candidates.length === 0) {
+    for (const line of stripped.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        candidates.push(JSON.parse(trimmed));
+      } catch {
+        // skip
+      }
     }
-    const result = parseClassifyResult(parsed, knownShas);
+  }
+
+  // Last resort: regex-extract `{...}` segments and try each
+  if (candidates.length === 0) {
+    const objMatches = stripped.match(/\{[^{}]*"sha"[^{}]*\}/g) ?? [];
+    for (const m of objMatches) {
+      try {
+        candidates.push(JSON.parse(m));
+      } catch {
+        // skip
+      }
+    }
+  }
+
+  for (const c of candidates) {
+    const result = parseClassifyResult(c, knownShas);
     if (!result) continue;
-    // Deduplicate: keep first result per sha in case the CLI repeats itself
     if (seen.has(result.sha)) continue;
     seen.add(result.sha);
     results.push(result);
+  }
+
+  // If everything failed, surface a sample so the next job result includes
+  // diagnostic info rather than a silent 'classified: 0'.
+  let diagnostic: string | null = null;
+  if (results.length === 0 && p.events.length > 0) {
+    const sample = rawOutput.slice(0, 600).replace(/\s+/g, " ");
+    diagnostic = `parsed 0 / ${p.events.length} — sample of CLI output: ${sample}`;
+    console.error(`[almanac-classify] ${diagnostic}`);
   }
 
   // POST to the ingest endpoint even on partial results so partial progress
@@ -261,5 +302,6 @@ export const almanacNoiseClassifyHandler: JobHandler = async (
     batch_size: p.events.length,
     classified: results.length,
     missed: p.events.length - results.length,
+    ...(diagnostic ? { diagnostic } : {}),
   };
 };

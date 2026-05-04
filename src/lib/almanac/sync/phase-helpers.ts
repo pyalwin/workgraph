@@ -59,6 +59,13 @@ async function requeueFailedJob(
   freshParamsJson: string,
 ): Promise<boolean> {
   const db = getLibsqlDb();
+  // Reset on:
+  //   - status='failed' (obvious retry)
+  //   - status='done' but the job produced no useful work — e.g. a
+  //     noise.classify or units.cluster job that returned classified=0
+  //     because the CLI output didn't parse. Treating these as 'done'
+  //     leaves stale idempotency keys and INSERT OR IGNORE silently
+  //     drops the user's retry click.
   const result = await db
     .prepare(
       `UPDATE agent_jobs
@@ -69,7 +76,21 @@ async function requeueFailedJob(
              started_at = NULL,
              completed_at = NULL,
              created_at = datetime('now')
-       WHERE agent_id = ? AND idempotency_key = ? AND status = 'failed'`,
+       WHERE agent_id = ?
+         AND idempotency_key = ?
+         AND (
+           status = 'failed'
+           OR (
+             status = 'done'
+             AND COALESCE(CAST(json_extract(result, '$.classified') AS INTEGER), -1) = 0
+             AND COALESCE(CAST(json_extract(result, '$.batch_size') AS INTEGER), 0) > 0
+           )
+           OR (
+             status = 'done'
+             AND COALESCE(CAST(json_extract(result, '$.named') AS INTEGER), -1) = 0
+             AND COALESCE(CAST(json_extract(result, '$.batch_size') AS INTEGER), 0) > 0
+           )
+         )`,
     )
     .run(freshParamsJson, agentId, idempotencyKey);
   return (result.changes ?? 0) > 0;
