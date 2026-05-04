@@ -55,14 +55,27 @@ export async function GET(req: NextRequest) {
     `SELECT COUNT(*) AS c FROM code_events WHERE workspace_id = ?`,
   ).get<CountRow>(workspaceId);
 
-  const eventsClassified = await db.prepare(
+  // Stage 1 (mechanical) runs on ingest and sets classifier_run_at.
+  // Stage 2 (LLM via agent) sets `intent`. We track both — but the
+  // advancement gate cares about Stage 2.
+  const eventsMechanicalClassified = await db.prepare(
     `SELECT COUNT(*) AS c FROM code_events
      WHERE workspace_id = ? AND classifier_run_at IS NOT NULL`,
   ).get<CountRow>(workspaceId);
 
+  const eventsLlmClassified = await db.prepare(
+    `SELECT COUNT(*) AS c FROM code_events
+     WHERE workspace_id = ? AND intent IS NOT NULL`,
+  ).get<CountRow>(workspaceId);
+
   const eventsSignal = await db.prepare(
     `SELECT COUNT(*) AS c FROM code_events
-     WHERE workspace_id = ? AND is_feature_evolution = 1`,
+     WHERE workspace_id = ? AND noise_class = 'signal'`,
+  ).get<CountRow>(workspaceId);
+
+  const eventsSignalPendingLlm = await db.prepare(
+    `SELECT COUNT(*) AS c FROM code_events
+     WHERE workspace_id = ? AND noise_class = 'signal' AND intent IS NULL`,
   ).get<CountRow>(workspaceId);
 
   const eventsUnitAssigned = await db.prepare(
@@ -152,11 +165,14 @@ export async function GET(req: NextRequest) {
 
   const queuedOrRunning = (jobsByStatus.queued ?? 0) + (jobsByStatus.running ?? 0);
   const phase1Done = (eventsTotal?.c ?? 0) > 0 && queuedOrRunning === 0;
-  const phase16Done = phase1Done && (eventsClassified?.c ?? 0) > 0;
+  // Phase 1.6 is "done" when there are no signal events still waiting
+  // for the Stage 2 LLM intent column.
+  const phase16Done = phase1Done && (eventsSignalPendingLlm?.c ?? 0) === 0;
   const phase2Done = phase16Done && (unitsTotal?.c ?? 0) > 0 && (unitsNamed?.c ?? 0) > 0;
 
-  // Phase 1.6 — fire when Phase 1 events exist but none classified yet
-  if ((eventsTotal?.c ?? 0) > 0 && (eventsClassified?.c ?? 0) === 0 && queuedOrRunning === 0) {
+  // Phase 1.6 — fire when there are signal events whose Stage 2 LLM
+  // intent column is still NULL and the agent isn't already busy.
+  if ((eventsSignalPendingLlm?.c ?? 0) > 0 && queuedOrRunning === 0) {
     await tryAdvance('phase1.6-noise', () => enqueueNoiseClassify(workspaceId));
   }
 
@@ -204,8 +220,10 @@ export async function GET(req: NextRequest) {
       })),
     },
     phase1_6_classify: {
-      events_classified: eventsClassified?.c ?? 0,
-      events_signal: eventsSignal?.c ?? 0,
+      events_classified: eventsMechanicalClassified?.c ?? 0,    // Stage 1 (mechanical, on ingest)
+      events_signal: eventsSignal?.c ?? 0,                       // marked signal by Stage 1
+      events_llm_classified: eventsLlmClassified?.c ?? 0,        // Stage 2 (LLM, via agent)
+      events_signal_pending_llm: eventsSignalPendingLlm?.c ?? 0, // remaining for Stage 2
     },
     phase2_units: {
       units_total: unitsTotal?.c ?? 0,

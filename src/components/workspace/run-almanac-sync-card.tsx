@@ -18,7 +18,12 @@ interface SyncStatus {
     events_total: number;
     backfill_repos: { repo: string; total_events: number; last_run_at: string | null; last_status: string | null; last_error: string | null }[];
   };
-  phase1_6_classify: { events_classified: number; events_signal: number };
+  phase1_6_classify: {
+    events_classified: number;
+    events_signal: number;
+    events_llm_classified: number;
+    events_signal_pending_llm: number;
+  };
   phase2_units: { units_total: number; units_named: number; events_unit_assigned: number };
   phase3_match: { candidates_total: number; candidates_accepted: number; events_linked: number };
   phase4_narrate: { sections_total: number; sections_narrated: number };
@@ -147,8 +152,9 @@ export function RunAlmanacSyncCard() {
         <PhaseRow
           label="Phase 1.6 · noise classifier"
           metrics={status ? [
-            ['classified', status.phase1_6_classify.events_classified],
-            ['signal',     status.phase1_6_classify.events_signal],
+            ['signal',         status.phase1_6_classify.events_signal],
+            ['llm classified', status.phase1_6_classify.events_llm_classified],
+            ['llm pending',    status.phase1_6_classify.events_signal_pending_llm],
           ] : null}
         />
         <PhaseRow
