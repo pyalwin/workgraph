@@ -44,9 +44,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'project_key is required' }, { status: 400 });
   }
 
-  const workspaceId = req.nextUrl.searchParams.get('workspaceId') ?? 'default';
-
   const db = getLibsqlDb();
+
+  // If the caller passes ?workspaceId=X, use it. Otherwise resolve to
+  // the workspace that actually has sections for this project_key —
+  // avoids the dev pitfall where the card defaults to 'default' but
+  // the data lives in 'engineering'.
+  const explicitWs = req.nextUrl.searchParams.get('workspaceId');
+  const workspaceId = explicitWs ?? (await (async () => {
+    const row = await db.prepare(
+      `SELECT workspace_id FROM almanac_sections
+       WHERE project_key = ?
+       ORDER BY position ASC
+       LIMIT 1`,
+    ).get<{ workspace_id: string }>(projectKey);
+    return row?.workspace_id ?? 'default';
+  })());
+
   const rows = await db
     .prepare(
       `SELECT id, workspace_id, project_key, unit_id, kind, anchor, position,
