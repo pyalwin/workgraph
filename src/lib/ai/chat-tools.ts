@@ -6,6 +6,7 @@ import { getLibsqlDb } from '@/lib/db/libsql';
 import { searchChunks } from '@/lib/embeddings/embed';
 import { getProjectDetail, getProjectSummaryCards } from '@/lib/project-queries';
 import { listDecisions } from '@/lib/decision/extract';
+import { almanacTools } from '@/lib/almanac/chat-tools';
 
 // Local helpers — initSchema/getDb are removed; substitute with the async pair.
 const initSchema = async () => ensureSchemaAsync();
@@ -268,7 +269,7 @@ export const chatTools = {
 
   searchKnowledge: tool({
     description:
-      'Semantic search across ingested content (Jira bodies, PR descriptions, meeting notes, Slack threads). Use ONLY for content/topic questions ("what was discussed about X", "find docs about Y") — NOT for counts, status filters, or project-name lookups.',
+      'Semantic search across ingested content (Jira bodies, PR descriptions, meeting notes, Slack threads, and Almanac sections). Use ONLY for content/topic questions ("what was discussed about X", "find docs about Y") — NOT for counts, status filters, or project-name lookups.',
     inputSchema: z.object({
       query: z.string().min(2),
       k: z.number().int().min(1).max(20).default(8),
@@ -278,6 +279,7 @@ export const chatTools = {
       const hits = await searchChunks(query, k ?? 8);
       const db = getDb();
       const itemSql = `SELECT id, title, source, source_id, item_type, status, url, created_at FROM work_items WHERE id = ?`;
+      const sectionSql = `SELECT id, anchor, title, project_key, kind FROM almanac_sections WHERE id = ?`;
       const best = new Map<string, typeof hits[0]>();
       for (const h of hits) {
         const prev = best.get(h.item_id);
@@ -285,13 +287,30 @@ export const chatTools = {
       }
       const results: Array<Record<string, unknown>> = [];
       for (const [itemId, hit] of best) {
-        const item = await db.prepare(itemSql).get<Record<string, unknown>>(itemId);
-        if (!item) continue;
-        results.push({
-          ...item,
-          excerpt: hit.chunk_text.length > 280 ? hit.chunk_text.slice(0, 280) + '…' : hit.chunk_text,
-          distance: Number(hit.distance.toFixed(4)),
-        });
+        const excerpt = hit.chunk_text.length > 280 ? hit.chunk_text.slice(0, 280) + '…' : hit.chunk_text;
+        if (hit.chunk_type === 'almanac_section') {
+          // item_id is a section uuid, not a work_items uuid
+          const sec = await db.prepare(sectionSql).get<{ id: string; anchor: string; title: string; project_key: string; kind: string }>(itemId);
+          if (!sec) continue;
+          results.push({
+            kind: 'almanac_section',
+            section_id: sec.id,
+            anchor: sec.anchor,
+            title: sec.title,
+            project_key: sec.project_key,
+            section_kind: sec.kind,
+            excerpt,
+            distance: Number(hit.distance.toFixed(4)),
+          });
+        } else {
+          const item = await db.prepare(itemSql).get<Record<string, unknown>>(itemId);
+          if (!item) continue;
+          results.push({
+            ...item,
+            excerpt,
+            distance: Number(hit.distance.toFixed(4)),
+          });
+        }
       }
       return { count: results.length, results };
     },
@@ -497,6 +516,7 @@ Rules:
       return { id, source_id: sourceId, title };
     },
   }),
+  ...almanacTools,
 } as const;
 
 export type ChatTools = typeof chatTools;

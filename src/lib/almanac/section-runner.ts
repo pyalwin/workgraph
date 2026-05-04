@@ -22,6 +22,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { buildDossier, buildProjectDossier } from './dossier-builder';
+import { rechunkAlmanacSection } from './chunks';
 import { buildCoverSection, sourcehash } from './sections/cover';
 import { buildSummarySection } from './sections/summary';
 import { buildUnitSection } from './sections/unit';
@@ -230,6 +231,22 @@ export async function regenerateSections(
       );
 
     rebuilt++;
+
+    // Eagerly rechunk the new section so the embedding cron can pick it up.
+    // Chunk errors must NOT abort regen — wrap and warn.
+    {
+      // The UPSERT may have reused an existing id; look it up by natural key.
+      const sectionRow = await db
+        .prepare(`SELECT id FROM almanac_sections WHERE project_key = ? AND anchor = ?`)
+        .get<{ id: string }>(projectKey, spec.anchor);
+      if (sectionRow) {
+        rechunkAlmanacSection(sectionRow.id).catch((err: unknown) => {
+          console.warn(
+            `[section-runner] rechunk failed for ${spec.anchor}: ${(err as Error).message}`,
+          );
+        });
+      }
+    }
 
     // Enqueue narration job if an agent is available
     if (agentId) {

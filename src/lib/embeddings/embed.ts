@@ -19,6 +19,7 @@ export const MODEL_BY_CHUNK_TYPE: Record<string, EmbeddingModel> = {
   pr_diff_summary: TEXT_MODEL,
   commit: TEXT_MODEL,
   meeting_note: TEXT_MODEL,
+  almanac_section: TEXT_MODEL,
   // pr_patch → CODE_MODEL once a suitable Ollama code embedder is pulled
 };
 
