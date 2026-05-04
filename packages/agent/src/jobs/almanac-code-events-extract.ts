@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { apiFetch } from "../client.js";
+import { resolveRepoPath } from "../lib/resolve-repo-path.js";
 import type { JobHandler } from "./noop.js";
 
 // ---------------------------------------------------------------------------
@@ -60,10 +61,14 @@ function parseParams(params: unknown): ExtractParams {
     throw new Error("almanac.code-events.extract: params must be an object");
   }
   const p = params as Record<string, unknown>;
+  const repo = assertString(p["repo"], "repo");
   const result: ExtractParams = {
     workspaceId: assertString(p["workspaceId"], "workspaceId"),
-    repo: assertString(p["repo"], "repo"),
-    repoPath: assertString(p["repoPath"], "repoPath"),
+    repo,
+    // repoPath is locally resolved on the agent — server can't know where
+    // your laptop has the clone. Falls back to $WORKGRAPH_REPO_DIR/<name>
+    // or ~/code/<name> if the param isn't passed.
+    repoPath: resolveRepoPath(repo, p["repoPath"]),
   };
   if (p["sinceIso"] !== undefined) {
     result.sinceIso = assertString(p["sinceIso"], "sinceIso");

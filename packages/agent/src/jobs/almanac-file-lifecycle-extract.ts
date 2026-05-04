@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { apiFetch } from "../client.js";
+import { resolveRepoPath } from "../lib/resolve-repo-path.js";
 import type { JobHandler } from "./noop.js";
 
 // ---------------------------------------------------------------------------
@@ -27,10 +28,11 @@ function parseParams(params: unknown): LifecycleParams {
     throw new Error("almanac.file-lifecycle.extract: params must be an object");
   }
   const p = params as Record<string, unknown>;
+  const repo = assertString(p["repo"], "repo");
   const result: LifecycleParams = {
     workspaceId: assertString(p["workspaceId"], "workspaceId"),
-    repo: assertString(p["repo"], "repo"),
-    repoPath: assertString(p["repoPath"], "repoPath"),
+    repo,
+    repoPath: resolveRepoPath(repo, p["repoPath"]),
   };
   if (p["branch"] !== undefined) {
     result.branch = assertString(p["branch"], "branch");
