@@ -196,15 +196,15 @@ export default async function LandingPage() {
             <span className="landing-card-tag">BYOAI</span>
             <h3>Bring your own model.</h3>
             <p>
-              Vercel AI SDK under the hood. AI Gateway by default — swap to OpenRouter
-              for any model (Anthropic, OpenAI, Google, Mistral). Embeddings via Hugging
-              Face Inference.
+              Vercel AI SDK under the hood. Plug in any model you already pay for —
+              Anthropic, OpenAI, Google, and more. Embeddings run on open-source
+              models, no extra key needed.
             </p>
             <ul className="landing-card-pills">
-              <li>Gateway</li>
-              <li>OpenRouter</li>
               <li>Anthropic</li>
-              <li>HuggingFace</li>
+              <li>OpenAI</li>
+              <li>Google</li>
+              <li>open-source</li>
             </ul>
           </article>
 
