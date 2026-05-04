@@ -59,12 +59,18 @@ export const almanacCodeEventsBackfill = inngest.createFunction(
         console.log('[almanac-backfill] No github connector configured for workspace', workspaceId);
         return [] as RepoEntry[];
       }
-      // Repos can live in either options.repos (legacy) or
-      // options.discovered.repos (current OAuth flow shape).
+      // Selected repos in options.repos (string[]) or options.discovered.repos
+      // ({id,label,hint}[]). Normalise both into { id: string }.
       const opts = cfg.config.options as
-        | { repos?: RepoEntry[]; discovered?: { repos?: RepoEntry[] } }
+        | {
+            repos?: (string | { id?: string })[];
+            discovered?: { repos?: (string | { id?: string })[] };
+          }
         | undefined;
-      const all = opts?.repos ?? opts?.discovered?.repos ?? [];
+      const raw = opts?.repos ?? opts?.discovered?.repos ?? [];
+      const all: RepoEntry[] = raw
+        .map((r) => (typeof r === 'string' ? { id: r } : r?.id ? { id: r.id } : null))
+        .filter((r): r is RepoEntry => r !== null);
       const filterRepo = (event.data as { repo?: string })?.repo;
       if (filterRepo) {
         return all.filter((r) => r.id === filterRepo);

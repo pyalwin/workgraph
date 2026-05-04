@@ -63,9 +63,15 @@ export const almanacDetectModulesAndUnits = inngest.createFunction(
         return [] as RepoEntry[];
       }
       const opts = cfg.config.options as
-        | { repos?: RepoEntry[]; discovered?: { repos?: RepoEntry[] } }
+        | {
+            repos?: (string | { id?: string })[];
+            discovered?: { repos?: (string | { id?: string })[] };
+          }
         | undefined;
-      const all = opts?.repos ?? opts?.discovered?.repos ?? [];
+      const raw = opts?.repos ?? opts?.discovered?.repos ?? [];
+      const all: RepoEntry[] = raw
+        .map((r) => (typeof r === 'string' ? { id: r } : r?.id ? { id: r.id } : null))
+        .filter((r): r is RepoEntry => r !== null);
       const filterRepo = (event.data as { repo?: string })?.repo;
       if (filterRepo) return all.filter((r) => r.id === filterRepo);
       return all;

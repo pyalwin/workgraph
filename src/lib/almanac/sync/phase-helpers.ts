@@ -46,10 +46,22 @@ const NOISE_BATCH_SIZE = 50;
 async function listRepos(workspaceId: string, filterRepo?: string): Promise<RepoEntry[]> {
   const cfg = await getConnectorConfigBySource(workspaceId, 'github');
   if (!cfg) return [];
+  // Connector OAuth flow stores repos in two places that have evolved at
+  // different times:
+  //   - options.repos              — array of strings (selected repos)
+  //   - options.discovered.repos   — array of { id, label, hint } (catalog)
+  // Either may be present. Selected (options.repos) takes precedence; we fall
+  // back to discovered. Normalise both into { id: string }.
   const opts = cfg.config.options as
-    | { repos?: RepoEntry[]; discovered?: { repos?: RepoEntry[] } }
+    | {
+        repos?: (string | { id?: string })[];
+        discovered?: { repos?: (string | { id?: string })[] };
+      }
     | undefined;
-  const all = opts?.repos ?? opts?.discovered?.repos ?? [];
+  const raw = opts?.repos ?? opts?.discovered?.repos ?? [];
+  const all: RepoEntry[] = raw
+    .map((r) => (typeof r === 'string' ? { id: r } : r?.id ? { id: r.id } : null))
+    .filter((r): r is RepoEntry => r !== null);
   return filterRepo ? all.filter((r) => r.id === filterRepo) : all;
 }
 
