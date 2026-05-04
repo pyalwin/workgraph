@@ -125,14 +125,30 @@ export function AlmanacClient({ projectKey }: { projectKey: string }) {
             )}
           </div>
         </div>
-        <button
-          type="button"
-          className="almanac-regen-btn"
-          onClick={handleRegenerate}
-          disabled={regenerating}
-        >
-          {regenerating ? 'Regenerating…' : 'Regenerate'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <Link
+            href={`/projects/${projectKey}/almanac/units`}
+            style={{
+              fontSize: '0.82rem',
+              color: 'var(--ink-4, #7a7670)',
+              textDecoration: 'none',
+              padding: '0.38rem 0.7rem',
+              border: '1px solid var(--rule-2, rgba(21,20,15,.14))',
+              borderRadius: '5px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Edit units
+          </Link>
+          <button
+            type="button"
+            className="almanac-regen-btn"
+            onClick={handleRegenerate}
+            disabled={regenerating}
+          >
+            {regenerating ? 'Regenerating…' : 'Regenerate'}
+          </button>
+        </div>
       </div>
 
       {sections.length === 0 ? (
