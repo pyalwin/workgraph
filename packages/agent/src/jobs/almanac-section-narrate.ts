@@ -1,5 +1,6 @@
 import { apiFetch } from "../client.js";
 import { runCliJson } from "../cli/spawn.js";
+import { resolveRepoPath } from "../lib/resolve-repo-path.js";
 import type { JobHandler } from "./noop.js";
 
 // ---------------------------------------------------------------------------
@@ -208,14 +209,23 @@ function collectEntities(dossier: Dossier): string[] {
 
 // ---------------------------------------------------------------------------
 // Prompt builders
+//
+// Strategy: instead of stuffing a curated set of files into the prompt, run
+// the CLI with cwd = the repo root and let the CLI's own filesystem tools
+// explore. Codex/Claude/Gemini all have read access when launched with their
+// read-only sandbox flag. The dossier still acts as targeting info (which
+// files / tickets are in scope) but the CLI is free to read more if it
+// needs to.
 // ---------------------------------------------------------------------------
 
 const COMMON_RULES = `
 Rules (follow strictly):
 - Output raw markdown only. No \`\`\`markdown fences. No preamble. No trailing commentary.
-- Do NOT invent SHAs, PR numbers, file paths, ticket keys, or author names not present in the dossier JSON below.
-- Quote at most 5 short code snippets. Be terse.
-- Length: 200–8000 characters.
+- Cite real artefacts — file paths with line numbers, function names, types, route paths, SQL table names. Do NOT invent any.
+- You can read any file under the current working directory. Prefer the files listed in 'Targeting' below as starting points, but follow imports and call chains as far as needed to explain things accurately.
+- Quote code snippets liberally when they make a contract, schema, or flow concrete. Short snippets are fine.
+- BE AS ELABORATE AND EXTENSIVE AS POSSIBLE. This document is the foundation of a RAG system — depth and completeness matter more than brevity. Do NOT self-limit. Walk through every relevant file. Trace every flow end-to-end. Document every contract.
+- Write techno-functional docs, NOT commit history. Explain how the system works today, not when each PR shipped.
 `.trim();
 
 function formatDossierSection(label: string, items: string[]): string {
@@ -262,65 +272,117 @@ function buildCoverPrompt(p: NarrateParams): string {
 }
 
 function buildSummaryPrompt(p: NarrateParams): string {
-  const events = getEvents(p.dossier);
   const tickets = getTickets(p.dossier);
-  const untimestampedCount = events.filter((e) => !e.ticket_key).length;
-  const ticketLines = tickets.slice(0, 15).map((t) => {
+  const ticketLines = tickets.slice(0, 12).map((t) => {
     const id = typeof t.source_id === "string" ? t.source_id : "";
     const title = typeof t.title === "string" ? t.title : "";
-    const status = typeof t.status === "string" ? t.status : "";
-    return `${id}: ${title} — ${status}`;
+    return `${id}: ${title}`;
   });
 
   return [
-    `Write an ~200-word executive summary for project "${p.projectKey}".`,
+    `Write a comprehensive techno-functional executive summary for the project "${p.projectKey}".`,
     "",
-    "Cover:",
-    "- Overall project state and recent momentum.",
-    "- Key drift highlights (work without tickets, tickets without merged code).",
-    "- Notable completions or blockers visible in the dossier.",
+    "READER: an engineer onboarding to this codebase. They want to understand HOW the system is built, what runs where, and where to look for what.",
+    "",
+    "EXPLORE THE CODEBASE FREELY — your cwd is set to the repo root. Read package.json, the routing layout under src/app/, the DB schema, the middleware/proxy, the inngest functions directory, the lib directory. Follow imports. Then write the doc.",
+    "",
+    "Structure (use these exact headings, but go DEEP under each):",
+    "",
+    "## Stack & runtime",
+    "  Runtime, framework, deployment target, primary deps (auth, DB, async runner, AI providers, embedding model). Cite package.json.",
+    "",
+    "## Repository layout",
+    "  Walk the top of src/ and packages/. For each major directory, what lives there, what depends on it, what conventions apply.",
+    "",
+    "## Primary entities & data model",
+    "  All top-level DB tables and the relationships between them. For each: columns, what owns it, who reads it. Cite the schema file.",
+    "",
+    "## Authentication & authorization",
+    "  How requests get authed, cookie/session shape, where withAuth() is enforced, exception paths.",
+    "",
+    "## Major workflows (one subsection per flow)",
+    "  For each major user-driven or scheduled flow: name it, describe the trigger, list the route/inngest entry point, trace the call chain through library functions to the DB writes / side effects, name the tables and columns it touches, describe the response shape.",
+    "  Common flows include: connector OAuth, sync/ingest pipelines, scheduled reports, the chat / AI loop, the local-agent pair + job flow, the Almanac pipeline.",
+    "",
+    "## Cross-cutting infrastructure",
+    "  Inngest cron schedule, embeddings pipeline, AI provider switching, retry / idempotency keys, observability hooks.",
+    "",
+    "## Operational notes",
+    "  How to run locally, important env vars, common failure modes.",
     "",
     COMMON_RULES,
     "",
-    "Dossier evidence:",
-    formatDossierSection("Tickets (sample)", ticketLines),
-    formatDossierSection("Recent events", eventSummaryLines(events, 10)),
-    `\nUnticketed commit count: ${untimestampedCount}`,
+    "Targeting hints (start here, but expand far beyond as needed):",
+    formatDossierSection("Sample tickets in this project", ticketLines),
   ]
     .filter((l) => l !== "")
     .join("\n");
 }
 
 function buildUnitPrompt(p: NarrateParams): string {
-  const events = getEvents(p.dossier);
   const tickets = getTickets(p.dossier);
-  const files = getFiles(p.dossier).slice(0, 15);
-  const filePaths = files.map((f) => (typeof f.path === "string" ? f.path : "?"));
+  const dossierFiles = getFiles(p.dossier);
+  const filePaths = dossierFiles
+    .map((f) => (typeof f.path === "string" ? f.path : ""))
+    .filter((s) => s.length > 0);
   const ticketLines = tickets.slice(0, 15).map((t) => {
     const id = typeof t.source_id === "string" ? t.source_id : "";
     const title = typeof t.title === "string" ? t.title : "";
-    const status = typeof t.status === "string" ? t.status : "";
-    return `${id}: ${title} — ${status}`;
+    return `${id}: ${title}`;
   });
 
   return [
-    `Write a per-unit narrative section titled "${p.title}".`,
+    `Write canonical techno-functional documentation for the "${p.title}" capability.`,
     "",
-    "Structure (in order):",
-    "1. Identity paragraph — what this functional unit is, what it owns.",
-    "2. Evolution — chronological narrative of key changes, citing SHA prefixes and ticket keys from the dossier.",
-    "3. Drift — any commits without linked tickets, or tickets without merged code (skip if none).",
-    "4. Key tickets — 3–8 bullet points of significant tickets with their status.",
-    "5. Decisions — any notable architectural or product decisions recorded in the dossier.",
+    "READER: an engineer who needs to understand exactly how this part of the system works in order to extend, debug, or onboard onto it. This document is also the source for a RAG index, so it should be thorough enough to answer specific questions about workflow, data shapes, and edge cases.",
     "",
-    "Cite SHAs, PR numbers, and ticket keys directly from the dossier. Do not invent any.",
+    "EXPLORE THE CODEBASE FREELY — your cwd is set to the repo root. The 'Targeting' section below lists files most associated with this capability (ranked by churn) but you should follow imports, read called functions, look at related routes / Inngest functions / DB queries, and document everything that's relevant.",
+    "",
+    "DO NOT WRITE A TICKET HISTORY. Ignore commit timeline / who shipped when. Describe the system AS IT IS NOW, with file paths and code citations.",
+    "",
+    "Structure (use these exact headings, go DEEP under each):",
+    "",
+    "## What this does",
+    "  Two paragraphs. The user-visible capability in plain language: what problem does it solve, who triggers it (UI button? cron? webhook?), what the visible outcome is, where it shows up.",
+    "",
+    "## Architecture overview",
+    "  A short summary of the moving parts: which routes, which library functions, which DB tables, which background jobs, which external systems. Mention each by file path.",
+    "",
+    "## End-to-end workflow",
+    "  Step-by-step trace of the primary flow. Each step:",
+    "    - the trigger or upstream caller",
+    "    - the file:line of the entry point",
+    "    - the work it does (with quoted snippets when they clarify)",
+    "    - the data it reads / writes (table + columns)",
+    "    - what it returns or hands off to next",
+    "  If there are multiple flows (cron vs manual, success vs failure, retry, idempotent re-run), give each its own subsection. Trace each branch fully.",
+    "",
+    "## Data model",
+    "  Tables this capability owns or relies on. For each: schema (cite the schema file), purpose, who writes, who reads, indexes, idempotency / unique constraints.",
+    "",
+    "## Public contracts",
+    "  Route handlers (HTTP method + path + request body + response shape), exported library functions (signature + return type), agent_jobs kinds. Quote signatures.",
+    "",
+    "## Internal contracts & types",
+    "  Important interfaces, zod schemas, and JSON shapes used between layers. Quote them.",
+    "",
+    "## Failure modes & gotchas",
+    "  What can break, what's idempotent, retry semantics, rate limits, known edge cases visible in the code, error paths, fallbacks.",
+    "",
+    "## Configuration",
+    "  Env vars, feature flags, connector configs, settings tables this depends on.",
+    "",
+    "## How to extend or modify",
+    "  Concrete pointers — to add a new X, edit file Y; to change behavior Z, look at function W.",
+    "",
+    "## References",
+    "  Comprehensive bullet list of every file path you cited → its one-line role. Then list ticket keys most relevant to current state.",
     "",
     COMMON_RULES,
     "",
-    "Dossier evidence:",
-    formatDossierSection("Files", filePaths),
-    formatDossierSection("Tickets", ticketLines),
-    formatDossierSection("Events (chronological)", eventSummaryLines(events, 25)),
+    "Targeting (start here, follow imports far beyond):",
+    formatDossierSection("Files most associated with this capability (ranked by churn)", filePaths),
+    formatDossierSection("Linked tickets", ticketLines),
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -425,6 +487,24 @@ function buildAppendixPrompt(p: NarrateParams): string {
   ].join("\n");
 }
 
+/**
+ * Sniff a repo identifier ("owner/name") from the dossier so we can resolve
+ * a local clone path to use as the CLI's cwd. The agent has already paired
+ * with one repo for the run — most fields ride along on dossier.repo or
+ * dossier.events[*].repo.
+ */
+function inferRepoFromDossier(dossier: Dossier): string {
+  if (typeof dossier.repo === "string" && dossier.repo.trim()) return dossier.repo;
+  if (Array.isArray(dossier.events)) {
+    for (const e of dossier.events) {
+      if (typeof e === "object" && e !== null && typeof (e as { repo?: unknown }).repo === "string") {
+        return (e as { repo: string }).repo;
+      }
+    }
+  }
+  return "";
+}
+
 function buildPrompt(p: NarrateParams): string {
   switch (p.kind) {
     case "cover":
@@ -486,9 +566,9 @@ function validateMarkdown(markdown: string, dossier: Dossier): ValidationResult 
   if (len < 200) {
     return { ok: false, reason: `output too short: ${len} chars (min 200)` };
   }
-  if (len > 8000) {
-    return { ok: false, reason: `output too long: ${len} chars (max 8000)` };
-  }
+  // No upper-bound — these docs are the foundation of a RAG index; depth
+  // and completeness matter more than brevity. The DB column is TEXT
+  // (libSQL has no practical column-size cap for our use case).
 
   // Must contain at least one entity from the dossier (anti-hallucination guard).
   // Exception: appendix kind is intentionally short and may have no entity refs.
@@ -565,10 +645,24 @@ export const almanacSectionNarrateHandler: JobHandler = async (
 
   const prompt = buildPrompt(p);
 
+  // Resolve the local clone path so the CLI runs INSIDE the repo. Codex's
+  // --sandbox read-only flag plus a non-default cwd lets it grep / read /
+  // follow imports without us having to ship file contents in the prompt.
+  // If the repo can't be resolved, fall back to undefined cwd — the CLI
+  // will still produce something, just without filesystem context.
+  let cwd: string | undefined;
+  try {
+    const repo = inferRepoFromDossier(p.dossier);
+    if (repo) cwd = resolveRepoPath(repo);
+  } catch {
+    cwd = undefined;
+  }
+
   const rawOutput = await runCliJson({
     cli: p.cli,
     prompt,
     model: p.model,
+    cwd,
   });
 
   const trimmed = rawOutput.trim();

@@ -64,6 +64,8 @@ export interface UnitDossier {
   jira_epic_key: string | null;
   first_seen_at: string | null;
   last_active_at: string | null;
+  /** Most-frequent repo across this unit's events; agent uses it as cwd. */
+  repo: string | null;
   events: DossierEvent[];
   files: DossierFile[];
   tickets: DossierTicket[];
@@ -83,6 +85,8 @@ export interface ProjectDossier {
   total_signal_events: number;
   drift_unticketed: number;
   drift_unbuilt: number;
+  /** Most-frequent repo across the project's events; agent uses it as cwd. */
+  repo: string | null;
   decisions: DossierDecision[];
   units_summary: { unit_id: string; name: string; signal_events: number }[];
   cross_project_tickets: number;
@@ -104,6 +108,7 @@ interface EventRow {
   sha: string;
   pr_number: number | null;
   occurred_at: string;
+  repo: string;
   author_login: string | null;
   author_email: string | null;
   message: string | null;
@@ -219,7 +224,7 @@ export async function buildDossier(
   // 2. All signal events for this unit (chronological)
   const allEvents = await db
     .prepare(
-      `SELECT ce.sha, ce.pr_number, ce.occurred_at,
+      `SELECT ce.sha, ce.pr_number, ce.occurred_at, ce.repo,
               ce.author_login, ce.author_email, ce.message,
               ce.files_touched, ce.additions, ce.deletions,
               ce.intent, ce.architectural_significance, ce.linked_item_id,
@@ -318,6 +323,19 @@ export async function buildDossier(
   let keywords: string[] = [];
   try { keywords = JSON.parse(unit.keywords) as string[]; } catch { /* empty */ }
 
+  // Pick the repo that owns the largest fraction of this unit's events.
+  // The agent uses it as cwd when invoking the CLI for narration so the
+  // CLI can read source files directly.
+  const repoCounts = new Map<string, number>();
+  for (const e of allEvents) {
+    if (e.repo) repoCounts.set(e.repo, (repoCounts.get(e.repo) ?? 0) + 1);
+  }
+  let dominantRepo: string | null = null;
+  let topCount = 0;
+  for (const [r, c] of repoCounts) {
+    if (c > topCount) { topCount = c; dominantRepo = r; }
+  }
+
   return {
     unit_id: unit.id,
     unit_name: unit.name ?? unit.id,
@@ -326,6 +344,7 @@ export async function buildDossier(
     jira_epic_key: unit.jira_epic_key,
     first_seen_at: unit.first_seen_at,
     last_active_at: unit.last_active_at,
+    repo: dominantRepo,
     events: selectMilestoneEvents(allEvents),
     files,
     tickets,
@@ -441,12 +460,27 @@ export async function buildProjectDossier(
     .get<{ cnt: number }>(`${projectKey}-%`);
   const crossProjectTickets = crossProjectRow?.cnt ?? 0;
 
+  // Pick the dominant repo across this project's signal events, same
+  // heuristic as in buildDossier — agent uses it as cwd for the CLI.
+  const projectRepoRow = await db
+    .prepare(
+      `SELECT ce.repo AS repo, COUNT(*) AS cnt FROM code_events ce
+       JOIN functional_units fu ON fu.id = ce.functional_unit_id
+       WHERE fu.workspace_id = ? AND fu.project_key = ?
+         AND ce.is_feature_evolution = 1 AND ce.repo IS NOT NULL
+       GROUP BY ce.repo
+       ORDER BY cnt DESC
+       LIMIT 1`,
+    )
+    .get<{ repo: string; cnt: number }>(workspaceId, projectKey);
+
   return {
     project_key: projectKey,
     unit_count: unitRows.length,
     total_signal_events: totalSignalEvents,
     drift_unticketed: driftUnticketed,
     drift_unbuilt: driftUnbuilt,
+    repo: projectRepoRow?.repo ?? null,
     decisions: allDecisions,
     units_summary: unitSummaries,
     cross_project_tickets: crossProjectTickets,
