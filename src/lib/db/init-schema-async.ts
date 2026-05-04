@@ -663,6 +663,31 @@ const DDL = `
   CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_issue ON orphan_ticket_candidates(issue_item_id);
   CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_open ON orphan_ticket_candidates(issue_item_id, dismissed_at, accepted_at);
 
+  -- Almanac Phase 4: per-section markdown content. One row per section per
+  -- project. anchor is a stable, human-friendly slug (e.g. 'cover',
+  -- 'summary', 'unit-<unit_id>', 'drift-unticketed'). source_hash is sha1
+  -- of the deterministic dossier inputs; matching hash on regen = no-op.
+  -- diagram_blocks is a JSON array of { kind, params, position } records
+  -- the renderer expands; markdown still embeds :::diagram::: fences inline.
+  CREATE TABLE IF NOT EXISTS almanac_sections (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    unit_id TEXT,                       -- nullable for cross-cutting sections
+    kind TEXT NOT NULL,                 -- 'cover'|'summary'|'unit'|'drift_unticketed'|'drift_unbuilt'|'decisions'|'appendix'
+    anchor TEXT NOT NULL,               -- stable slug, unique per project
+    position INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    markdown TEXT NOT NULL,
+    diagram_blocks TEXT NOT NULL DEFAULT '[]',
+    source_hash TEXT NOT NULL,
+    generated_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(project_key, anchor)
+  );
+  CREATE INDEX IF NOT EXISTS idx_almanac_sections_project ON almanac_sections(workspace_id, project_key, position);
+  CREATE INDEX IF NOT EXISTS idx_almanac_sections_unit ON almanac_sections(unit_id);
+
   CREATE TABLE IF NOT EXISTS issue_decisions (
     id TEXT PRIMARY KEY,
     issue_item_id TEXT NOT NULL REFERENCES work_items(id),

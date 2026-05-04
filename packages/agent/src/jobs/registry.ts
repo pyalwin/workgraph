@@ -5,6 +5,7 @@ import { almanacFileLifecycleExtractHandler } from "./almanac-file-lifecycle-ext
 import { almanacNoiseClassifyHandler } from "./almanac-noise-classify.js";
 import { almanacUnitsNameHandler } from "./almanac-units-name.js";
 import { almanacUnitsClusterHandler } from "./almanac-units-cluster.js";
+import { almanacSectionNarrateHandler } from "./almanac-section-narrate.js";
 
 const registry: Record<string, JobHandler> = {
   noop: noopHandler,
@@ -13,6 +14,7 @@ const registry: Record<string, JobHandler> = {
   "almanac.noise.classify": almanacNoiseClassifyHandler,
   "almanac.units.name": almanacUnitsNameHandler,
   "almanac.units.cluster": almanacUnitsClusterHandler,
+  "almanac.section.narrate": almanacSectionNarrateHandler,
 };
 
 export function getHandler(kind: string): JobHandler | undefined {

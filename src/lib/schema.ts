@@ -624,6 +624,27 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_issue ON orphan_ticket_candidates(issue_item_id);
     CREATE INDEX IF NOT EXISTS idx_orphan_ticket_cand_open ON orphan_ticket_candidates(issue_item_id, dismissed_at, accepted_at);
 
+    -- Almanac Phase 4: per-section markdown content. UNIQUE(project_key, anchor)
+    -- enforces single canonical version per section; source_hash gates regen.
+    CREATE TABLE IF NOT EXISTS almanac_sections (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_key TEXT NOT NULL,
+      unit_id TEXT,
+      kind TEXT NOT NULL,
+      anchor TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      diagram_blocks TEXT NOT NULL DEFAULT '[]',
+      source_hash TEXT NOT NULL,
+      generated_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(project_key, anchor)
+    );
+    CREATE INDEX IF NOT EXISTS idx_almanac_sections_project ON almanac_sections(workspace_id, project_key, position);
+    CREATE INDEX IF NOT EXISTS idx_almanac_sections_unit ON almanac_sections(unit_id);
+
     -- AI-extracted decisions surfaced from PR review threads. Distinct from
     -- the existing decisions table (which has UNIQUE(item_id) — one per
     -- ticket). One Jira ticket can produce N decisions across its review
