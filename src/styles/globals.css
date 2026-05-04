@@ -5736,6 +5736,7 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
     width: 100%;
     overflow-x: auto;
   }
+}
 
 /* ─── Almanac ─────────────────────────────────────────────────────────────── */
 
@@ -5913,7 +5914,6 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
 @media (max-width: 768px) {
   .almanac-layout { flex-direction: column; }
   .almanac-toc-col { width: 100%; position: static; }
-}
 }
 
 /* ── Unit Editor (Phase 6) ── */
