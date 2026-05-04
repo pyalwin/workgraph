@@ -123,13 +123,14 @@ export async function enqueueBackfill(
     if (await requeueFailedJob(agentId, ceKey)) {
       requeued++;
     } else {
-      const ceParams = {
+      // Build the params object — omit null/empty optional keys so the
+      // agent's strict assertString doesn't reject "defined but invalid".
+      const ceParams: Record<string, unknown> = {
         workspaceId,
         repo: repo.id,
-        repoPath: null,
-        sinceIso: cursor.last_occurred_at,
         branch: 'main',
       };
+      if (cursor.last_occurred_at) ceParams.sinceIso = cursor.last_occurred_at;
       const ceResult = await db
         .prepare(
           `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
@@ -143,7 +144,7 @@ export async function enqueueBackfill(
     if (await requeueFailedJob(agentId, flKey)) {
       requeued++;
     } else {
-      const flParams = { workspaceId, repo: repo.id, repoPath: null, branch: 'main' };
+      const flParams: Record<string, unknown> = { workspaceId, repo: repo.id, branch: 'main' };
       const flResult = await db
         .prepare(
           `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
@@ -196,11 +197,10 @@ export async function enqueueNoiseClassify(
 
     for (let i = 0; i < pending.length; i += NOISE_BATCH_SIZE) {
       const batch = pending.slice(i, i + NOISE_BATCH_SIZE);
-      const params = {
+      const params: Record<string, unknown> = {
         workspaceId,
         repo: repo.id,
         cli: opts.cli ?? 'codex',
-        model: opts.model ?? null,
         events: batch.map((e) => ({
           id: e.id,
           sha: e.sha,
@@ -208,6 +208,7 @@ export async function enqueueNoiseClassify(
           files_touched: e.files_touched,
         })),
       };
+      if (opts.model) params.model = opts.model;
       const idemKey = `almanac-noise-classify-${repo.id}-${today}-batch${Math.floor(i / NOISE_BATCH_SIZE)}`;
       if (await requeueFailedJob(agentId, idemKey)) {
         enqueued++;
