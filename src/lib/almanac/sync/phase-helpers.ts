@@ -43,6 +43,32 @@ interface PendingEvent {
 
 const NOISE_BATCH_SIZE = 50;
 
+/**
+ * Re-queue any 'failed' job for an idempotency key so a manual retry
+ * (Run sync click) acts as a real retry. Returns true if a row was reset,
+ * meaning the caller should NOT also INSERT (the unique constraint would
+ * collide and INSERT OR IGNORE skips silently — losing the retry).
+ */
+async function requeueFailedJob(
+  agentId: string,
+  idempotencyKey: string,
+): Promise<boolean> {
+  const db = getLibsqlDb();
+  const result = await db
+    .prepare(
+      `UPDATE agent_jobs
+         SET status = 'queued',
+             error = NULL,
+             attempt = COALESCE(attempt, 0) + 1,
+             started_at = NULL,
+             completed_at = NULL,
+             created_at = datetime('now')
+       WHERE agent_id = ? AND idempotency_key = ? AND status = 'failed'`,
+    )
+    .run(agentId, idempotencyKey);
+  return (result.changes ?? 0) > 0;
+}
+
 async function listRepos(workspaceId: string, filterRepo?: string): Promise<RepoEntry[]> {
   const cfg = await getConnectorConfigBySource(workspaceId, 'github');
   if (!cfg) return [];
@@ -85,6 +111,7 @@ export async function enqueueBackfill(
   const db = getLibsqlDb();
   const today = new Date().toISOString().slice(0, 10);
   let enqueued = 0;
+  let requeued = 0;
 
   for (const repo of repos) {
     // read cursor
@@ -92,29 +119,39 @@ export async function enqueueBackfill(
       .prepare(`SELECT last_sha, last_occurred_at FROM code_events_backfill_state WHERE repo = ?`)
       .get<BackfillCursor>(repo.id)) ?? { last_sha: null, last_occurred_at: null };
 
-    const ceParams = {
-      workspaceId,
-      repo: repo.id,
-      repoPath: null,
-      sinceIso: cursor.last_occurred_at,
-      branch: 'main',
-    };
-    const ceResult = await db
-      .prepare(
-        `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
-         VALUES (?, ?, 'almanac.code-events.extract', ?, 'queued', ?, datetime('now'))`,
-      )
-      .run(uuidv4(), agentId, JSON.stringify(ceParams), `almanac-code-events-${repo.id}-${today}`);
-    if ((ceResult.changes ?? 0) > 0) enqueued++;
+    const ceKey = `almanac-code-events-${repo.id}-${today}`;
+    if (await requeueFailedJob(agentId, ceKey)) {
+      requeued++;
+    } else {
+      const ceParams = {
+        workspaceId,
+        repo: repo.id,
+        repoPath: null,
+        sinceIso: cursor.last_occurred_at,
+        branch: 'main',
+      };
+      const ceResult = await db
+        .prepare(
+          `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
+           VALUES (?, ?, 'almanac.code-events.extract', ?, 'queued', ?, datetime('now'))`,
+        )
+        .run(uuidv4(), agentId, JSON.stringify(ceParams), ceKey);
+      if ((ceResult.changes ?? 0) > 0) enqueued++;
+    }
 
-    const flParams = { workspaceId, repo: repo.id, repoPath: null, branch: 'main' };
-    const flResult = await db
-      .prepare(
-        `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
-         VALUES (?, ?, 'almanac.file-lifecycle.extract', ?, 'queued', ?, datetime('now'))`,
-      )
-      .run(uuidv4(), agentId, JSON.stringify(flParams), `almanac-file-lifecycle-${repo.id}-${today}`);
-    if ((flResult.changes ?? 0) > 0) enqueued++;
+    const flKey = `almanac-file-lifecycle-${repo.id}-${today}`;
+    if (await requeueFailedJob(agentId, flKey)) {
+      requeued++;
+    } else {
+      const flParams = { workspaceId, repo: repo.id, repoPath: null, branch: 'main' };
+      const flResult = await db
+        .prepare(
+          `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
+           VALUES (?, ?, 'almanac.file-lifecycle.extract', ?, 'queued', ?, datetime('now'))`,
+        )
+        .run(uuidv4(), agentId, JSON.stringify(flParams), flKey);
+      if ((flResult.changes ?? 0) > 0) enqueued++;
+    }
   }
 
   return {
@@ -122,8 +159,8 @@ export async function enqueueBackfill(
     workspaceId,
     agent_id: agentId,
     repos: repos.length,
-    enqueued,
-    skipped_existing: repos.length * 2 - enqueued,
+    enqueued: enqueued + requeued,
+    skipped_existing: repos.length * 2 - enqueued - requeued,
   };
 }
 
@@ -172,6 +209,10 @@ export async function enqueueNoiseClassify(
         })),
       };
       const idemKey = `almanac-noise-classify-${repo.id}-${today}-batch${Math.floor(i / NOISE_BATCH_SIZE)}`;
+      if (await requeueFailedJob(agentId, idemKey)) {
+        enqueued++;
+        continue;
+      }
       const result = await db
         .prepare(
           `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
@@ -227,6 +268,10 @@ export async function runDetectUnits(
   for (const repo of repos) {
     const params = { workspaceId, repo: repo.id };
     const idemKey = `almanac-units-cluster-${repo.id}-${today}`;
+    if (await requeueFailedJob(agentId, idemKey)) {
+      enqueued++;
+      continue;
+    }
     const result = await db
       .prepare(
         `INSERT OR IGNORE INTO agent_jobs (id, agent_id, kind, params, status, idempotency_key, created_at)
