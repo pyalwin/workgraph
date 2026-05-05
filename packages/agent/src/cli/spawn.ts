@@ -201,7 +201,10 @@ function logCliEvent(cli: string, evt: Record<string, unknown>): void {
     t === 'output_text.delta' ||
     t === 'response.output_text.delta' ||
     t === 'stream_event' || // Claude's per-keystroke delta envelope
-    t === 'delta'
+    t === 'delta' ||
+    // Skip item.started — it's always followed shortly by item.completed
+    // with the same data, so logging both doubles the noise.
+    t === 'item.started'
   ) {
     return;
   }
@@ -210,8 +213,8 @@ function logCliEvent(cli: string, evt: Record<string, unknown>): void {
   if (t === 'item.completed' && typeof evt.item === 'object' && evt.item !== null) {
     const item = evt.item as Record<string, unknown>;
     const itemType = (item.type as string | undefined) ?? '?';
-    const summary = summariseCodexItem(item);
-    console.log(`${tag} item.completed ${itemType}${summary ? ' · ' + summary : ''}`);
+    const { icon, label } = renderCodexItem(item, itemType);
+    console.log(`${tag} ${icon} ${label}`);
     return;
   }
 
@@ -257,69 +260,163 @@ function logCliEvent(cli: string, evt: Record<string, unknown>): void {
 }
 
 /**
- * Summarise Codex item.completed payloads. The interesting fields differ
- * by item type — reasoning, function_call, command_execution, file_read,
- * agent_message etc. Defensive: every field is `unknown`.
+ * Render Codex item.completed payloads as { icon, label } so the agent
+ * terminal scans like a structured trace instead of a JSON dump:
+ *
+ *   📖  read src/lib/foo.ts (lines 1–380)
+ *   🔍  grep "createFunction" in src/inngest
+ *   📁  ls src/lib/almanac
+ *   🛠️  bash $ npm run build
+ *   💭  reasoning: I need to understand the unit's entry point…
+ *   ✍️  agent_message · 274c · "The KAN work is split into…"
+ *   🔧  read_file({"path":"package.json"})
  */
-function summariseCodexItem(item: Record<string, unknown>): string {
-  const itemType = item.type as string | undefined;
-
-  // Tool / function call
-  if (itemType === 'function_call' || itemType === 'tool_use') {
-    const name = (item.name as string | undefined) ?? '?';
-    const argsRaw = item.arguments ?? item.input;
-    let argsPreview = '';
-    if (typeof argsRaw === 'string') {
-      argsPreview = argsRaw.slice(0, 120).replace(/\s+/g, ' ');
-    } else if (argsRaw && typeof argsRaw === 'object') {
-      try { argsPreview = JSON.stringify(argsRaw).slice(0, 120); } catch { /* ignore */ }
-    }
-    return `${name}(${argsPreview})`;
+function renderCodexItem(
+  item: Record<string, unknown>,
+  itemType: string,
+): { icon: string; label: string } {
+  if (itemType === 'reasoning' || itemType === 'thinking') {
+    const text = clean((item.text as string | undefined) ?? '');
+    return { icon: '💭', label: text ? `reasoning · ${truncate(text, 140)}` : 'reasoning' };
   }
 
-  // Tool / function output
-  if (itemType === 'function_call_output' || itemType === 'tool_result') {
-    const outRaw = item.output ?? item.content;
-    let preview = '';
-    if (typeof outRaw === 'string') {
-      preview = outRaw.slice(0, 120).replace(/\s+/g, ' ');
-    } else if (outRaw && typeof outRaw === 'object') {
-      try { preview = JSON.stringify(outRaw).slice(0, 120); } catch { /* ignore */ }
-    }
-    return `← ${preview}`;
+  if (itemType === 'agent_message') {
+    const text = clean((item.text as string | undefined) ?? '');
+    return { icon: '✍️ ', label: `agent_message · ${text.length}c · "${truncate(text, 100)}"` };
   }
 
-  // Command execution (shell)
   if (itemType === 'command_execution' || itemType === 'shell_call') {
     const cmd = item.command ?? item.cmd;
     const cmdStr = Array.isArray(cmd) ? cmd.join(' ') : String(cmd ?? '');
-    return `$ ${cmdStr.slice(0, 140)}`;
+    return summariseShellCommand(cmdStr);
   }
 
-  // File read / edit (Claude/Codex tool variants)
-  if (itemType === 'file_read' || itemType === 'read_file') {
-    return `read ${(item.path as string | undefined) ?? ''}`;
-  }
-  if (itemType === 'file_write' || itemType === 'write_file') {
-    return `write ${(item.path as string | undefined) ?? ''}`;
-  }
-  if (itemType === 'grep' || itemType === 'search') {
-    return `grep "${(item.query as string | undefined) ?? ''}"`;
-  }
-
-  // Reasoning / thinking
-  if (itemType === 'reasoning' || itemType === 'thinking') {
-    const text = (item.text as string | undefined) ?? '';
-    return text ? `(reasoning: ${text.slice(0, 100).replace(/\s+/g, ' ')}…)` : '(reasoning)';
+  // Generic tool/function call
+  if (itemType === 'function_call' || itemType === 'tool_use') {
+    const name = (item.name as string | undefined) ?? '?';
+    const argsRaw = item.arguments ?? item.input;
+    const args = typeof argsRaw === 'string'
+      ? argsRaw
+      : argsRaw && typeof argsRaw === 'object' ? safeStringify(argsRaw) : '';
+    // Promote known tool names to friendlier renderings
+    if (name === 'read_file' || name === 'file_read') return { icon: '📖', label: `read ${pickPath(args) ?? args}` };
+    if (name === 'write_file' || name === 'file_write') return { icon: '📝', label: `write ${pickPath(args) ?? args}` };
+    if (name === 'grep' || name === 'search') return { icon: '🔍', label: `grep ${pickQuery(args) ?? args}` };
+    if (name === 'list_dir' || name === 'ls') return { icon: '📁', label: `ls ${pickPath(args) ?? args}` };
+    return { icon: '🔧', label: `${name}(${truncate(args, 100)})` };
   }
 
-  // Final agent message — show length + first words so we can see "writing"
-  if (itemType === 'agent_message') {
-    const text = (item.text as string | undefined) ?? '';
-    return `${text.length}c · "${text.slice(0, 80).replace(/\s+/g, ' ')}…"`;
+  if (itemType === 'function_call_output' || itemType === 'tool_result') {
+    const outRaw = item.output ?? item.content;
+    const out = typeof outRaw === 'string'
+      ? outRaw
+      : outRaw && typeof outRaw === 'object' ? safeStringify(outRaw) : '';
+    return { icon: '↩️ ', label: `result · ${truncate(clean(out), 100)}` };
   }
 
-  return '';
+  return { icon: '·', label: `${itemType}` };
+}
+
+/**
+ * Codex tends to wrap every shell call in "/bin/zsh -lc \"…\"". Strip the
+ * wrapper, then map the inner command to a meaningful one-line label.
+ *
+ *   nl -ba file | sed -n '1,380p'   → 📖 read file (lines 1–380)
+ *   cat file                        → 📖 read file
+ *   rg/grep "pat" path              → 🔍 grep "pat" in path
+ *   ls path                         → 📁 ls path
+ *   find path -name x               → 🔎 find x under path
+ *   anything else                   → 🛠️  $ <cmd, truncated>
+ */
+function summariseShellCommand(cmdStr: string): { icon: string; label: string } {
+  // Strip the typical zsh/bash wrapper that Codex emits.
+  const inner = (() => {
+    const m = cmdStr.match(/^\/bin\/(?:zsh|bash) -lc\s+"((?:[^"\\]|\\.)*)"\s*$/);
+    if (m) return m[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    const m2 = cmdStr.match(/^\/bin\/(?:zsh|bash) -lc\s+'(.*)'\s*$/);
+    if (m2) return m2[1];
+    return cmdStr;
+  })();
+
+  // Pattern: `nl -ba <path> | sed -n 'N,Mp'`  (Codex's preferred read pattern)
+  const nlSed = inner.match(/nl\s+-ba\s+'?([^'|]+?)'?\s*\|\s*sed\s+-n\s+'(\d+),(\d+)p'/);
+  if (nlSed) {
+    return { icon: '📖', label: `read ${nlSed[1].trim()} (lines ${nlSed[2]}–${nlSed[3]})` };
+  }
+
+  // Pattern: `sed -n 'N,Mp' <path>`
+  const sedOnly = inner.match(/sed\s+-n\s+'(\d+),(\d+)p'\s+'?([^'\s]+)'?/);
+  if (sedOnly) {
+    return { icon: '📖', label: `read ${sedOnly[3]} (lines ${sedOnly[1]}–${sedOnly[2]})` };
+  }
+
+  // Pattern: `cat <path>` (with optional flags)
+  const catMatch = inner.match(/^\s*cat\s+(?:-[A-Za-z]+\s+)*'?([^'|>\s]+)'?/);
+  if (catMatch) {
+    return { icon: '📖', label: `read ${catMatch[1]}` };
+  }
+
+  // Pattern: `head -n N <path>` / `tail -n N <path>`
+  const hMatch = inner.match(/^\s*(head|tail)\s+(?:-n\s+\+?(\d+)\s+)?'?([^'\s]+)'?/);
+  if (hMatch) {
+    return { icon: '📖', label: `${hMatch[1]} ${hMatch[2] ? `${hMatch[2]} of ` : ''}${hMatch[3]}` };
+  }
+
+  // Pattern: rg / grep
+  const rgMatch = inner.match(/^\s*(?:rg|grep)\s+(?:-[A-Za-z]+\s+)*'([^']+)'(?:\s+(\S+))?/);
+  if (rgMatch) {
+    return { icon: '🔍', label: `grep "${rgMatch[1]}"${rgMatch[2] ? ` in ${rgMatch[2]}` : ''}` };
+  }
+  const rgMatch2 = inner.match(/^\s*(?:rg|grep)\s+(?:-[A-Za-z]+\s+)*"([^"]+)"(?:\s+(\S+))?/);
+  if (rgMatch2) {
+    return { icon: '🔍', label: `grep "${rgMatch2[1]}"${rgMatch2[2] ? ` in ${rgMatch2[2]}` : ''}` };
+  }
+
+  // Pattern: ls / la
+  const lsMatch = inner.match(/^\s*ls\s+(?:-[A-Za-z]+\s+)*(\S*)/);
+  if (lsMatch) {
+    return { icon: '📁', label: `ls ${lsMatch[1] || '.'}` };
+  }
+
+  // Pattern: find
+  const findMatch = inner.match(/^\s*find\s+(\S+)(?:\s+-name\s+'?([^'\s]+)'?)?/);
+  if (findMatch) {
+    return {
+      icon: '🔎',
+      label: `find${findMatch[2] ? ` "${findMatch[2]}"` : ''} under ${findMatch[1]}`,
+    };
+  }
+
+  // Pattern: wc
+  const wcMatch = inner.match(/^\s*wc\s+(?:-[A-Za-z]+\s+)*'?([^'\s]+)'?/);
+  if (wcMatch) {
+    return { icon: '📏', label: `wc ${wcMatch[1]}` };
+  }
+
+  return { icon: '🛠️ ', label: `$ ${truncate(inner, 140)}` };
+}
+
+function clean(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function truncate(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1).trimEnd() + '…';
+}
+
+function safeStringify(v: unknown): string {
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+
+function pickPath(args: string): string | null {
+  const m = args.match(/"path"\s*:\s*"([^"]+)"/);
+  return m ? m[1] : null;
+}
+
+function pickQuery(args: string): string | null {
+  const m = args.match(/"(?:query|pattern)"\s*:\s*"([^"]+)"/);
+  return m ? `"${m[1]}"` : null;
 }
 
 /**
