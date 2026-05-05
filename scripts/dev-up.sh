@@ -127,7 +127,15 @@ note "open libsql admin (HTTP):  http://localhost:8081/health"
 note "ctrl-c here stops next + inngest + agent (libsql stays up)"
 note "─────────────────────────────────────────────────────────"
 
-# Block until any child exits, then propagate.
-wait -n
-note "one process exited — shutting down the rest"
-cleanup
+# Block until any child exits. macOS bash 3.2 has no 'wait -n', so poll
+# every 2s — cheap and portable. As soon as one PID is gone, take down
+# the rest and exit cleanly.
+while true; do
+  sleep 2
+  for pid in "${PIDS[@]}"; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      note "process $pid exited — shutting down the rest"
+      cleanup
+    fi
+  done
+done
