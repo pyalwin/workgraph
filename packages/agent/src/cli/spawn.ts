@@ -110,6 +110,13 @@ function tryParse(line: string): Record<string, unknown> | null {
  */
 export async function* streamCli(opts: CliOptions): AsyncIterable<string> {
   const { binary, args } = buildArgs(opts);
+  const tag = `[cli ${binary}]`;
+  const startedAt = Date.now();
+  // Argv is huge for narrate prompts; show the binary + flags only.
+  const printableArgs = args
+    .map((a) => (a.length > 60 ? `<${a.length}c prompt>` : a))
+    .join(" ");
+  console.log(`${tag} spawn · cwd=${opts.cwd ?? '(default)'} · ${binary} ${printableArgs}`);
 
   const child = spawn(binary, args, {
     cwd: opts.cwd,
@@ -119,20 +126,36 @@ export async function* streamCli(opts: CliOptions): AsyncIterable<string> {
 
   // Forward stderr for debugging without polluting the JSONL stream.
   child.stderr?.on("data", (chunk: Buffer) => {
-    process.stderr.write(`[almanac-classify ${binary} stderr] ${chunk.toString()}`);
+    process.stderr.write(`${tag} stderr · ${chunk.toString()}`);
   });
 
   const onAbort = (): void => { child.kill("SIGTERM"); };
   opts.signal?.addEventListener("abort", onAbort, { once: true });
 
+  // Heartbeat: print every 30s so the user can tell the CLI is still
+  // working on long unit/summary jobs (not silently hung).
+  let lineCount = 0;
+  let lastByteAt = Date.now();
+  const heartbeat = setInterval(() => {
+    const elapsedS = ((Date.now() - startedAt) / 1000).toFixed(0);
+    const sinceLastS = ((Date.now() - lastByteAt) / 1000).toFixed(0);
+    console.log(`${tag} … alive · ${elapsedS}s elapsed · ${lineCount} lines · ${sinceLastS}s since last output`);
+  }, 30_000);
+  heartbeat.unref?.();
+
   try {
     const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity });
     for await (const line of rl) {
       const trimmed = line.trim();
-      if (trimmed) yield trimmed;
+      if (trimmed) {
+        lineCount++;
+        lastByteAt = Date.now();
+        yield trimmed;
+      }
     }
   } finally {
     opts.signal?.removeEventListener("abort", onAbort);
+    clearInterval(heartbeat);
   }
 
   // Wait for the process to fully exit (ignore the code — callers handle
@@ -141,6 +164,11 @@ export async function* streamCli(opts: CliOptions): AsyncIterable<string> {
     if (child.exitCode !== null) { resolve(); return; }
     child.once("close", () => resolve());
   });
+
+  const totalMs = Date.now() - startedAt;
+  console.log(
+    `${tag} done · ${(totalMs / 1000).toFixed(1)}s · ${lineCount} stdout lines · exit=${child.exitCode ?? '?'}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -164,10 +192,17 @@ export async function* streamCli(opts: CliOptions): AsyncIterable<string> {
 export async function runCliJson(opts: CliOptions): Promise<string> {
   const parts: string[] = [];
   let streamedDelta = false; // Claude: suppress duplicate result/assistant text
+  const eventTypes = new Map<string, number>();
+  let unparseable = 0;
 
   for await (const line of streamCli(opts)) {
     const evt = tryParse(line);
-    if (!evt) continue;
+    if (!evt) {
+      unparseable++;
+      continue;
+    }
+    const evtType = (evt.type as string | undefined) ?? '(no type)';
+    eventTypes.set(evtType, (eventTypes.get(evtType) ?? 0) + 1);
 
     switch (opts.cli) {
       case "codex": {
@@ -250,5 +285,16 @@ export async function runCliJson(opts: CliOptions): Promise<string> {
     }
   }
 
-  return parts.join("");
+  const totalText = parts.join("");
+  // Per-event-type breakdown so the user can see what the CLI emitted
+  // vs what we extracted text from. If text=0 here, the parser missed
+  // a new event shape and the user can grep eventTypes to see what.
+  const breakdown = [...eventTypes.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `${t}=${n}`)
+    .join(' ');
+  console.log(
+    `[cli ${opts.cli}] events · text=${totalText.length}c · parts=${parts.length} · unparseable_lines=${unparseable} · ${breakdown}`,
+  );
+  return totalText;
 }

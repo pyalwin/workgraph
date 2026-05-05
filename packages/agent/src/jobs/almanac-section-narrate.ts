@@ -641,41 +641,72 @@ type NarrateJobResult =
 export const almanacSectionNarrateHandler: JobHandler = async (
   params: unknown
 ): Promise<NarrateJobResult> => {
+  const t0 = Date.now();
   const p = parseParams(params);
+  const tag = `[narrate ${p.anchor}]`;
+  console.log(
+    `${tag} parsed params · kind=${p.kind} cli=${p.cli} ws=${p.workspaceId} project=${p.projectKey} ` +
+      `dossier{events=${(p.dossier.events as unknown[] | undefined)?.length ?? 0} ` +
+      `tickets=${(p.dossier.tickets as unknown[] | undefined)?.length ?? 0} ` +
+      `files=${(p.dossier.files as unknown[] | undefined)?.length ?? 0}}`,
+  );
 
   const prompt = buildPrompt(p);
+  console.log(`${tag} prompt built · ${prompt.length} chars`);
 
-  // Resolve the local clone path so the CLI runs INSIDE the repo. Codex's
-  // --sandbox read-only flag plus a non-default cwd lets it grep / read /
-  // follow imports without us having to ship file contents in the prompt.
-  // If the repo can't be resolved, fall back to undefined cwd — the CLI
-  // will still produce something, just without filesystem context.
+  // Resolve local clone path. The CLI runs with cwd=repoPath so it can
+  // grep/read/follow imports without us shipping file contents.
   let cwd: string | undefined;
+  let cwdReason: string;
   try {
     const repo = inferRepoFromDossier(p.dossier);
-    if (repo) cwd = resolveRepoPath(repo);
-  } catch {
-    cwd = undefined;
+    if (repo) {
+      cwd = resolveRepoPath(repo);
+      cwdReason = `resolved from dossier.repo='${repo}'`;
+    } else {
+      cwdReason = 'no repo on dossier — CLI will run without repo cwd';
+    }
+  } catch (err) {
+    cwdReason = `resolveRepoPath failed: ${err instanceof Error ? err.message : String(err)}`;
   }
+  console.log(`${tag} cwd · ${cwd ?? '(unset)'} (${cwdReason})`);
 
+  const tCli = Date.now();
+  console.log(`${tag} starting ${p.cli}${p.model ? ` model=${p.model}` : ''} (this may take minutes for unit/summary)…`);
   const rawOutput = await runCliJson({
     cli: p.cli,
     prompt,
     model: p.model,
     cwd,
   });
+  const cliMs = Date.now() - tCli;
+  console.log(`${tag} CLI finished in ${(cliMs / 1000).toFixed(1)}s · ${rawOutput.length} raw chars`);
 
   const trimmed = rawOutput.trim();
+  if (trimmed.length === 0) {
+    console.error(`${tag} CLI returned empty output — check CLI auth / model availability`);
+  }
 
   // Apply diagram fence preservation before validation.
   const markdown = preserveDiagramFences(trimmed, p.skeletonMarkdown);
+  if (markdown.length !== trimmed.length) {
+    console.log(`${tag} diagram fences reattached · ${markdown.length - trimmed.length} extra chars`);
+  }
 
   const validation = validateMarkdown(markdown, p.dossier);
   if (!validation.ok) {
+    console.error(`${tag} validation failed · ${validation.reason}`);
     return { ok: false, success: false, reason: validation.reason };
   }
+  console.log(
+    `${tag} validation ok · ${markdown.length} chars · hasReferences=${validation.hasReferences}`,
+  );
 
+  const tPost = Date.now();
   await postSection(p, markdown);
+  console.log(
+    `${tag} POSTed to ingest · ${Date.now() - tPost}ms · total job ${(Date.now() - t0) / 1000}s`,
+  );
 
   return {
     ok: true,
