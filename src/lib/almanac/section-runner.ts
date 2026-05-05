@@ -255,17 +255,50 @@ export async function regenerateSections(
         model: opts?.model ?? undefined,
         dossier: dossierForJob,
       };
+      const paramsJson = JSON.stringify(jobParams);
 
-      const result = await db
+      // When the user clicks Regenerate (forceAll) we MUST overwrite any
+      // existing job for this idempotency key — including 'done' rows from
+      // a prior run. Otherwise INSERT OR IGNORE silently drops the new job
+      // and the section just keeps yesterday's narrative.
+      // Outside forceAll, we still re-queue 'failed' rows + 'done' rows that
+      // produced no useful content (chars=0), so retries actually re-fire.
+      const updateClause = (opts?.forceAll === true || forceThis)
+        ? "WHERE idempotency_key = ? AND agent_id = ?"
+        : `WHERE idempotency_key = ? AND agent_id = ?
+             AND (
+               status = 'failed'
+               OR (status = 'done' AND COALESCE(CAST(json_extract(result, '$.chars') AS INTEGER), 0) = 0)
+             )`;
+
+      const updateResult = await db
         .prepare(
-          `INSERT OR IGNORE INTO agent_jobs
-             (id, agent_id, kind, params, status, idempotency_key, created_at)
-           VALUES (?, ?, 'almanac.section.narrate', ?, 'queued', ?, datetime('now'))`,
+          `UPDATE agent_jobs
+             SET status = 'queued',
+                 params = ?,
+                 error = NULL,
+                 result = NULL,
+                 attempt = COALESCE(attempt, 0) + 1,
+                 started_at = NULL,
+                 completed_at = NULL,
+                 created_at = datetime('now')
+           ${updateClause}`,
         )
-        .run(uuidv4(), agentId, JSON.stringify(jobParams), idempotencyKey);
+        .run(paramsJson, idempotencyKey, agentId);
 
-      if ((result.changes ?? 0) > 0) {
+      if ((updateResult.changes ?? 0) > 0) {
         enqueuedJobs.push(idempotencyKey);
+      } else {
+        const insertResult = await db
+          .prepare(
+            `INSERT OR IGNORE INTO agent_jobs
+               (id, agent_id, kind, params, status, idempotency_key, created_at)
+             VALUES (?, ?, 'almanac.section.narrate', ?, 'queued', ?, datetime('now'))`,
+          )
+          .run(uuidv4(), agentId, paramsJson, idempotencyKey);
+        if ((insertResult.changes ?? 0) > 0) {
+          enqueuedJobs.push(idempotencyKey);
+        }
       }
     }
   }
