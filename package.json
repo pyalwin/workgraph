@@ -20,7 +20,9 @@
     "db:down": "docker compose stop libsql",
     "db:reset": "bash scripts/db-local-reset.sh",
     "db:logs": "docker compose logs -f libsql",
-    "dev:up": "bash scripts/dev-up.sh"
+    "dev:up": "bash scripts/dev-up.sh",
+    "dev:down": "bash scripts/dev-down.sh",
+    "dev:down:all": "bash scripts/dev-down.sh --all"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.175",
