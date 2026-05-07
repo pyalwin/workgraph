@@ -5,6 +5,8 @@
  * Dispatches to subcommands based on argv[2].
  */
 
+export {}; // mark this file as an ES module so top-level await is allowed
+
 const [, , command, ...rest] = process.argv;
 
 switch (command) {
