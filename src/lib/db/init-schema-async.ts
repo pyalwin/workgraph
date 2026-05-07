@@ -663,6 +663,30 @@ const DDL = `
  * is swallowed.
  */
 async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promise<void> {
+  // Legacy schema cleanup: the production agent_jobs table was originally
+  // created with an `agent_id NOT NULL` column that the current code path
+  // doesn't write (we use `assigned_to` instead). DROP COLUMN failed —
+  // likely an index or other constraint on agent_id blocks it on Turso.
+  // The safest fix in beta (no live job data worth keeping) is to detect
+  // the legacy column and drop the table outright; the DDL block below
+  // will recreate it cleanly.
+  try {
+    const cols = await db
+      .prepare(`PRAGMA table_info(agent_jobs)`)
+      .all<{ name: string }>();
+    const hasLegacyAgentId = cols.some((c) => c.name === 'agent_id');
+    if (hasLegacyAgentId) {
+      // job_events references agent_jobs via FK ON DELETE CASCADE, so we
+      // drop it first to keep the order explicit.
+      await db.exec(`DROP TABLE IF EXISTS job_events`);
+      await db.exec(`DROP TABLE IF EXISTS agent_jobs`);
+      console.warn('[schema migration] dropped legacy agent_jobs (had agent_id NOT NULL); will be recreated by DDL.');
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[schema migration] legacy agent_jobs check failed (continuing):', msg);
+  }
+
   const migrations: string[] = [
     // Columns added to tables that already existed in older deploys. The
     // CREATE TABLE blocks below are no-ops once a table exists, so any
@@ -674,12 +698,6 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
     `ALTER TABLE almanac_docs ADD COLUMN title TEXT`,
     `ALTER TABLE agents ADD COLUMN claude_available INTEGER`,
     `ALTER TABLE agents ADD COLUMN claude_version TEXT`,
-    // Legacy columns that prod has but our current code no longer uses.
-    // The old agent_jobs.agent_id was NOT NULL and would block all our
-    // inserts (which only set id, workspace_id, kind, status, params).
-    // SQLite 3.35+ supports DROP COLUMN; Turso/libsql is on a newer
-    // SQLite so this is safe.
-    `ALTER TABLE agent_jobs DROP COLUMN agent_id`,
   ];
   for (const sql of migrations) {
     try {
