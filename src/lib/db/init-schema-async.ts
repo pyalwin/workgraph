@@ -673,8 +673,20 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
       await db.exec(sql);
     } catch (err) {
       const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
-      if (msg.includes('duplicate column') || msg.includes('already exists')) continue;
-      throw err;
+      // Accept any phrasing libsql/Turso/SQLite uses for "this column or
+      // table is already there" — the migration is idempotent and a benign
+      // re-application must never poison schema init.
+      if (
+        msg.includes('duplicate column') ||
+        msg.includes('already exists') ||
+        msg.includes('duplicate name') ||
+        msg.includes('no such table') // table will be created by the next deploy of the DDL block
+      ) {
+        continue;
+      }
+      // Non-blocking: log but don't poison schema init for the entire
+      // process. Schema bugs caught here would otherwise 500 every request.
+      console.warn(`[schema migration] non-fatal failure for "${sql}":`, msg);
     }
   }
 }

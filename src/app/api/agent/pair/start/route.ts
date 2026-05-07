@@ -31,29 +31,40 @@ function generateUserCode(): string {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  await ensureSchemaAsync();
-  const db = getLibsqlDb();
+  try {
+    await ensureSchemaAsync();
+    const db = getLibsqlDb();
 
-  const id = uuid();
-  const userCode = generateUserCode();
-  const expiresAt = new Date(Date.now() + PAIRING_TTL_MS).toISOString();
+    const id = uuid();
+    const userCode = generateUserCode();
+    const expiresAt = new Date(Date.now() + PAIRING_TTL_MS).toISOString();
 
-  await db
-    .prepare(
-      `INSERT INTO agent_pairing (id, user_code, status, expires_at)
-       VALUES (?, ?, 'pending', ?)`,
-    )
-    .run(id, userCode, expiresAt);
+    await db
+      .prepare(
+        `INSERT INTO agent_pairing (id, user_code, status, expires_at)
+         VALUES (?, ?, 'pending', ?)`,
+      )
+      .run(id, userCode, expiresAt);
 
-  // Prefer the configured public URL; fall back to the request origin so the
-  // response is always a complete URL the agent can print.
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
-  const verificationUrl = `${origin}/agents/connect?code=${userCode}`;
+    // Prefer the configured public URL; fall back to the request origin so
+    // the response is always a complete URL the agent can print.
+    const origin = process.env.NEXT_PUBLIC_APP_URL ?? new URL(req.url).origin;
+    const verificationUrl = `${origin}/agents/connect?code=${userCode}`;
 
-  return NextResponse.json({
-    pairing_id: id,
-    user_code: userCode,
-    verification_url: verificationUrl,
-    expires_at: expiresAt,
-  });
+    return NextResponse.json({
+      pairing_id: id,
+      user_code: userCode,
+      verification_url: verificationUrl,
+      expires_at: expiresAt,
+    });
+  } catch (err) {
+    // Surface the message so the agent CLI gets something actionable
+    // instead of an empty 500 body. Beta-phase debug aid.
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[pair/start] failed:', err);
+    return NextResponse.json(
+      { error: 'pair_start_failed', message },
+      { status: 500 },
+    );
+  }
 }
