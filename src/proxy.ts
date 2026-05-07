@@ -27,15 +27,18 @@ export const config = {
   matcher: [
     // Skip the authkit proxy on:
     //   - static assets
-    //   - the agent transport (bearer-token auth, no WorkOS session)
+    //   - bearer-token agent endpoints (heartbeat, jobs/*, pair/start, pair/poll)
     //   - the inngest webhook (HMAC-signed)
     //   - the agent ingest endpoints under /api/almanac/docs/:id/{outline,sections/:section_id}
+    //
     // Running authkit on the agent's high-frequency POSTs burned WorkOS rate
     // limits and produced "Failed to exchange WORKOS_CLAIM_TOKEN (429)".
-    // The sections exclusion is anchored to a single trailing segment so that
-    // browser-auth subroutes (e.g. .../sections/:section_id/regen) still run
-    // through authkit. /api/jobs/:id/events stays under the proxy because it
-    // uses withAuth() for browser session.
-    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|robots.txt|sitemap.xml|api/agent|api/inngest|api/almanac/docs/[^/]+/outline$|api/almanac/docs/[^/]+/sections/[^/]+$).*)',
+    //
+    // /api/agent/pair/confirm is the one agent path that DOES need authkit
+    // (the user's browser confirms the pairing via withAuth), so it's
+    // deliberately NOT in the exclusion list. Same applies to
+    // .../sections/:id/regen — anchored exclusions let browser-auth
+    // subroutes still run through authkit.
+    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|robots.txt|sitemap.xml|api/agent/(?:heartbeat|jobs|pair/(?:start|poll))|api/inngest|api/almanac/docs/[^/]+/outline$|api/almanac/docs/[^/]+/sections/[^/]+$).*)',
   ],
 };
