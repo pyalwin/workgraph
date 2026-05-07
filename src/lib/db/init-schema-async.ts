@@ -664,6 +664,13 @@ const DDL = `
  */
 async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promise<void> {
   const migrations: string[] = [
+    // Columns added to tables that already existed in older deploys. The
+    // CREATE TABLE blocks below are no-ops once a table exists, so any
+    // column we have grown since the original deploy needs an explicit
+    // ALTER here. Each ALTER is wrapped in tolerant error handling so
+    // running on a fresh DB ("no such table") or after the column is
+    // already present ("duplicate column") is harmless.
+    `ALTER TABLE agent_jobs ADD COLUMN workspace_id TEXT`,
     `ALTER TABLE almanac_docs ADD COLUMN title TEXT`,
     `ALTER TABLE agents ADD COLUMN claude_available INTEGER`,
     `ALTER TABLE agents ADD COLUMN claude_version TEXT`,
@@ -695,8 +702,12 @@ export async function ensureSchemaAsync(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
     const db = getLibsqlDb();
-    await db.exec(DDL);
+    // Migrations run BEFORE the DDL so columns added since older deploys
+    // are present on existing tables before any CREATE INDEX statement
+    // tries to reference them. On a fresh install the migrations are
+    // no-ops ("no such table") and the DDL creates the schema cleanly.
     await runAdditiveMigrations(db);
+    await db.exec(DDL);
   })();
   // Don't cache a rejected promise — a transient DDL failure should not
   // permanently break every subsequent caller until the process restarts.
