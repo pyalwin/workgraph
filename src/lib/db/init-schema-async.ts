@@ -674,6 +674,12 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
     `ALTER TABLE almanac_docs ADD COLUMN title TEXT`,
     `ALTER TABLE agents ADD COLUMN claude_available INTEGER`,
     `ALTER TABLE agents ADD COLUMN claude_version TEXT`,
+    // Legacy columns that prod has but our current code no longer uses.
+    // The old agent_jobs.agent_id was NOT NULL and would block all our
+    // inserts (which only set id, workspace_id, kind, status, params).
+    // SQLite 3.35+ supports DROP COLUMN; Turso/libsql is on a newer
+    // SQLite so this is safe.
+    `ALTER TABLE agent_jobs DROP COLUMN agent_id`,
   ];
   for (const sql of migrations) {
     try {
@@ -687,7 +693,9 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
         msg.includes('duplicate column') ||
         msg.includes('already exists') ||
         msg.includes('duplicate name') ||
-        msg.includes('no such table') // table will be created by the next deploy of the DDL block
+        msg.includes('no such table') || // table will be created by the next deploy of the DDL block
+        msg.includes('no such column') || // DROP COLUMN where column was already removed
+        msg.includes("can't drop column") // some libsql variants for already-dropped column
       ) {
         continue;
       }
