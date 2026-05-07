@@ -1,0 +1,52 @@
+{
+  "name": "@workgraph/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Workgraph local agent — runs Claude jobs on your machine",
+  "license": "MIT",
+  "homepage": "https://github.com/pyalwin/workgraph#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pyalwin/workgraph.git",
+    "directory": "packages/agent"
+  },
+  "bugs": {
+    "url": "https://github.com/pyalwin/workgraph/issues"
+  },
+  "keywords": [
+    "workgraph",
+    "agent",
+    "cli",
+    "claude",
+    "almanac",
+    "documentation",
+    "ai"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "workgraph": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts run",
+    "dev:watch": "tsx watch src/index.ts run",
+    "start": "node dist/index.js run",
+    "test": "tsx --test src/dispatcher.test.ts src/workspace.test.ts src/drivers/claude.test.ts src/handlers/almanac-outline.test.ts src/handlers/almanac-draft-section.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.4.0"
+  }
+}

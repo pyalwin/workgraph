@@ -1,0 +1,299 @@
+/* ─────────────────────────────────────────────────────────────────────
+ * Notion-style typography & spacing for the almanac doc viewer.
+ *
+ * Scoped to `.almanac-doc-page` on the doc page wrapper so it doesn't
+ * leak into other surfaces. Imported by almanac-doc-client.tsx after
+ * the OpenUI defaults so these win on cascade.
+ *
+ * Reference values follow Notion's public editor:
+ *   - Inter at 16/1.5 body
+ *   - H1 40px / 700 / -0.022em / 1.1
+ *   - H2 30px / 600 / 1.3
+ *   - H3 24px / 600 / 1.3
+ *   - Content column 708px, page padding 96px on desktop
+ *   - Heading rhythm: large top margin, tight bottom margin
+ * ───────────────────────────────────────────────────────────────────── */
+
+.almanac-doc-page {
+  --almanac-content-width: 720px;
+  --almanac-text-color: var(--ink);
+  --almanac-text-muted: var(--ink-3);
+  --almanac-text-faint: var(--ink-5);
+  --almanac-divider: var(--rule);
+}
+
+.almanac-doc-page,
+.almanac-doc-page .openui-markdown-renderer {
+  font-family: var(--sans);
+  color: var(--almanac-text-color);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Document heading (page title) ─────────────────────────────────── */
+.almanac-doc-page .almanac-title {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  line-height: 1.1;
+  margin: 4px 0 8px;
+  color: var(--almanac-text-color);
+}
+
+.almanac-doc-page .almanac-title--placeholder {
+  color: var(--almanac-text-faint);
+  font-weight: 600;
+}
+
+.almanac-doc-page .almanac-subtitle {
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--almanac-text-muted);
+  margin: 6px 0 0;
+  max-width: 720px;
+}
+
+/* ─── Markdown body — Notion scale ──────────────────────────────────── */
+.almanac-doc-page .openui-markdown-renderer {
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--almanac-text-color);
+}
+
+.almanac-doc-page .openui-markdown-renderer > * + * {
+  margin-top: 0.5em;
+}
+
+.almanac-doc-page .openui-markdown-renderer p {
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 3px 0;
+}
+
+.almanac-doc-page .openui-markdown-renderer h2 {
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.012em;
+  margin: 36px 0 4px;
+  color: var(--almanac-text-color);
+}
+
+.almanac-doc-page .openui-markdown-renderer h3 {
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.008em;
+  margin: 28px 0 4px;
+  color: var(--almanac-text-color);
+  scroll-margin-top: 32px;
+}
+
+.almanac-doc-page .openui-markdown-renderer h4 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 20px 0 4px;
+  color: var(--almanac-text-color);
+}
+
+/* ─── Lists ─────────────────────────────────────────────────────────── */
+.almanac-doc-page .openui-markdown-renderer ul,
+.almanac-doc-page .openui-markdown-renderer ol {
+  margin: 6px 0;
+  padding-left: 26px;
+}
+
+.almanac-doc-page .openui-markdown-renderer li {
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 2px 0;
+  padding: 2px 0;
+}
+
+.almanac-doc-page .openui-markdown-renderer li > p {
+  padding: 0;
+  margin: 0;
+}
+
+.almanac-doc-page .openui-markdown-renderer li::marker {
+  color: var(--almanac-text-muted);
+}
+
+/* ─── Inline emphasis ───────────────────────────────────────────────── */
+.almanac-doc-page .openui-markdown-renderer strong {
+  font-weight: 600;
+  color: var(--almanac-text-color);
+}
+
+.almanac-doc-page .openui-markdown-renderer em {
+  font-style: italic;
+}
+
+.almanac-doc-page .openui-markdown-renderer a {
+  color: var(--blue);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--blue) 30%, transparent);
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.almanac-doc-page .openui-markdown-renderer a:hover {
+  border-bottom-color: var(--blue);
+}
+
+/* ─── Inline code ───────────────────────────────────────────────────── */
+.almanac-doc-page .openui-markdown-renderer code:not(pre code) {
+  font-family: var(--mono);
+  font-size: 0.875em;
+  background: rgba(135, 131, 120, 0.15);
+  color: #eb5757;
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+  border: none;
+}
+
+/* ─── Footnote markers — Notion-style superscript pill ──────────────── */
+.almanac-doc-page .openui-markdown-renderer sup {
+  font-size: 0;
+  vertical-align: baseline;
+  line-height: 0;
+  margin: 0 1px;
+}
+
+.almanac-doc-page .openui-markdown-renderer sup a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  background: rgba(135, 131, 120, 0.12);
+  color: var(--ink-2);
+  border-radius: 999px;
+  border: none;
+  font-size: 11px;
+  font-weight: 500;
+  text-decoration: none;
+  vertical-align: 1px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.almanac-doc-page .openui-markdown-renderer sup a:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+/* ─── Footnotes block (when expanded) ───────────────────────────────── */
+.almanac-doc-page .openui-markdown-renderer section[data-footnotes] {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--almanac-divider);
+  font-size: 14px;
+  color: var(--almanac-text-muted);
+}
+
+.almanac-doc-page .openui-markdown-renderer section[data-footnotes] ol {
+  padding-left: 22px;
+}
+
+.almanac-doc-page .openui-markdown-renderer section[data-footnotes] li {
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 4px 0;
+  padding: 0;
+}
+
+.almanac-doc-page .openui-markdown-renderer section[data-footnotes] code {
+  font-size: 0.92em;
+}
+
+/* ─── Tables (lighter than OpenUI default) ──────────────────────────── */
+.almanac-doc-page .openui-markdown-renderer table {
+  font-size: 14px;
+  border-collapse: collapse;
+  margin: 10px 0;
+}
+
+.almanac-doc-page .openui-markdown-renderer table th,
+.almanac-doc-page .openui-markdown-renderer table td {
+  padding: 8px 12px;
+  border: 1px solid var(--almanac-divider);
+}
+
+.almanac-doc-page .openui-markdown-renderer table th {
+  background: rgba(135, 131, 120, 0.08);
+  font-weight: 600;
+  text-align: left;
+}
+
+/* ─── Blockquote ────────────────────────────────────────────────────── */
+.almanac-doc-page .openui-markdown-renderer blockquote {
+  border-left: 3px solid var(--ink);
+  margin: 8px 0;
+  padding: 0 0 0 14px;
+  color: var(--almanac-text-muted);
+  font-style: normal;
+}
+
+/* ─── Section title (the "## H2" the agent emits per section) ───────── */
+.almanac-doc-page .almanac-section-title {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.25;
+  margin: 0;
+  color: var(--almanac-text-color);
+}
+
+/* Subtle divider between sections (Notion-style hairline) */
+.almanac-doc-page main > section + section::before {
+  content: '';
+  display: block;
+  height: 1px;
+  margin: 0 0 32px;
+  background: var(--almanac-divider);
+}
+
+/* Make the regen button hover-only, like a Notion block menu */
+.almanac-doc-page main > section button[type="button"]:hover {
+  background: rgba(135, 131, 120, 0.10);
+  color: var(--ink) !important;
+  border-color: var(--rule) !important;
+}
+
+/* Sidebar TOC items: subtle, hover-only emphasis */
+.almanac-doc-page aside button:hover {
+  color: var(--ink) !important;
+}
+
+/* Reduce the visual weight of subsection chip nav */
+.almanac-doc-page .almanac-chip-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 12px;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.almanac-doc-page .almanac-chip-nav button {
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--almanac-divider);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--almanac-text-muted);
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.almanac-doc-page .almanac-chip-nav button:hover {
+  background: rgba(135, 131, 120, 0.10);
+  color: var(--almanac-text-color);
+  border-color: var(--rule-2);
+}

@@ -123,6 +123,10 @@ export function WorkgraphStateProvider({ children }: { children: ReactNode }) {
     if (current && current.enabled === false) {
       const firstEnabled = workspaces.find((w) => w.enabled !== false);
       if (firstEnabled && firstEnabled.id !== state.workspaceId) {
+        // Auto-correction is not a user-initiated switch; prime the ref so
+        // the redirect effect below treats the resulting state change as a
+        // baseline rather than a navigation event.
+        prevWorkspaceId.current = firstEnabled.id;
         setState({ workspaceId: firstEnabled.id });
       }
     }
@@ -161,13 +165,22 @@ export function WorkgraphStateProvider({ children }: { children: ReactNode }) {
     };
 
   useEffect(() => {
-    if (prevWorkspaceId.current !== null && prevWorkspaceId.current !== state.workspaceId) {
+    // Wait for the localStorage hydration effect to settle before establishing
+    // a baseline. Without this guard, the hydrated workspaceId looks like a
+    // user-initiated switch and pushes the user off whatever deep link they
+    // opened (e.g., /agents/connect?code=...).
+    if (!hydrated) return;
+    if (prevWorkspaceId.current === null) {
+      prevWorkspaceId.current = state.workspaceId;
+      return;
+    }
+    if (prevWorkspaceId.current !== state.workspaceId) {
       const menu = activeWorkspace.ui?.menu;
       const landingHref = menu?.[0]?.href ?? '/dashboard';
       router.push(landingHref);
+      prevWorkspaceId.current = state.workspaceId;
     }
-    prevWorkspaceId.current = state.workspaceId;
-  }, [state.workspaceId, activeWorkspace, router]);
+  }, [state.workspaceId, activeWorkspace, router, hydrated]);
 
   return (
     <WgCtx.Provider

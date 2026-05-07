@@ -17,6 +17,7 @@ export default authkitProxy({
       '/auth/callback',
       '/auth/signout',
       '/api/inngest',
+      '/api/agent/:path*',
     ],
   },
   debug: false,
@@ -24,6 +25,17 @@ export default authkitProxy({
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|robots.txt|sitemap.xml).*)',
+    // Skip the authkit proxy on:
+    //   - static assets
+    //   - the agent transport (bearer-token auth, no WorkOS session)
+    //   - the inngest webhook (HMAC-signed)
+    //   - the agent ingest endpoints under /api/almanac/docs/:id/{outline,sections/:section_id}
+    // Running authkit on the agent's high-frequency POSTs burned WorkOS rate
+    // limits and produced "Failed to exchange WORKOS_CLAIM_TOKEN (429)".
+    // The sections exclusion is anchored to a single trailing segment so that
+    // browser-auth subroutes (e.g. .../sections/:section_id/regen) still run
+    // through authkit. /api/jobs/:id/events stays under the proxy because it
+    // uses withAuth() for browser session.
+    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|robots.txt|sitemap.xml|api/agent|api/inngest|api/almanac/docs/[^/]+/outline$|api/almanac/docs/[^/]+/sections/[^/]+$).*)',
   ],
 };

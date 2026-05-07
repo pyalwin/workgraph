@@ -543,14 +543,154 @@ const DDL = `
     id TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- ── Almanac Local Agent ──────────────────────────────────────────────────
+  -- agents: one row per paired local-agent install.
+  -- Replaces/extends the older workspace_agents scaffold; that table remains
+  -- for the legacy agent-status UI query until it is migrated.
+  CREATE TABLE IF NOT EXISTS agents (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL,
+    hostname TEXT,
+    platform TEXT,
+    version TEXT,
+    claude_available INTEGER,
+    claude_version TEXT,
+    paired_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_agents_workspace_id ON agents(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id);
+
+  -- agent_pairing: transient rows used during the device-flow pairing dance.
+  -- Deleted or expires; confirmed rows result in an agents row.
+  CREATE TABLE IF NOT EXISTS agent_pairing (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT,
+    user_id TEXT,
+    user_code TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    agent_id TEXT,
+    agent_token_raw TEXT,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_pairing_user_code ON agent_pairing(user_code);
+  CREATE INDEX IF NOT EXISTS idx_agent_pairing_expires ON agent_pairing(expires_at);
+
+  -- agent_jobs: the job queue.
+  CREATE TABLE IF NOT EXISTS agent_jobs (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    params TEXT NOT NULL DEFAULT '{}',
+    result TEXT,
+    assigned_to TEXT REFERENCES agents(id),
+    attempt INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    started_at TEXT,
+    finished_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_status_kind ON agent_jobs(status, kind, created_at);
+  CREATE INDEX IF NOT EXISTS idx_agent_jobs_workspace ON agent_jobs(workspace_id);
+
+  -- job_events: streaming events emitted by the agent during a job.
+  CREATE TABLE IF NOT EXISTS job_events (
+    job_id TEXT NOT NULL REFERENCES agent_jobs(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (job_id, seq)
+  );
+  CREATE INDEX IF NOT EXISTS idx_job_events_job_created ON job_events(job_id, created_at);
+
+  -- almanac_docs: one row per generated document.
+  CREATE TABLE IF NOT EXISTS almanac_docs (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    repo_key TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'outlining',
+    outline TEXT,
+    product_summary TEXT,
+    title TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_almanac_docs_workspace ON almanac_docs(workspace_id);
+  CREATE INDEX IF NOT EXISTS idx_almanac_docs_project ON almanac_docs(workspace_id, project_key);
+
+  -- almanac_doc_sections: one row per section within a document.
+  CREATE TABLE IF NOT EXISTS almanac_doc_sections (
+    doc_id TEXT NOT NULL REFERENCES almanac_docs(id) ON DELETE CASCADE,
+    section_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    markdown TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    job_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    regenerated_at TEXT,
+    PRIMARY KEY (doc_id, section_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_almanac_sections_doc ON almanac_doc_sections(doc_id, ordinal);
+
+  CREATE TABLE IF NOT EXISTS project_github_configs (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    default_branch TEXT NOT NULL DEFAULT 'main',
+    path_prefixes TEXT NOT NULL DEFAULT '[]',
+    ticket_prefixes TEXT NOT NULL DEFAULT '[]',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS uniq_project_github_configs ON project_github_configs(workspace_id, project_key, repo);
+  CREATE INDEX IF NOT EXISTS idx_project_github_configs_project ON project_github_configs(workspace_id, project_key);
 `;
+
+/**
+ * Best-effort additive migrations. SQLite has no `ADD COLUMN IF NOT EXISTS`,
+ * so each ALTER is wrapped in a try/catch and the "duplicate column" failure
+ * is swallowed.
+ */
+async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promise<void> {
+  const migrations: string[] = [
+    `ALTER TABLE almanac_docs ADD COLUMN title TEXT`,
+    `ALTER TABLE agents ADD COLUMN claude_available INTEGER`,
+    `ALTER TABLE agents ADD COLUMN claude_version TEXT`,
+  ];
+  for (const sql of migrations) {
+    try {
+      await db.exec(sql);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      if (msg.includes('duplicate column') || msg.includes('already exists')) continue;
+      throw err;
+    }
+  }
+}
 
 export async function ensureSchemaAsync(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
     const db = getLibsqlDb();
     await db.exec(DDL);
+    await runAdditiveMigrations(db);
   })();
+  // Don't cache a rejected promise — a transient DDL failure should not
+  // permanently break every subsequent caller until the process restarts.
+  _initPromise.catch(() => {
+    _initPromise = null;
+  });
   return _initPromise;
 }
 

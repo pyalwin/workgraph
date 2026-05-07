@@ -5173,6 +5173,32 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
 }
 .proj-header-counts { font-size: 0.85rem; }
 .proj-header-actions { display: flex; align-items: center; gap: 0.65rem; flex-shrink: 0; }
+
+.proj-almanac-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--bone-2, #efeadf);
+  border: 1px solid var(--rule, rgba(21, 20, 15, 0.08));
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--ink-2, #2a2822);
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.proj-almanac-link:hover {
+  background: var(--paper, #fff);
+  border-color: var(--rule-2, rgba(21, 20, 15, 0.14));
+  color: var(--ink, #15140f);
+}
+
+.proj-almanac-link svg {
+  flex-shrink: 0;
+  color: var(--ink-3, #53504a);
+}
 .proj-header-title {
   margin: 0 0 1.5rem;
   font-size: clamp(1.85rem, 4vw, 2.6rem);

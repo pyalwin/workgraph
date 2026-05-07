@@ -145,6 +145,17 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
             </span>
           </div>
           <div className="proj-header-actions">
+            <Link
+              href={`/projects/${projectKey.toLowerCase()}/almanac`}
+              className="proj-almanac-link"
+              title="Open the project's product almanac"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M4 5a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v15l-3-2-3 2-3-2-3 2-3-2V5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
+                <path d="M8 8h7M8 12h7M8 16h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+              </svg>
+              Almanac
+            </Link>
             <PeriodPill value={period} onChange={setPeriod} />
           </div>
         </div>

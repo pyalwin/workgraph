@@ -12,6 +12,7 @@ import { projectReadmeRefresh } from './project-readme';
 import { projectOkrsRefresh } from './project-okrs';
 import { githubTrailsRefreshWorkspace, issuePrSummaryRefresh, unmatchedPrAiMatcher } from './github-trails';
 import { chunkEmbedRun } from './chunk-embed';
+import { almanacFanOutSections, almanacAssemble, almanacHandleJobFailure } from './almanac';
 
 export const functions = [
   heartbeat,
@@ -27,4 +28,7 @@ export const functions = [
   issuePrSummaryRefresh,
   unmatchedPrAiMatcher,
   chunkEmbedRun,
+  almanacFanOutSections,
+  almanacAssemble,
+  almanacHandleJobFailure,
 ];

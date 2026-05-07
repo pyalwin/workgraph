@@ -566,6 +566,145 @@ export const workspaceUserAliases = sqliteTable(
   ],
 );
 
+// ─────── Almanac Local Agent ──────────────────────────────────────────────
+
+export const agents = sqliteTable(
+  'agents',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    userId: text('user_id').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    hostname: text('hostname'),
+    platform: text('platform'),
+    version: text('version'),
+    claudeAvailable: integer('claude_available'),
+    claudeVersion: text('claude_version'),
+    pairedAt: text('paired_at').notNull().default(sql`(datetime('now'))`),
+    lastSeenAt: text('last_seen_at'),
+  },
+  (t) => [
+    index('idx_agents_workspace_id').on(t.workspaceId),
+    index('idx_agents_user_id').on(t.userId),
+  ],
+);
+
+export const agentPairing = sqliteTable(
+  'agent_pairing',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id'),
+    userId: text('user_id'),
+    userCode: text('user_code').notNull(),
+    status: text('status').notNull().default('pending'),
+    agentId: text('agent_id'),
+    agentTokenRaw: text('agent_token_raw'),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    index('idx_agent_pairing_user_code').on(t.userCode),
+    index('idx_agent_pairing_expires').on(t.expiresAt),
+  ],
+);
+
+export const agentJobs = sqliteTable(
+  'agent_jobs',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    kind: text('kind').notNull(),
+    status: text('status').notNull().default('queued'),
+    params: text('params').notNull().default('{}'),
+    result: text('result'),
+    assignedTo: text('assigned_to'),
+    attempt: integer('attempt').notNull().default(0),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    startedAt: text('started_at'),
+    finishedAt: text('finished_at'),
+  },
+  (t) => [
+    index('idx_agent_jobs_status_kind').on(t.status, t.kind, t.createdAt),
+    index('idx_agent_jobs_workspace').on(t.workspaceId),
+  ],
+);
+
+export const jobEvents = sqliteTable(
+  'job_events',
+  {
+    jobId: text('job_id').notNull(),
+    seq: integer('seq').notNull(),
+    type: text('type').notNull(),
+    payload: text('payload').notNull().default('{}'),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    primaryKey({ columns: [t.jobId, t.seq] }),
+    index('idx_job_events_job_created').on(t.jobId, t.createdAt),
+  ],
+);
+
+export const almanacDocs = sqliteTable(
+  'almanac_docs',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    projectKey: text('project_key').notNull(),
+    repoKey: text('repo_key').notNull(),
+    ref: text('ref').notNull(),
+    status: text('status').notNull().default('outlining'),
+    outline: text('outline'),
+    productSummary: text('product_summary'),
+    title: text('title'),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    completedAt: text('completed_at'),
+  },
+  (t) => [
+    index('idx_almanac_docs_workspace').on(t.workspaceId),
+    index('idx_almanac_docs_project').on(t.workspaceId, t.projectKey),
+  ],
+);
+
+export const almanacDocSections = sqliteTable(
+  'almanac_doc_sections',
+  {
+    docId: text('doc_id').notNull(),
+    sectionId: text('section_id').notNull(),
+    ordinal: integer('ordinal').notNull(),
+    title: text('title').notNull(),
+    markdown: text('markdown'),
+    status: text('status').notNull().default('queued'),
+    jobId: text('job_id'),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+    regeneratedAt: text('regenerated_at'),
+  },
+  (t) => [
+    primaryKey({ columns: [t.docId, t.sectionId] }),
+    index('idx_almanac_sections_doc').on(t.docId, t.ordinal),
+  ],
+);
+
+export const projectGithubConfigs = sqliteTable(
+  'project_github_configs',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    projectKey: text('project_key').notNull(),
+    repo: text('repo').notNull(),
+    defaultBranch: text('default_branch').notNull().default('main'),
+    pathPrefixes: text('path_prefixes').notNull().default('[]'),
+    ticketPrefixes: text('ticket_prefixes').notNull().default('[]'),
+    enabled: integer('enabled').notNull().default(1),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    uniqueIndex('uniq_project_github_configs').on(t.workspaceId, t.projectKey, t.repo),
+    index('idx_project_github_configs_project').on(t.workspaceId, t.projectKey),
+  ],
+);
+
 // Convenience: every table re-exported as `schema` for `drizzle({ schema })`.
 export const schema = {
   goals,
@@ -598,4 +737,11 @@ export const schema = {
   actionItems,
   anomalies,
   workspaceUserAliases,
+  agents,
+  agentPairing,
+  agentJobs,
+  jobEvents,
+  almanacDocs,
+  almanacDocSections,
+  projectGithubConfigs,
 };
