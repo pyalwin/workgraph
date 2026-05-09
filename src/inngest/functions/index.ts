@@ -13,6 +13,7 @@ import { projectOkrsRefresh } from './project-okrs';
 import { githubTrailsRefreshWorkspace, issuePrSummaryRefresh, unmatchedPrAiMatcher } from './github-trails';
 import { chunkEmbedRun } from './chunk-embed';
 import { almanacFanOutSections, almanacAssemble, almanacHandleJobFailure } from './almanac';
+import { projectBacklogRefresh } from './project-backlog';
 
 export const functions = [
   heartbeat,
@@ -31,4 +32,5 @@ export const functions = [
   almanacFanOutSections,
   almanacAssemble,
   almanacHandleJobFailure,
+  projectBacklogRefresh,
 ];

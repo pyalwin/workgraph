@@ -25,6 +25,8 @@ import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
 import { getProjectReadme } from './project-readme';
+import { buildProjectItemFilter } from '../project-connectors';
+import { resolveAlmanacWorkspaceId } from '../almanac/workspace-resolver';
 
 let _initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
@@ -88,16 +90,24 @@ async function gatherContext(projectKey: string): Promise<OKRContext | null> {
   const projectRow = await db
     .prepare(`SELECT title FROM work_items WHERE source='jira' AND source_id = ?`)
     .get<{ title: string }>(`project:${projectKey}`);
-  if (!projectRow) return null;
+  const summaryRow = await db
+    .prepare(`SELECT name FROM project_summaries WHERE project_key = ?`)
+    .get<{ name: string }>(projectKey);
+  const projectTitle = projectRow?.title ?? summaryRow?.name ?? null;
+  if (!projectTitle) return null;
 
   const { readme } = await getProjectReadme(projectKey);
   if (!readme) return null;
+
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+  const filter = await buildProjectItemFilter(workspaceId, projectKey);
+  const filterWi = await buildProjectItemFilter(workspaceId, projectKey, 'wi');
 
   const tickets = await db
     .prepare(
       `SELECT source_id, title, status, summary
        FROM work_items
-       WHERE source='jira' AND json_extract(metadata, '$.entity_key') = ?
+       WHERE ${filter.sql}
        ORDER BY COALESCE(updated_at, created_at) DESC
        LIMIT ?`,
     )
@@ -106,7 +116,7 @@ async function gatherContext(projectKey: string): Promise<OKRContext | null> {
       title: string;
       status: string | null;
       summary: string | null;
-    }>(projectKey, TICKET_LIMIT);
+    }>(...filter.params, TICKET_LIMIT);
 
   const ticketLines = tickets.map((t) => {
     const status = (t.status ?? 'unknown').padEnd(8);
@@ -118,10 +128,10 @@ async function gatherContext(projectKey: string): Promise<OKRContext | null> {
     .prepare(
       `SELECT d.title, d.summary FROM decisions d
        JOIN work_items wi ON wi.id = d.item_id
-       WHERE wi.source='jira' AND json_extract(wi.metadata, '$.entity_key') = ?
+       WHERE ${filterWi.sql}
        ORDER BY d.decided_at DESC LIMIT 5`,
     )
-    .all<{ title: string; summary: string | null }>(projectKey);
+    .all<{ title: string; summary: string | null }>(...filterWi.params);
   const recentDecisions = decisionRows.map(
     (d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`,
   );
@@ -129,7 +139,7 @@ async function gatherContext(projectKey: string): Promise<OKRContext | null> {
   const now = new Date();
   return {
     projectKey,
-    projectName: projectRow.title,
+    projectName: projectTitle,
     readme,
     ticketLines,
     recentDecisions,

@@ -46,6 +46,7 @@ Environment variables:
 | Variable                 | Effect                                                               |
 |--------------------------|----------------------------------------------------------------------|
 | `WORKGRAPH_SERVER_URL`   | Default server URL for `workgraph login` (overridden by `--url`).    |
+| `WORKGRAPH_CONFIG_DIR`   | Override config + data dir (default `~/.workgraph`). Useful for running a dev build alongside the globally-installed agent. |
 
 ## Build from source
 
@@ -54,6 +55,35 @@ npm install
 npm run build      # runs tsc → dist/
 node dist/index.js run
 ```
+
+## Running the dev build alongside a globally-installed agent
+
+Both binaries default to `~/.workgraph/config.json`, so they would clash on
+credentials and repo mappings. Point the dev build at a separate directory
+with `WORKGRAPH_CONFIG_DIR`:
+
+```sh
+cd packages/agent
+
+# One-time pairing against a local Next.js dev server (http://localhost:3000).
+# Note: `npm run dev` hardcodes the `run` subcommand, so for `login` (and
+# any other subcommand) invoke tsx directly:
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npx tsx src/index.ts login --dev
+
+# Run the dev agent (foreground) — uses the `dev` script which appends `run`:
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev
+
+# Or, with auto-reload on source changes:
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev:watch
+
+# For other subcommands (status, logout, repo add/list/remove), invoke tsx
+# directly the same way:
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npx tsx src/index.ts status
+```
+
+The globally-installed `workgraph` binary keeps using `~/.workgraph` as
+before — they do not see each other's config, repo maps, or auto-managed
+clones. Run them in separate terminals if you want both polling at once.
 
 ## Test
 

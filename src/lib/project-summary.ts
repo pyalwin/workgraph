@@ -3,6 +3,8 @@ import { ensureSchemaAsync } from './db/init-schema-async';
 import { getLibsqlDb } from './db/libsql';
 import { getModel } from './ai';
 import { inngest } from '@/inngest/client';
+import { buildProjectItemFilter } from './project-connectors';
+import { resolveAlmanacWorkspaceId } from './almanac/workspace-resolver';
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -66,13 +68,15 @@ async function dispatchRegen(projectKey: string, projectName: string): Promise<v
 async function computeQuickFallback(projectKey: string, projectName: string): Promise<string> {
   const db = getLibsqlDb();
   try {
+    const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+    const filter = await buildProjectItemFilter(workspaceId, projectKey);
     const counts = await db.prepare(`
       SELECT
         COUNT(*) AS total,
         SUM(CASE WHEN status IN ('done','closed','resolved') THEN 1 ELSE 0 END) AS done
       FROM work_items
-      WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
-    `).get<{ total: number; done: number }>(projectKey);
+      WHERE ${filter.sql}
+    `).get<{ total: number; done: number }>(...filter.params);
     const total = counts?.total ?? 0;
     const done = counts?.done ?? 0;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -92,23 +96,18 @@ export async function generateAndStore(projectKey: string, projectName: string):
   await ensureInit();
   const db = getLibsqlDb();
 
-  // Pull both done AND active tickets so the recap can speak to "in progress"
-  // and "watch" with real grounding. The schema uses both `metadata.project`
-  // (legacy) and `metadata.entity_key` (new) — match either so older items
-  // aren't silently dropped.
-  //
-  // Parameterized by alias because some queries join work_items alongside
-  // other tables that also have a `metadata` column (entities, etc.) — bare
-  // `metadata` is ambiguous in those contexts.
-  const projectFilter = (alias = '') => {
-    const p = alias ? `${alias}.` : '';
-    return `(json_extract(${p}metadata, '$.project') = ? OR json_extract(${p}metadata, '$.entity_key') = ?)`;
-  };
+  // Resolve the project's connector bindings into SQL filters. The bare
+  // alias is used for plain work_items queries; aliased variants are used
+  // when the query joins other tables that also have a `metadata` column.
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+  const filter = await buildProjectItemFilter(workspaceId, projectKey);
+  const filterWi = await buildProjectItemFilter(workspaceId, projectKey, 'wi');
+  const filterT = await buildProjectItemFilter(workspaceId, projectKey, 't');
 
   const doneTickets = await db.prepare(`
     SELECT source_id, title, status, summary, body, updated_at
     FROM work_items
-    WHERE source = 'jira' AND ${projectFilter()}
+    WHERE ${filter.sql}
       AND status IN ('done', 'closed', 'resolved')
     ORDER BY COALESCE(updated_at, created_at) DESC
     LIMIT ${RECAP_DONE_LIMIT}
@@ -119,13 +118,13 @@ export async function generateAndStore(projectKey: string, projectName: string):
     summary: string | null;
     body: string | null;
     updated_at: string | null;
-  }>(projectKey, projectKey);
+  }>(...filter.params);
 
   const activeTickets = await db.prepare(`
     SELECT source_id, title, status, summary, priority,
            json_extract(metadata, '$.last_commented_at') AS last_at
     FROM work_items
-    WHERE source = 'jira' AND ${projectFilter()}
+    WHERE ${filter.sql}
       AND status IN ('active', 'open', 'in_progress', 'to_do')
     ORDER BY COALESCE(updated_at, created_at) DESC
     LIMIT ${RECAP_ACTIVE_LIMIT}
@@ -136,7 +135,7 @@ export async function generateAndStore(projectKey: string, projectName: string):
     summary: string | null;
     priority: string | null;
     last_at: string | null;
-  }>(projectKey, projectKey);
+  }>(...filter.params);
 
   if (doneTickets.length === 0 && activeTickets.length === 0) {
     const fallback = `No tickets in scope for ${projectName} yet.`;
@@ -148,10 +147,10 @@ export async function generateAndStore(projectKey: string, projectName: string):
   const statusBreakdown = await db.prepare(`
     SELECT status, COUNT(*) AS c
     FROM work_items
-    WHERE source = 'jira' AND ${projectFilter()}
+    WHERE ${filter.sql}
     GROUP BY status
     ORDER BY c DESC
-  `).all<{ status: string | null; c: number }>(projectKey, projectKey);
+  `).all<{ status: string | null; c: number }>(...filter.params);
 
   // Top entity themes for context (what the project is about). Joins
   // entities + work_items, both of which have a `metadata` column — alias
@@ -162,11 +161,11 @@ export async function generateAndStore(projectKey: string, projectName: string):
     JOIN entity_mentions em ON em.entity_id = e.id
     JOIN work_items wi ON wi.id = em.item_id
     WHERE e.entity_type IN ('theme', 'capability')
-      AND wi.source = 'jira' AND ${projectFilter('wi')}
+      AND ${filterWi.sql}
     GROUP BY e.id
     ORDER BY c DESC
     LIMIT 15
-  `).all<{ canonical_form: string; c: number }>(projectKey, projectKey);
+  `).all<{ canonical_form: string; c: number }>(...filterWi.params);
 
   // Linked PRs — find via cross-references in the links table. Joins
   // work_items twice (as pr + t); the project filter targets the ticket side.
@@ -176,11 +175,11 @@ export async function generateAndStore(projectKey: string, projectName: string):
     JOIN links l ON (l.source_item_id = pr.id OR l.target_item_id = pr.id)
     JOIN work_items t ON (t.id = l.source_item_id OR t.id = l.target_item_id)
     WHERE pr.source = 'github'
-      AND t.source = 'jira' AND ${projectFilter('t')}
+      AND ${filterT.sql}
       AND t.status IN ('done', 'closed', 'resolved')
       AND t.id != pr.id
     LIMIT 200
-  `).all<{ title: string; ticket_key: string }>(projectKey, projectKey);
+  `).all<{ title: string; ticket_key: string }>(...filterT.params);
 
   const prsByTicket = new Map<string, string[]>();
   for (const pr of linkedPrs) {

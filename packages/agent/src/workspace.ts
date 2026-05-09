@@ -18,16 +18,17 @@
 
 import { readFile, writeFile, mkdir, stat, access, rename, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
+import { configDir } from './paths.js';
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 
-const DATA_DIR = join(homedir(), '.workgraph');
+const DATA_DIR = configDir();
 const REPOS_JSON = join(DATA_DIR, 'repos.json');
 const WORKSPACES_DIR = join(DATA_DIR, 'workspaces');
 const MANAGED_MARKER = '.workgraph-managed';

@@ -1,9 +1,9 @@
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { configDir } from './paths.js';
 import type { AgentConfig } from './types.js';
 
-const CONFIG_DIR = join(homedir(), '.workgraph');
+const CONFIG_DIR = configDir();
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
 export async function readConfig(): Promise<AgentConfig | null> {

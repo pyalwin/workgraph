@@ -295,6 +295,8 @@ export const projectSummaries = sqliteTable('project_summaries', {
   // README — stable, descriptive document, separate from `recap` (status-y)
   readme: text('readme'),
   readmeGeneratedAt: text('readme_generated_at'),
+  // 'manual' | 'jira-sync' | 'connector-attach' — diagnostic provenance
+  createdVia: text('created_via'),
 });
 
 // ─────── chunks + embeddings ──────────────────────────────────────────────
@@ -705,6 +707,55 @@ export const projectGithubConfigs = sqliteTable(
   ],
 );
 
+// Per-project backlog: AI-suggested + user-managed todos and feature ideas.
+// Stable id (sha1 of project_key|kind|normalized title) makes regen idempotent —
+// `INSERT OR IGNORE` on regen never overwrites user state.
+export const projectBacklogItems = sqliteTable(
+  'project_backlog_items',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    projectKey: text('project_key').notNull(),
+    kind: text('kind').notNull(),                            // 'todo' | 'feature'
+    title: text('title').notNull(),
+    description: text('description'),
+    source: text('source').notNull().default('manual'),      // 'almanac' | 'manual'
+    state: text('state').notNull().default('open'),          // 'open' | 'in_progress' | 'done' | 'dismissed'
+    aiGenerated: integer('ai_generated').notNull().default(0),
+    evidence: text('evidence'),                              // JSON: {paths, refs, commits}
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+    doneAt: text('done_at'),
+    dismissedAt: text('dismissed_at'),
+  },
+  (t) => [
+    index('idx_project_backlog_project').on(t.workspaceId, t.projectKey, t.state),
+    index('idx_project_backlog_kind').on(t.workspaceId, t.projectKey, t.kind),
+  ],
+);
+
+// Generic project↔connector bindings. Each row binds a project to a slice of a
+// workspace-level connector (JIRA project / GitHub repo / Slack channel /
+// Notion DB). See docs/superpowers/specs/2026-05-07-decouple-project-from-jira-design.md.
+export const projectConnectors = sqliteTable(
+  'project_connectors',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    projectKey: text('project_key').notNull(),
+    kind: text('kind').notNull(),                            // 'jira' | 'github' | 'slack' | 'notion'
+    ref: text('ref').notNull(),                              // external slice id, kind-specific
+    config: text('config').notNull().default('{}'),          // kind-specific JSON
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    uniqueIndex('uniq_project_connectors').on(t.workspaceId, t.projectKey, t.kind, t.ref),
+    index('idx_project_connectors_project').on(t.workspaceId, t.projectKey),
+    index('idx_project_connectors_ref').on(t.workspaceId, t.kind, t.ref),
+  ],
+);
+
 // Convenience: every table re-exported as `schema` for `drizzle({ schema })`.
 export const schema = {
   goals,
@@ -744,4 +795,6 @@ export const schema = {
   almanacDocs,
   almanacDocSections,
   projectGithubConfigs,
+  projectConnectors,
+  projectBacklogItems,
 };

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { withAuth } from '@workos-inc/authkit-nextjs';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { getProjectDetail } from '@/lib/project-queries';
 import { getOrGenerateSummary } from '@/lib/project-summary';
 import { getProjectReadme } from '@/lib/sync/project-readme';
 import { getProjectOKRs, type ProjectOKR } from '@/lib/sync/project-okrs';
+import { deleteProject } from '@/lib/project-crud';
 import { inngest } from '@/inngest/client';
 
 export const dynamic = 'force-dynamic';
@@ -124,6 +126,9 @@ async function getProjectAnomalies(projectKey: string): Promise<ProjectAnomaly[]
 
 async function getProjectActionItems(projectKey: string): Promise<ProjectActionItem[]> {
   const db = getLibsqlDb();
+  // Match on the project-hub source_id (legacy 'jira' or new 'manual' hub)
+  // OR on any work_item that the project's connector bindings claim — covers
+  // github-only projects with action items anchored to repo / release rows.
   return db
     .prepare(
       `SELECT ai.id, ai.source_item_id, wi.source_id, wi.title AS source_title,
@@ -131,7 +136,6 @@ async function getProjectActionItems(projectKey: string): Promise<ProjectActionI
        FROM action_items ai
        JOIN work_items wi ON wi.id = ai.source_item_id
        WHERE ai.state = 'open'
-         AND wi.source = 'jira'
          AND (
            wi.source_id = ?
            OR json_extract(wi.metadata, '$.entity_key') = ?
@@ -190,4 +194,18 @@ export async function GET(req: NextRequest, props: { params: Promise<{ key: stri
   }
 
   return NextResponse.json(detail);
+}
+
+export async function DELETE(_req: NextRequest, props: { params: Promise<{ key: string }> }) {
+  const { user } = await withAuth();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  await ensureSchemaAsync();
+  const params = await props.params;
+  const projectKey = params.key.toUpperCase();
+  const deleted = await deleteProject(projectKey);
+  if (!deleted) {
+    return NextResponse.json({ error: 'project_not_found' }, { status: 404 });
+  }
+  return NextResponse.json({ ok: true, projectKey });
 }

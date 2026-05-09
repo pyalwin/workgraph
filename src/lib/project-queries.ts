@@ -1,5 +1,7 @@
 import { ensureSchemaAsync } from './db/init-schema-async';
 import { getLibsqlDb } from './db/libsql';
+import { buildProjectItemFilter } from './project-connectors';
+import { resolveAlmanacWorkspaceId } from './almanac/workspace-resolver';
 
 let _initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
@@ -223,6 +225,14 @@ export async function getProjectDetail(projectKey: string, period: string): Prom
   const inPeriod = (ts: string | null | undefined) =>
     !!ts && ts >= startTs && ts <= endTs;
 
+  // Resolve the project's connector bindings into a SQL filter once. Used
+  // for every "items in this project" query below — covers JIRA, GitHub,
+  // and any future kinds via project_connectors.
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+  const itemFilter = await buildProjectItemFilter(workspaceId, projectKey);
+  const itemFilterW = await buildProjectItemFilter(workspaceId, projectKey, 'w');
+  const itemFilterWi = await buildProjectItemFilter(workspaceId, projectKey, 'wi');
+
   // --- Tickets ---
   // Pull gap_analysis status alongside the ticket fields so the list view can
   // badge "Partially Shipped" / "Implementation Gap" without a follow-up call.
@@ -232,9 +242,9 @@ export async function getProjectDetail(projectKey: string, period: string): Prom
     SELECT id, source_id, title, status, created_at, updated_at, url,
            json_extract(gap_analysis, '$.status') AS gap_status_raw
     FROM work_items
-    WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
+    WHERE ${itemFilter.sql}
     ORDER BY updated_at DESC, created_at DESC
-  `).all<any>(projectKey);
+  `).all<any>(...itemFilter.params);
   const allTickets = allTicketsRows.map((t: any) => ({
     id: t.id,
     source_id: t.source_id,
@@ -274,8 +284,7 @@ export async function getProjectDetail(projectKey: string, period: string): Prom
               t.state, t.match_status, w.source_id AS ticket_source_id
        FROM issue_trails t
        JOIN work_items w ON w.id = t.issue_item_id
-       WHERE w.source = 'jira'
-         AND json_extract(w.metadata, '$.project') = ?
+       WHERE ${itemFilterW.sql}
          AND t.match_status IN ('matched', 'ai_matched')
        ORDER BY t.occurred_at ASC`,
     )
@@ -289,7 +298,7 @@ export async function getProjectDetail(projectKey: string, period: string): Prom
       occurred_at: string;
       state: string | null;
       ticket_source_id: string;
-    }>(projectKey);
+    }>(...itemFilterW.params);
 
   type PrAgg = {
     pr_ref: string;
@@ -456,12 +465,11 @@ export async function getProjectDetail(projectKey: string, period: string): Prom
   const weeklyRows = await db.prepare(`
     SELECT strftime('%Y-%W', updated_at) as week, COUNT(*) as closed
     FROM work_items
-    WHERE source = 'jira'
-      AND json_extract(metadata, '$.project') = ?
+    WHERE ${itemFilter.sql}
       AND status IN ('done', 'closed', 'resolved')
       AND updated_at >= ? AND updated_at <= ?
     GROUP BY week ORDER BY week ASC
-  `).all<{ week: string; closed: number }>(projectKey, startTs, endTs);
+  `).all<{ week: string; closed: number }>(...itemFilter.params, startTs, endTs);
 
   const velocityWeekly: VelocityWeek[] = weeklyRows
     .filter(r => r.week != null)
@@ -521,39 +529,62 @@ export async function getProjectSummaryCards(period: string): Promise<ProjectSum
   const endTs = end + 'T23:59:59';
   const priorStartTs = priorStart + 'T00:00:00';
 
-  // Get all JIRA project keys
-  const projectKeys = await db.prepare(`
-    SELECT DISTINCT json_extract(metadata, '$.project') as key
-    FROM work_items WHERE source = 'jira'
-  `).all<{ key: string }>();
-
-  // PR counts per project, sourced from issue_trails. PRs aren't work_items
-  // anymore — they're trail rows anchored to Jira tickets. One DISTINCT
-  // pr_ref per project gives us the per-card pr_count below.
-  const prCountsRows = await db
+  // Source of truth for "what projects exist" is project_summaries (created
+  // manually, via JIRA sync, or via connector-attach). Union with JIRA project
+  // keys observed in work_items so legacy installs without project_summaries
+  // rows for a JIRA project still show a card.
+  const summaryRows = await db
+    .prepare(`SELECT project_key, name FROM project_summaries`)
+    .all<{ project_key: string; name: string | null }>();
+  const observedJiraKeys = await db
     .prepare(
-      `SELECT json_extract(w.metadata, '$.project') AS project,
-              COUNT(DISTINCT t.pr_ref) AS n
-       FROM issue_trails t
-       JOIN work_items w ON w.id = t.issue_item_id
-       WHERE w.source = 'jira'
-         AND t.match_status IN ('matched', 'ai_matched')
-       GROUP BY project`,
+      `SELECT DISTINCT json_extract(metadata, '$.project') as key
+       FROM work_items WHERE source = 'jira'`,
     )
-    .all<{ project: string | null; n: number }>();
-  const prCountsByProject = new Map<string, number>();
-  for (const r of prCountsRows) if (r.project) prCountsByProject.set(r.project, r.n);
+    .all<{ key: string | null }>();
+
+  const projectMap = new Map<string, string>();
+  for (const r of summaryRows) {
+    projectMap.set(r.project_key, r.name || r.project_key);
+  }
+  for (const r of observedJiraKeys) {
+    if (r.key && !projectMap.has(r.key)) {
+      projectMap.set(r.key, PROJECT_NAMES[r.key] || r.key);
+    }
+  }
+  const projectKeys = Array.from(projectMap.entries()).map(([key, name]) => ({ key, name }));
+
+  // Resolve workspace once — single-tenant installs share one workspace, and
+  // the resolver falls back to it. For multi-tenant we'd need to scope
+  // project_summaries by workspace; out of scope here.
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKeys[0]?.key || '');
 
   const cards: ProjectSummaryCard[] = [];
 
-  for (const { key } of projectKeys) {
+  for (const { key, name: rawName } of projectKeys) {
     if (!key) continue;
-    const name = PROJECT_NAMES[key] || key;
+    const name = PROJECT_NAMES[key] || rawName;
+
+    const cardFilter = await buildProjectItemFilter(workspaceId, key);
+    const cardFilterW = await buildProjectItemFilter(workspaceId, key, 'w');
 
     const allTickets = await db.prepare(`
       SELECT status, updated_at, created_at FROM work_items
-      WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
-    `).all<{ status: string; updated_at: string | null; created_at: string }>(key);
+      WHERE ${cardFilter.sql}
+    `).all<{ status: string; updated_at: string | null; created_at: string }>(...cardFilter.params);
+
+    // PR count for this project, derived from issue_trails joined to its
+    // bound work_items.
+    const prCountRow = await db
+      .prepare(
+        `SELECT COUNT(DISTINCT t.pr_ref) AS n
+         FROM issue_trails t
+         JOIN work_items w ON w.id = t.issue_item_id
+         WHERE ${cardFilterW.sql}
+           AND t.match_status IN ('matched', 'ai_matched')`,
+      )
+      .get<{ n: number }>(...cardFilterW.params);
+    const prCount = prCountRow?.n ?? 0;
 
     const total = allTickets.length;
     const done = allTickets.filter(t => ['done', 'closed', 'resolved'].includes(t.status)).length;
@@ -581,8 +612,6 @@ export async function getProjectSummaryCards(period: string): Promise<ProjectSum
     }).length;
 
     const stalePct = open.length > 0 ? stale / open.length * 100 : 0;
-
-    const prCount = prCountsByProject.get(key) ?? 0;
 
     // Summary
     const summaryRow = await db

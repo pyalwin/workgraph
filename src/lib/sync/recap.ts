@@ -1,5 +1,7 @@
 import { runPrompt } from '@/lib/ai/runner';
 import { getLibsqlDb } from '../db/libsql';
+import { buildProjectItemFilter } from '../project-connectors';
+import { resolveAlmanacWorkspaceId } from '../almanac/workspace-resolver';
 
 const PROJECT_NAMES: Record<string, string> = {
   ALPHA: 'Alpha Initiative',
@@ -20,24 +22,38 @@ interface ProjectStats {
 async function getProjectStats(): Promise<ProjectStats[]> {
   const db = getLibsqlDb();
 
-  const projects = await db
+  // Source of truth: project_summaries (manual, jira-sync, or connector-attach
+  // origin). Union with JIRA project keys observed in work_items so projects
+  // without a summaries row yet still get a recap generated.
+  const summaryRows = await db
+    .prepare(`SELECT project_key FROM project_summaries`)
+    .all<{ project_key: string }>();
+  const observedJiraKeys = await db
     .prepare(
       `SELECT DISTINCT json_extract(metadata, '$.project') as project_key
        FROM work_items
        WHERE source = 'jira' AND json_extract(metadata, '$.project') IS NOT NULL`,
     )
     .all<{ project_key: string }>();
+  const projectKeySet = new Set<string>();
+  for (const r of summaryRows) projectKeySet.add(r.project_key);
+  for (const r of observedJiraKeys) projectKeySet.add(r.project_key);
+  const projects = Array.from(projectKeySet).map((project_key) => ({ project_key }));
 
   const out: ProjectStats[] = [];
   for (const { project_key } of projects) {
+    const workspaceId = await resolveAlmanacWorkspaceId(project_key);
+    const filter = await buildProjectItemFilter(workspaceId, project_key);
+    const filterWi = await buildProjectItemFilter(workspaceId, project_key, 'wi');
+
     const items = await db
       .prepare(
         `SELECT title, summary, status, source_id
          FROM work_items
-         WHERE source = 'jira' AND json_extract(metadata, '$.project') = ?
+         WHERE ${filter.sql}
          ORDER BY updated_at DESC, created_at DESC`,
       )
-      .all<{ title: string; summary: string | null; status: string | null; source_id: string }>(project_key);
+      .all<{ title: string; summary: string | null; status: string | null; source_id: string }>(...filter.params);
 
     const doneCount = items.filter((i) => ['done', 'closed', 'resolved'].includes(i.status || '')).length;
     const activeCount = items.filter((i) =>
@@ -50,11 +66,10 @@ async function getProjectStats(): Promise<ProjectStats[]> {
          FROM work_items wi
          JOIN item_tags it ON it.item_id = wi.id
          JOIN tags t ON t.id = it.tag_id
-         WHERE wi.source = 'jira'
-           AND json_extract(wi.metadata, '$.project') = ?
+         WHERE ${filterWi.sql}
            AND t.category = 'type' AND t.name = 'blocker'`,
       )
-      .get<{ c: number }>(project_key);
+      .get<{ c: number }>(...filterWi.params);
 
     out.push({
       key: project_key,

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { ProjectSummaryCard } from '@/lib/project-queries';
 import { useWorkgraphState } from '@/components/workspace/workgraph-state';
 import { ROLES } from '@/components/layout/topbar';
@@ -88,6 +89,7 @@ function mapCard(c: ProjectSummaryCard): DisplayCard {
 export function ProjectsIndexClient({ initialCards }: { initialCards: ProjectSummaryCard[] }) {
   const [period, setPeriod] = useState('30d');
   const [cards, setCards] = useState(initialCards);
+  const [createOpen, setCreateOpen] = useState(false);
   const { state, setState } = useWorkgraphState();
   const role = ROLES[state.role] ?? Object.values(ROLES)[0];
   const roleLabel = role?.label ?? 'Workspace User';
@@ -136,8 +138,27 @@ export function ProjectsIndexClient({ initialCards }: { initialCards: ProjectSum
             {healthy} healthy
           </div>
           <PeriodPill value={period} onChange={setPeriod} />
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--rule)',
+              background: 'var(--paper)',
+              color: 'var(--ink)',
+              fontSize: 12,
+              fontWeight: 500,
+              fontFamily: 'var(--mono)',
+              cursor: 'pointer',
+            }}
+          >
+            + New project
+          </button>
         </div>
       </section>
+
+      {createOpen && <NewProjectModal onClose={() => setCreateOpen(false)} />}
 
       <div className="proj-rolebar">
         <div className="proj-rolebar-left">
@@ -342,6 +363,149 @@ function LedgerRow({ p }: { p: DisplayCard }) {
         </div>
       </div>
     </Link>
+  );
+}
+
+const PROJECT_KEY_PATTERN = /^[A-Z0-9][A-Z0-9_-]{0,31}$/;
+
+function NewProjectModal({ onClose }: { onClose: () => void }) {
+  const router = useRouter();
+  const [key, setKey] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const normalizedKey = key.trim().toUpperCase();
+  const keyValid = PROJECT_KEY_PATTERN.test(normalizedKey);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!keyValid || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: normalizedKey, name: name.trim() || normalizedKey }),
+      });
+      if (res.status === 409) {
+        setError(`A project with key "${normalizedKey}" already exists.`);
+        return;
+      }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(typeof j.error === 'string' ? j.error : `Failed (${res.status})`);
+        return;
+      }
+      router.push(`/projects/${normalizedKey}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.4)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 100,
+      }}
+    >
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+        style={{
+          background: 'var(--paper)',
+          border: '1px solid var(--rule)',
+          borderRadius: 12,
+          padding: 24,
+          width: 420,
+          maxWidth: '90vw',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+        }}
+      >
+        <h3 style={{ margin: 0, fontSize: 16 }}>New project</h3>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Key</span>
+          <input
+            autoFocus
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="e.g. WG"
+            style={{
+              padding: '8px 10px',
+              border: '1px solid var(--rule)',
+              borderRadius: 6,
+              fontFamily: 'var(--mono)',
+              textTransform: 'uppercase',
+            }}
+          />
+          <span style={{ fontSize: 11, color: keyValid || !key ? 'var(--ink-4)' : 'var(--red)' }}>
+            Uppercase, alphanumeric + _/-, max 32 characters.
+          </span>
+        </label>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Name (optional)</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={normalizedKey || 'Project name'}
+            style={{
+              padding: '8px 10px',
+              border: '1px solid var(--rule)',
+              borderRadius: 6,
+            }}
+          />
+        </label>
+
+        {error && (
+          <div style={{ color: 'var(--red)', fontSize: 12 }}>{error}</div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={submitting}
+            style={{
+              padding: '6px 12px',
+              border: '1px solid var(--rule)',
+              borderRadius: 6,
+              background: 'transparent',
+              cursor: submitting ? 'default' : 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!keyValid || submitting}
+            style={{
+              padding: '6px 12px',
+              border: 0,
+              borderRadius: 6,
+              background: keyValid && !submitting ? 'var(--ink)' : 'var(--ink-4)',
+              color: 'var(--paper)',
+              cursor: keyValid && !submitting ? 'pointer' : 'default',
+            }}
+          >
+            {submitting ? 'Creating…' : 'Create'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

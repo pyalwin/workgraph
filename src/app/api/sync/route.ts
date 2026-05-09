@@ -4,51 +4,20 @@ import { computeAllMetrics } from '@/lib/metrics';
 import { createLinksForAll } from '@/lib/crossref';
 import { enrichAll } from '@/lib/sync/enrich';
 import { generateAllRecaps } from '@/lib/sync/recap';
-import { ingestItems } from '@/lib/sync/ingest';
 import { getLibsqlDb } from '@/lib/db/libsql';
-import { readFileSync, existsSync } from 'fs';
-import path from 'path';
-import type { WorkItemInput } from '@/lib/sync/types';
-
-async function ingestMeetingsJson(): Promise<{ synced: number; skipped: number }> {
-  const jsonPath = path.join(process.cwd(), 'data', 'meetings.json');
-  if (!existsSync(jsonPath)) return { synced: 0, skipped: 0 };
-
-  const meetings = JSON.parse(readFileSync(jsonPath, 'utf-8'));
-  const items: WorkItemInput[] = meetings.map((m: any) => ({
-    source: 'meeting',
-    source_id: m.id,
-    item_type: 'meeting',
-    title: m.title || 'Untitled Meeting',
-    body: m.summary || null,
-    author: m.participants?.[0] || null,
-    status: 'completed',
-    priority: null,
-    url: m.url || null,
-    metadata: { participants: m.participants || [] },
-    created_at: m.date ? new Date(m.date).toISOString() : new Date().toISOString(),
-    updated_at: null,
-  }));
-
-  const result = await ingestItems(items);
-  return { synced: result.itemsSynced, skipped: result.itemsSkipped };
-}
 
 export async function POST() {
   try {
     await ensureSchemaAsync();
 
-    // Phase 1: Ingest local data (meetings.json)
-    const meetingsResult = await ingestMeetingsJson();
-
-    // Phase 2: Enrich un-enriched items with Haiku (summary, type, topics, entities, goals)
+    // Enrich un-enriched items (summary, type, topics, entities, goals)
     const enrichResult = await enrichAll({ concurrency: 5 });
 
-    // Phase 3: Cross-reference and metrics
+    // Cross-reference + metrics
     await createLinksForAll();
     await computeAllMetrics();
 
-    // Phase 4: Generate project recaps
+    // Project recaps
     await generateAllRecaps();
 
     const db = getLibsqlDb();
@@ -84,8 +53,6 @@ export async function POST() {
       message: 'Sync complete',
       totalItems,
       totalLinks,
-      meetingsIngested: meetingsResult.synced,
-      meetingsSkipped: meetingsResult.skipped,
       enriched: enrichResult.enriched,
       enrichFailed: enrichResult.failed,
       breakdown,

@@ -223,7 +223,8 @@ const DDL = `
     updated_at TEXT DEFAULT (datetime('now')),
     summary_generated_at TEXT,
     readme TEXT,
-    readme_generated_at TEXT
+    readme_generated_at TEXT,
+    created_via TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_items_source ON work_items(source);
@@ -655,6 +656,39 @@ const DDL = `
   );
   CREATE UNIQUE INDEX IF NOT EXISTS uniq_project_github_configs ON project_github_configs(workspace_id, project_key, repo);
   CREATE INDEX IF NOT EXISTS idx_project_github_configs_project ON project_github_configs(workspace_id, project_key);
+
+  CREATE TABLE IF NOT EXISTS project_connectors (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref TEXT NOT NULL,
+    config TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS uniq_project_connectors ON project_connectors(workspace_id, project_key, kind, ref);
+  CREATE INDEX IF NOT EXISTS idx_project_connectors_project ON project_connectors(workspace_id, project_key);
+  CREATE INDEX IF NOT EXISTS idx_project_connectors_ref ON project_connectors(workspace_id, kind, ref);
+
+  CREATE TABLE IF NOT EXISTS project_backlog_items (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    project_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    state TEXT NOT NULL DEFAULT 'open',
+    ai_generated INTEGER NOT NULL DEFAULT 0,
+    evidence TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    done_at TEXT,
+    dismissed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_project_backlog_project ON project_backlog_items(workspace_id, project_key, state);
+  CREATE INDEX IF NOT EXISTS idx_project_backlog_kind ON project_backlog_items(workspace_id, project_key, kind);
 `;
 
 /**
@@ -698,6 +732,7 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
     `ALTER TABLE almanac_docs ADD COLUMN title TEXT`,
     `ALTER TABLE agents ADD COLUMN claude_available INTEGER`,
     `ALTER TABLE agents ADD COLUMN claude_version TEXT`,
+    `ALTER TABLE project_summaries ADD COLUMN created_via TEXT`,
   ];
   for (const sql of migrations) {
     try {
@@ -724,6 +759,97 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
   }
 }
 
+/**
+ * One-time backfill for project_connectors. Idempotent — uses INSERT OR
+ * IGNORE against the unique (workspace_id, project_key, kind, ref) index so
+ * re-running on an already-backfilled DB is a no-op.
+ *
+ * Sources:
+ *   1. Every project_summaries row → kind='jira', ref=project_key.
+ *      Workspace is inferred from project_github_configs when available,
+ *      otherwise falls back to the first known workspace_id from
+ *      workspace_connector_configs (single-tenant deploys).
+ *   2. Every project_github_configs row → kind='github', ref=repo, with
+ *      remaining columns folded into the config JSON.
+ *   3. project_summaries.created_via set to 'jira-sync' for any row where
+ *      the column is null (every row before this change came from JIRA).
+ */
+async function backfillProjectConnectors(db: ReturnType<typeof getLibsqlDb>): Promise<void> {
+  try {
+    // 2. GitHub configs → project_connectors. Done first because it carries
+    // workspace_id explicitly per row, which we'll also use to resolve the
+    // workspace for JIRA backfill below.
+    await db.exec(`
+      INSERT OR IGNORE INTO project_connectors
+        (id, workspace_id, project_key, kind, ref, config, created_at, updated_at)
+      SELECT
+        'pc_gh_' || id,
+        workspace_id,
+        project_key,
+        'github',
+        repo,
+        json_object(
+          'defaultBranch', default_branch,
+          'pathPrefixes', json(path_prefixes),
+          'ticketPrefixes', json(ticket_prefixes),
+          'enabled', enabled
+        ),
+        created_at,
+        updated_at
+      FROM project_github_configs
+    `);
+
+    // 1. JIRA backfill: one row per project_summaries entry. Use the
+    // workspace_id we can infer from an existing GitHub binding for the same
+    // project; if none, fall back to the first workspace in
+    // workspace_connector_configs (single-tenant case).
+    const fallbackRows = await db
+      .prepare(`SELECT workspace_id FROM workspace_connector_configs LIMIT 1`)
+      .all<{ workspace_id: string }>();
+    const fallbackWorkspace = fallbackRows[0]?.workspace_id ?? null;
+
+    if (fallbackWorkspace) {
+      await db
+        .prepare(`
+          INSERT OR IGNORE INTO project_connectors
+            (id, workspace_id, project_key, kind, ref, config, created_at, updated_at)
+          SELECT
+            'pc_jira_' || ps.project_key,
+            COALESCE(
+              (SELECT pgc.workspace_id FROM project_github_configs pgc
+                WHERE pgc.project_key = ps.project_key LIMIT 1),
+              ?
+            ),
+            ps.project_key,
+            'jira',
+            ps.project_key,
+            '{}',
+            COALESCE(ps.updated_at, datetime('now')),
+            datetime('now')
+          FROM project_summaries ps
+        `)
+        .run(fallbackWorkspace);
+    } else {
+      // No workspace_connector_configs rows yet — nothing to back JIRA
+      // bindings to. Skip; the next sync that creates a workspace connector
+      // will run this migration again on the next process start.
+      console.warn(
+        '[schema migration] skipping JIRA project_connectors backfill: no workspace_connector_configs rows yet',
+      );
+    }
+
+    // 3. Mark provenance for legacy rows.
+    await db.exec(`
+      UPDATE project_summaries
+      SET created_via = 'jira-sync'
+      WHERE created_via IS NULL
+    `);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[schema migration] project_connectors backfill non-fatal failure:', msg);
+  }
+}
+
 export async function ensureSchemaAsync(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
@@ -734,6 +860,7 @@ export async function ensureSchemaAsync(): Promise<void> {
     // no-ops ("no such table") and the DDL creates the schema cleanly.
     await runAdditiveMigrations(db);
     await db.exec(DDL);
+    await backfillProjectConnectors(db);
   })();
   // Don't cache a rejected promise — a transient DDL failure should not
   // permanently break every subsequent caller until the process restarts.

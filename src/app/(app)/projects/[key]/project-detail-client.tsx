@@ -8,13 +8,16 @@ import { Markdown } from '@/components/chat/prompt-kit/markdown';
 import { ItemDetailDrawer } from '@/components/items/item-detail-drawer';
 import { AnomalyActionPanel } from '@/components/anomalies/anomaly-action-panel';
 import { OrphanPrReviewModal } from '@/components/anomalies/orphan-pr-review-modal';
+import { ProjectSettingsTab } from './project-settings-tab';
+import { ProjectBacklogBlock } from './project-backlog-block';
 
-type Tab = 'overview' | 'goals' | 'actions' | 'activity';
+type Tab = 'overview' | 'goals' | 'actions' | 'activity' | 'settings';
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'goals', label: 'Goals' },
   { id: 'actions', label: 'Actions' },
   { id: 'activity', label: 'Activity' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 const STATUS_LABEL: Record<string, string> = {
@@ -450,6 +453,9 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
 
       {tab === 'activity' && (
       <>
+      {/* ───── Backlog (todos + features, AI-seeded + user-managed) ───── */}
+      <ProjectBacklogBlock projectKey={projectKey} />
+
       {/* ───── Velocity chart ───── */}
       {d.velocity_weekly.length > 0 && (
         <section className="proj-section">
@@ -657,6 +663,8 @@ export function ProjectDetailClient({ projectKey }: { projectKey: string }) {
 
       </>)}
 
+      {tab === 'settings' && <ProjectSettingsTab projectKey={projectKey} />}
+
       <ItemDetailDrawer itemId={openItemId} onClose={() => setOpenItemId(null)} />
       <OrphanPrReviewModal
         open={orphanReviewRepo !== null}
@@ -688,6 +696,8 @@ function tabCount(
       return counts.actionCount + counts.anomalyCount;
     case 'activity':
       return counts.ticketCount;
+    case 'settings':
+      return null;
   }
 }
 

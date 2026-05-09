@@ -12,8 +12,10 @@
 import { registerHandler } from '../dispatcher.js';
 import { almanacOutlineHandler } from './almanac-outline.js';
 import { almanacDraftSectionHandler } from './almanac-draft-section.js';
+import { almanacBacklogHandler } from './almanac-backlog.js';
 
 export function registerAllHandlers(): void {
   registerHandler('almanac.outline', almanacOutlineHandler);
   registerHandler('almanac.draft-section', almanacDraftSectionHandler);
+  registerHandler('almanac.backlog', almanacBacklogHandler);
 }

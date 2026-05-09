@@ -26,6 +26,8 @@ import { z } from 'zod';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
+import { buildProjectItemFilter } from '../project-connectors';
+import { resolveAlmanacWorkspaceId } from '../almanac/workspace-resolver';
 
 let _initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
@@ -57,16 +59,22 @@ interface ReadmeContext {
 async function gatherContext(projectKey: string): Promise<ReadmeContext | null> {
   const db = getLibsqlDb();
 
+  // Look for a JIRA project hub if one was synthesized; otherwise fall back
+  // to the project_summaries name. README generation should still proceed
+  // for JIRA-less projects as long as some bound items exist.
   const projectRow = await db
     .prepare(`SELECT title FROM work_items WHERE source='jira' AND source_id = ?`)
     .get<{ title: string }>(`project:${projectKey}`);
-  if (!projectRow) return null;
+  const summaryRow = await db
+    .prepare(`SELECT name FROM project_summaries WHERE project_key = ?`)
+    .get<{ name: string }>(projectKey);
+  const projectTitle = projectRow?.title ?? summaryRow?.name ?? null;
+  if (!projectTitle) return null;
 
-  // Match BOTH metadata.project (legacy) and metadata.entity_key (Phase 1.2+)
-  // so older tickets that only have the project field still surface. Excludes
-  // the synthetic project hub + parent placeholders because neither field is
-  // set on those derived rows.
-  const projectFilter = `(json_extract(metadata, '$.project') = ? OR json_extract(metadata, '$.entity_key') = ?)`;
+  // Resolve the project's connector bindings into reusable SQL filters.
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+  const filter = await buildProjectItemFilter(workspaceId, projectKey);
+  const filterWi = await buildProjectItemFilter(workspaceId, projectKey, 'wi');
 
   const counts = await db
     .prepare(
@@ -77,18 +85,17 @@ async function gatherContext(projectKey: string): Promise<ReadmeContext | null> 
          MIN(created_at) AS earliest,
          MAX(COALESCE(updated_at, created_at)) AS latest
        FROM work_items
-       WHERE source='jira' AND ${projectFilter}`,
+       WHERE ${filter.sql}`,
     )
     .get<{ done: number; active: number; backlog: number; earliest: string | null; latest: string | null }>(
-      projectKey,
-      projectKey,
+      ...filter.params,
     );
 
   const tickets = await db
     .prepare(
       `SELECT source_id, title, status, summary, item_type
        FROM work_items
-       WHERE source='jira' AND ${projectFilter}
+       WHERE ${filter.sql}
        ORDER BY COALESCE(updated_at, created_at) DESC
        LIMIT ?`,
     )
@@ -98,7 +105,7 @@ async function gatherContext(projectKey: string): Promise<ReadmeContext | null> 
       status: string | null;
       summary: string | null;
       item_type: string;
-    }>(projectKey, projectKey, TICKET_LIMIT);
+    }>(...filter.params, TICKET_LIMIT);
 
   // Compact format — title + status. Use AI summary when present; otherwise
   // omit the body entirely. Per-ticket overhead drops from ~250 chars to
@@ -119,13 +126,12 @@ async function gatherContext(projectKey: string): Promise<ReadmeContext | null> 
          JOIN entity_mentions em ON em.entity_id = e.id
          JOIN work_items wi ON wi.id = em.item_id
          WHERE e.entity_type = ?
-           AND wi.source='jira'
-           AND json_extract(wi.metadata, '$.entity_key') = ?
+           AND ${filterWi.sql}
          GROUP BY e.id
          ORDER BY c DESC
          LIMIT ?`,
       )
-      .all<{ canonical: string; c: number }>(entityType, projectKey, ENTITY_LIMIT);
+      .all<{ canonical: string; c: number }>(entityType, ...filterWi.params, ENTITY_LIMIT);
   }
 
   const topThemes = (await topEntities('theme')).map((r) => ({ canonical: r.canonical, count: r.c }));
@@ -137,29 +143,28 @@ async function gatherContext(projectKey: string): Promise<ReadmeContext | null> 
     .prepare(
       `SELECT author AS name, COUNT(*) AS c
        FROM work_items
-       WHERE source='jira' AND ${projectFilter}
+       WHERE ${filter.sql}
          AND author IS NOT NULL AND author != ''
        GROUP BY author
        ORDER BY c DESC LIMIT 8`,
     )
-    .all<{ name: string; c: number }>(projectKey, projectKey);
+    .all<{ name: string; c: number }>(...filter.params);
 
   const decisionRows = await db
     .prepare(
       `SELECT d.title, d.summary FROM decisions d
        JOIN work_items wi ON wi.id = d.item_id
-       WHERE wi.source='jira'
-         AND (json_extract(wi.metadata, '$.project') = ? OR json_extract(wi.metadata, '$.entity_key') = ?)
+       WHERE ${filterWi.sql}
        ORDER BY d.decided_at DESC LIMIT 8`,
     )
-    .all<{ title: string; summary: string | null }>(projectKey, projectKey);
+    .all<{ title: string; summary: string | null }>(...filterWi.params);
   const recentDecisions = decisionRows.map(
     (d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`,
   );
 
   return {
     projectKey,
-    projectName: projectRow.title,
+    projectName: projectTitle,
     totalDone: counts?.done ?? 0,
     totalActive: counts?.active ?? 0,
     totalBacklog: counts?.backlog ?? 0,

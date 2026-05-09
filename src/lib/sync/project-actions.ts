@@ -16,6 +16,8 @@ import { z } from 'zod';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
 import { getModel } from '../ai';
+import { buildProjectItemFilter } from '../project-connectors';
+import { resolveAlmanacWorkspaceId } from '../almanac/workspace-resolver';
 
 let _initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
@@ -65,14 +67,23 @@ interface ProjectContext {
 async function gatherContext(projectKey: string): Promise<ProjectContext | null> {
   const db = getLibsqlDb();
 
-  const projectRow = await db
+  // Project name: prefer the synthetic JIRA hub (legacy), fall back to
+  // project_summaries (manual / connector-attach origin).
+  const jiraHub = await db
     .prepare(
       `SELECT title FROM work_items
        WHERE source = 'jira' AND source_id = ?`,
     )
     .get<{ title: string }>(`project:${projectKey}`);
+  const summaryRow = await db
+    .prepare(`SELECT name FROM project_summaries WHERE project_key = ?`)
+    .get<{ name: string }>(projectKey);
+  const projectName = jiraHub?.title ?? summaryRow?.name ?? null;
+  if (!projectName) return null;
 
-  if (!projectRow) return null;
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+  const filter = await buildProjectItemFilter(workspaceId, projectKey);
+  const filterWi = await buildProjectItemFilter(workspaceId, projectKey, 'wi');
 
   const counts = await db
     .prepare(
@@ -80,9 +91,9 @@ async function gatherContext(projectKey: string): Promise<ProjectContext | null>
          SUM(CASE WHEN status IN ('done','closed','resolved') THEN 1 ELSE 0 END) AS done,
          SUM(CASE WHEN status IN ('active','open','backlog') THEN 1 ELSE 0 END) AS open
        FROM work_items
-       WHERE source='jira' AND json_extract(metadata, '$.entity_key') = ?`,
+       WHERE ${filter.sql}`,
     )
-    .get<{ done: number; open: number }>(projectKey);
+    .get<{ done: number; open: number }>(...filter.params);
 
   // Pull the most recently active + the just-shipped, both with summaries when present.
   const tickets = await db
@@ -90,7 +101,7 @@ async function gatherContext(projectKey: string): Promise<ProjectContext | null>
       `SELECT source_id, title, status, summary, priority,
               json_extract(metadata, '$.last_commented_at') AS last_at
        FROM work_items
-       WHERE source = 'jira' AND json_extract(metadata, '$.entity_key') = ?
+       WHERE ${filter.sql}
        ORDER BY COALESCE(updated_at, created_at) DESC
        LIMIT ?`,
     )
@@ -101,7 +112,7 @@ async function gatherContext(projectKey: string): Promise<ProjectContext | null>
       summary: string | null;
       priority: string | null;
       last_at: string | null;
-    }>(projectKey, PROMPT_TICKET_LIMIT);
+    }>(...filter.params, PROMPT_TICKET_LIMIT);
 
   const ticketLines = tickets.map((t) => {
     const status = (t.status ?? 'unknown').padEnd(8);
@@ -114,22 +125,63 @@ async function gatherContext(projectKey: string): Promise<ProjectContext | null>
     .prepare(
       `SELECT d.title, d.summary FROM decisions d
        JOIN work_items wi ON wi.id = d.item_id
-       WHERE wi.source='jira' AND json_extract(wi.metadata, '$.entity_key') = ?
+       WHERE ${filterWi.sql}
        ORDER BY d.decided_at DESC LIMIT 5`,
     )
-    .all<{ title: string; summary: string | null }>(projectKey);
+    .all<{ title: string; summary: string | null }>(...filterWi.params);
   const recentDecisions = decisionRows.map(
     (d) => `- ${d.title}${d.summary ? ` — ${d.summary.slice(0, 200)}` : ''}`,
   );
 
   return {
     projectKey,
-    projectName: projectRow.title,
+    projectName,
     totalOpen: counts?.open ?? 0,
     totalDone: counts?.done ?? 0,
     ticketLines,
     recentDecisions,
   };
+}
+
+/**
+ * Ensures a `project_hub` work_item exists for this project. The synthetic
+ * JIRA project hub (source='jira', source_id='project:<KEY>') was created by
+ * the JIRA sync; for github-only projects we create a generic equivalent
+ * with source='manual'. Either way, action_items.source_item_id has a stable
+ * anchor.
+ */
+async function ensureProjectHub(projectKey: string): Promise<string | null> {
+  const db = getLibsqlDb();
+  const sourceId = `project:${projectKey}`;
+
+  // Prefer the existing JIRA hub when present (legacy).
+  const jiraHub = await db
+    .prepare(`SELECT id FROM work_items WHERE source='jira' AND source_id = ?`)
+    .get<{ id: string }>(sourceId);
+  if (jiraHub) return jiraHub.id;
+
+  // Otherwise look for a manual hub.
+  const manualHub = await db
+    .prepare(`SELECT id FROM work_items WHERE source='manual' AND source_id = ?`)
+    .get<{ id: string }>(sourceId);
+  if (manualHub) return manualHub.id;
+
+  // Create one. Use the project name from project_summaries.
+  const summary = await db
+    .prepare(`SELECT name FROM project_summaries WHERE project_key = ?`)
+    .get<{ name: string }>(projectKey);
+  if (!summary) return null;
+
+  const id = uuid();
+  await db
+    .prepare(
+      `INSERT INTO work_items
+       (id, source, source_id, item_type, title, status, created_at, metadata)
+       VALUES (?, 'manual', ?, 'project_hub', ?, 'active', datetime('now'),
+               json_object('project', ?, 'entity_key', ?))`,
+    )
+    .run(id, sourceId, summary.name, projectKey, projectKey);
+  return id;
 }
 
 function buildPrompt(ctx: ProjectContext): { system: string; user: string } {
@@ -166,6 +218,9 @@ ${ctx.recentDecisions.length > 0
 
 async function persist(projectKey: string, hubId: string, items: ProjectActions['action_items']): Promise<void> {
   const db = getLibsqlDb();
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+  const filterWi = await buildProjectItemFilter(workspaceId, projectKey, 'wi');
+
   // Replace AI-generated open items for this project hub. Keep user-edited
   // items (any non-null user_priority) and items in non-open states.
   await db
@@ -185,13 +240,12 @@ async function persist(projectKey: string, hubId: string, items: ProjectActions[
        WHERE state = 'open'
          AND user_priority IS NULL
          AND source_item_id IN (
-           SELECT id FROM work_items
-           WHERE source='jira'
-             AND json_extract(metadata, '$.entity_key') = ?
-             AND id != ?
+           SELECT wi.id FROM work_items wi
+           WHERE ${filterWi.sql}
+             AND wi.id != ?
          )`,
     )
-    .run(projectKey, hubId);
+    .run(...filterWi.params, hubId);
 
   // Sequential async — each insert is independent. Atomicity across the loop
   // isn't required (idempotent project-hub regeneration).
@@ -216,11 +270,9 @@ export async function generateProjectActionItems(
   if (!ctx) return { ok: false, reason: 'project hub not found' };
   if (ctx.ticketLines.length === 0) return { ok: false, reason: 'no tickets in project' };
 
-  const db = getLibsqlDb();
-  const hub = await db
-    .prepare(`SELECT id FROM work_items WHERE source='jira' AND source_id = ?`)
-    .get<{ id: string }>(`project:${projectKey}`);
-  if (!hub) return { ok: false, reason: 'project hub row missing' };
+  const hubId = await ensureProjectHub(projectKey);
+  if (!hubId) return { ok: false, reason: 'project hub row missing' };
+  const hub = { id: hubId };
 
   const { system, user } = buildPrompt(ctx);
   let result: ProjectActions;
