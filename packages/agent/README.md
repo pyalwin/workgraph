@@ -66,9 +66,8 @@ with `WORKGRAPH_CONFIG_DIR`:
 cd packages/agent
 
 # One-time pairing against a local Next.js dev server (http://localhost:3000).
-# Note: `npm run dev` hardcodes the `run` subcommand, so for `login` (and
-# any other subcommand) invoke tsx directly:
-WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npx tsx src/index.ts login --dev
+# `dev:login` already passes `--dev`, so it always pairs against localhost:
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev:login
 
 # Run the dev agent (foreground) — uses the `dev` script which appends `run`:
 WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev
@@ -76,9 +75,10 @@ WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev
 # Or, with auto-reload on source changes:
 WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev:watch
 
-# For other subcommands (status, logout, repo add/list/remove), invoke tsx
-# directly the same way:
-WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npx tsx src/index.ts status
+# Other subcommands have matching scripts:
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev:status
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev:logout
+WORKGRAPH_CONFIG_DIR=~/.workgraph-dev npm run dev:repo -- list
 ```
 
 The globally-installed `workgraph` binary keeps using `~/.workgraph` as

@@ -40,6 +40,10 @@
     "build": "tsc",
     "dev": "tsx src/index.ts run",
     "dev:watch": "tsx watch src/index.ts run",
+    "dev:login": "tsx src/index.ts login --dev",
+    "dev:status": "tsx src/index.ts status",
+    "dev:logout": "tsx src/index.ts logout",
+    "dev:repo": "tsx src/index.ts repo",
     "start": "node dist/index.js run",
     "test": "tsx --test src/dispatcher.test.ts src/workspace.test.ts src/drivers/claude.test.ts src/handlers/almanac-outline.test.ts src/handlers/almanac-draft-section.test.ts",
     "prepublishOnly": "npm run build"
