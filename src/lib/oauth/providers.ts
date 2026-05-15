@@ -96,6 +96,25 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProvider> = {
     mcpServerUrl: 'https://mcp.linear.app/sse',
     metadataUrl: 'https://mcp.linear.app/.well-known/oauth-authorization-server',
   },
+  google: {
+    source: 'google',
+    label: 'Google Workspace',
+    authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    defaultScopes: [
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.compose',
+      'https://www.googleapis.com/auth/drive.readonly',
+      'https://www.googleapis.com/auth/calendar.readonly',
+      'openid',
+      'email',
+      'profile',
+    ],
+    extraAuthParams: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' },
+    // No mcpServerUrl — Gmail/Drive/Calendar use direct REST APIs via googleapis,
+    // not MCP. Token is shared across the three direct-API adapters via
+    // getOAuthTokenByProvider(workspaceId, 'google').
+  },
   slack: {
     source: 'slack',
     label: 'Slack',

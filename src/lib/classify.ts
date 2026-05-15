@@ -8,13 +8,16 @@ interface Goal {
 }
 
 export async function classifyItem(
+  workspaceId: string,
   title: string,
   body: string | null,
 ): Promise<{ goalId: string; confidence: number }[]> {
   const db = getLibsqlDb();
   const goals = await db
-    .prepare("SELECT id, name, keywords, status FROM goals WHERE status = 'active'")
-    .all<Goal>();
+    .prepare(
+      "SELECT id, name, keywords, status FROM goals WHERE workspace_id = ? AND status = 'active'",
+    )
+    .all<Goal>(workspaceId);
 
   const text = `${title} ${body || ''}`.toLowerCase();
   const matches: { goalId: string; confidence: number }[] = [];
@@ -38,23 +41,27 @@ export async function classifyItem(
   return matches;
 }
 
-export async function reclassifyAll(): Promise<void> {
+export async function reclassifyAll(workspaceId: string): Promise<void> {
   const db = getLibsqlDb();
 
   await db
-    .prepare("DELETE FROM item_tags WHERE tag_id IN (SELECT id FROM tags WHERE category = 'goal')")
-    .run();
+    .prepare(
+      "DELETE FROM item_tags WHERE tag_id IN (SELECT id FROM tags WHERE category = 'goal' AND workspace_id = ?)",
+    )
+    .run(workspaceId);
 
   const items = await db
     .prepare('SELECT id, title, body FROM work_items')
     .all<{ id: string; title: string; body: string | null }>();
 
   for (const item of items) {
-    const matches = await classifyItem(item.title, item.body);
+    const matches = await classifyItem(workspaceId, item.title, item.body);
     for (const m of matches) {
       await db
-        .prepare("INSERT OR IGNORE INTO tags (id, name, category) VALUES (?, ?, 'goal')")
-        .run(m.goalId, m.goalId);
+        .prepare(
+          "INSERT OR IGNORE INTO tags (id, name, category, workspace_id) VALUES (?, ?, 'goal', ?)",
+        )
+        .run(m.goalId, m.goalId, workspaceId);
       await db
         .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, ?)')
         .run(item.id, m.goalId, m.confidence);

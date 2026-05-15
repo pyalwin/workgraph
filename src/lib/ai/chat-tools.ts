@@ -6,6 +6,7 @@ import { getLibsqlDb } from '@/lib/db/libsql';
 import { searchChunks } from '@/lib/embeddings/embed';
 import { getProjectDetail, getProjectSummaryCards } from '@/lib/project-queries';
 import { listDecisions } from '@/lib/decision/extract';
+import { buildWorkspaceItemFilter } from '@/lib/active-workspace';
 
 // Local helpers — initSchema/getDb are removed; substitute with the async pair.
 const initSchema = async () => ensureSchemaAsync();
@@ -30,26 +31,37 @@ function findProjectKey(query: string): string | null {
 
 const SQL_FORBIDDEN = /\b(insert|update|delete|drop|alter|create|attach|detach|pragma|replace|vacuum|reindex)\b/i;
 
-export const chatTools = {
+/**
+ * Builds the workgraph chat tool surface scoped to a single workspace.
+ *
+ * All tools that read from `work_items` apply `buildWorkspaceItemFilter` so
+ * that only items whose `source` is configured in the given workspace are
+ * visible. The workspace must be passed at build time — these helpers may
+ * run in non-request contexts (CLI backends, MCP) where cookies aren't
+ * available.
+ */
+export function buildChatTools(workspaceId: string) {
+  return {
   // ───── Structured queries ─────
 
   countItems: tool({
     description:
-      'Count work_items matching optional filters. Use for "how many" questions about Jira tickets, GitHub items, etc. Sources: jira, github, slack, granola, notion, manual. Item types vary by source (e.g. task, bug, story for jira).',
+      'Count work_items matching optional filters. Use for "how many" questions about tickets, emails, meetings, documents, etc. Sources: jira, github, slack, gmail, gcal (calendar events), gdrive (Drive docs), granola (meeting transcripts), notion, manual, pipeline (synthetic deal/investor/candidate hubs). Item types vary by source — e.g. task/bug/story for jira; thread for gmail; event for gcal; doc/sheet/slides/folder/file for gdrive; deal/investor/candidate for pipeline.',
     inputSchema: z.object({
-      source: z.string().optional().describe('e.g. jira, github, slack'),
+      source: z.string().optional().describe('e.g. jira, github, slack, gmail, gcal, gdrive, notion, granola'),
       item_type: z.string().optional().describe('e.g. task, bug, story, repository, release, note'),
       status: z.string().optional().describe('e.g. open, in_progress, done, closed'),
     }),
     execute: async ({ source, item_type, status }) => {
       await initSchema();
       const db = getDb();
-      const where: string[] = [];
-      const params: (string | number | null)[] = [];
+      const filter = await buildWorkspaceItemFilter(workspaceId, '');
+      const where: string[] = [filter.sql];
+      const params: (string | number | null)[] = [...filter.params];
       if (source) { where.push('source = ?'); params.push(source); }
       if (item_type) { where.push('item_type = ?'); params.push(item_type); }
       if (status) { where.push('status = ?'); params.push(status); }
-      const sql = `SELECT COUNT(*) AS c FROM work_items ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`;
+      const sql = `SELECT COUNT(*) AS c FROM work_items WHERE ${where.join(' AND ')}`;
       const row = await db.prepare(sql).get(...params) as { c: number };
       return { count: row.c, filters: { source, item_type, status } };
     },
@@ -67,14 +79,15 @@ export const chatTools = {
     execute: async ({ source, item_type, status, limit }) => {
       await initSchema();
       const db = getDb();
-      const where: string[] = [];
-      const params: (string | number | null)[] = [];
+      const filter = await buildWorkspaceItemFilter(workspaceId, '');
+      const where: string[] = [filter.sql];
+      const params: (string | number | null)[] = [...filter.params];
       if (source) { where.push('source = ?'); params.push(source); }
       if (item_type) { where.push('item_type = ?'); params.push(item_type); }
       if (status) { where.push('status = ?'); params.push(status); }
       const sql = `SELECT id, source, source_id, item_type, title, status, url, created_at, updated_at
                    FROM work_items
-                   ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+                   WHERE ${where.join(' AND ')}
                    ORDER BY COALESCE(updated_at, created_at) DESC
                    LIMIT ?`;
       const rows = await db.prepare(sql).all(...params, limit ?? 15) as Array<Record<string, unknown>>;
@@ -92,14 +105,15 @@ export const chatTools = {
     execute: async ({ groupBy, source }) => {
       await initSchema();
       const db = getDb();
-      const sourceClause = source ? 'WHERE source = ?' : '';
+      const filter = await buildWorkspaceItemFilter(workspaceId, '');
+      const where: string[] = [filter.sql];
+      const params: (string | number | null)[] = [...filter.params];
+      if (source) { where.push('source = ?'); params.push(source); }
       const sql = `SELECT ${groupBy} AS bucket, COUNT(*) AS c
-                   FROM work_items ${sourceClause}
+                   FROM work_items WHERE ${where.join(' AND ')}
                    GROUP BY ${groupBy}
                    ORDER BY c DESC`;
-      const rows = (source
-        ? await db.prepare(sql).all<{ bucket: string; c: number }>(source)
-        : await db.prepare(sql).all<{ bucket: string; c: number }>());
+      const rows = await db.prepare(sql).all<{ bucket: string; c: number }>(...params);
       return { groupBy, rows };
     },
   }),
@@ -275,9 +289,11 @@ export const chatTools = {
     }),
     execute: async ({ query, k }) => {
       await initSchema();
-      const hits = await searchChunks(query, k ?? 8);
+      const hits = await searchChunks(query, k ?? 8, { workspaceId });
       const db = getDb();
-      const itemSql = `SELECT id, title, source, source_id, item_type, status, url, created_at FROM work_items WHERE id = ?`;
+      const filter = await buildWorkspaceItemFilter(workspaceId, '');
+      const itemSql = `SELECT id, title, source, source_id, item_type, status, url, created_at
+                       FROM work_items WHERE id = ? AND ${filter.sql}`;
       const best = new Map<string, typeof hits[0]>();
       for (const h of hits) {
         const prev = best.get(h.item_id);
@@ -285,7 +301,9 @@ export const chatTools = {
       }
       const results: Array<Record<string, unknown>> = [];
       for (const [itemId, hit] of best) {
-        const item = await db.prepare(itemSql).get<Record<string, unknown>>(itemId);
+        const item = await db
+          .prepare(itemSql)
+          .get<Record<string, unknown>>(itemId, ...filter.params);
         if (!item) continue;
         results.push({
           ...item,
@@ -377,9 +395,14 @@ export const chatTools = {
       const db = getDb();
       let row: unknown;
       if (table === 'work_items') {
+        const filter = await buildWorkspaceItemFilter(workspaceId, '');
         row = await db
-          .prepare(`SELECT * FROM work_items WHERE id = ? OR source_id = ? LIMIT 1`)
-          .get(id, id);
+          .prepare(
+            `SELECT * FROM work_items
+             WHERE (id = ? OR source_id = ?) AND ${filter.sql}
+             LIMIT 1`,
+          )
+          .get(id, id, ...filter.params);
       } else {
         row = await db.prepare(`SELECT * FROM ${table} WHERE id = ? LIMIT 1`).get(id);
       }
@@ -403,27 +426,28 @@ export const chatTools = {
     execute: async ({ itemId, linkType }) => {
       await initSchema();
       const db = getDb();
+      const filter = await buildWorkspaceItemFilter(workspaceId, 'w');
       const typeClause = linkType ? 'AND link_type = ?' : '';
       const outgoingSql = `
         SELECT l.link_type, l.confidence, w.id, w.source, w.source_id, w.item_type, w.title, w.status
         FROM links l
         JOIN work_items w ON w.id = l.target_item_id
-        WHERE l.source_item_id = ? ${typeClause}
+        WHERE l.source_item_id = ? ${typeClause} AND ${filter.sql}
         LIMIT 30
       `;
       const incomingSql = `
         SELECT l.link_type, l.confidence, w.id, w.source, w.source_id, w.item_type, w.title, w.status
         FROM links l
         JOIN work_items w ON w.id = l.source_item_id
-        WHERE l.target_item_id = ? ${typeClause}
+        WHERE l.target_item_id = ? ${typeClause} AND ${filter.sql}
         LIMIT 30
       `;
       const outgoing = linkType
-        ? await db.prepare(outgoingSql).all<Record<string, unknown>>(itemId, linkType)
-        : await db.prepare(outgoingSql).all<Record<string, unknown>>(itemId);
+        ? await db.prepare(outgoingSql).all<Record<string, unknown>>(itemId, linkType, ...filter.params)
+        : await db.prepare(outgoingSql).all<Record<string, unknown>>(itemId, ...filter.params);
       const incoming = linkType
-        ? await db.prepare(incomingSql).all<Record<string, unknown>>(itemId, linkType)
-        : await db.prepare(incomingSql).all<Record<string, unknown>>(itemId);
+        ? await db.prepare(incomingSql).all<Record<string, unknown>>(itemId, linkType, ...filter.params)
+        : await db.prepare(incomingSql).all<Record<string, unknown>>(itemId, ...filter.params);
       return { outgoing, incoming };
     },
   }),
@@ -497,6 +521,7 @@ Rules:
       return { id, source_id: sourceId, title };
     },
   }),
-} as const;
+  } as const;
+}
 
-export type ChatTools = typeof chatTools;
+export type ChatTools = ReturnType<typeof buildChatTools>;

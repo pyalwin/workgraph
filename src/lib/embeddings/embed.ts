@@ -1,5 +1,6 @@
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
+import { buildWorkspaceItemFilter } from '../active-workspace';
 import { embed, TEXT_MODEL, TEXT_DIM, type EmbeddingModel } from './huggingface';
 
 let _initPromise: Promise<void> | null = null;
@@ -162,20 +163,33 @@ function cosineDistance(a: Float32Array, b: Float32Array): number {
 export async function searchChunks(
   query: string,
   k: number = 10,
-  opts: { source?: string } = {},
+  opts: { source?: string; workspaceId?: string } = {},
 ): Promise<ChunkSearchHit[]> {
   await ensureInit();
   const db = getLibsqlDb();
   const qvec = await embed(query, TEXT_MODEL);
   const sourceFilter = opts.source?.trim() || null;
+  const wsFilter = opts.workspaceId
+    ? await buildWorkspaceItemFilter(opts.workspaceId, 'wi')
+    : null;
 
   // Try libSQL native vector_distance_cos first — works on Turso and on
   // newer libsql file mode. Falls back to in-process cosine when the
   // function is unavailable (e.g. older libsql build in dev).
   const queryLiteral = JSON.stringify(qvec);
+  const whereParts: string[] = [];
+  const filterArgs: (string | number)[] = [];
+  if (sourceFilter) {
+    whereParts.push('wi.source = ?');
+    filterArgs.push(sourceFilter);
+  }
+  if (wsFilter) {
+    whereParts.push(wsFilter.sql);
+    filterArgs.push(...wsFilter.params);
+  }
+  const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
   try {
-    const where = sourceFilter ? 'WHERE wi.source = ?' : '';
-    const args = sourceFilter ? [queryLiteral, sourceFilter, k] : [queryLiteral, k];
+    const args = [queryLiteral, ...filterArgs, k];
     const rows = await db
       .prepare(
         `SELECT cv.chunk_id, ic.item_id, ic.chunk_type, ic.chunk_text,
@@ -210,7 +224,7 @@ export async function searchChunks(
          FROM chunk_vectors cv
          JOIN item_chunks ic ON ic.id = cv.chunk_id
          JOIN work_items wi ON wi.id = ic.item_id
-         ${sourceFilter ? 'WHERE wi.source = ?' : ''}`,
+         ${where}`,
       )
       .all<{
         chunk_id: number | bigint;
@@ -218,7 +232,7 @@ export async function searchChunks(
         item_id: string;
         chunk_type: string;
         chunk_text: string;
-      }>(...(sourceFilter ? [sourceFilter] : []));
+      }>(...filterArgs);
     const q = new Float32Array(qvec);
     const scored = rows.map((r) => ({
       chunk_id: Number(r.chunk_id),

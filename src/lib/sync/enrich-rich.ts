@@ -77,12 +77,14 @@ type Enrichment = z.infer<typeof EnrichmentSchema>;
 
 // ─── Prompt ───────────────────────────────────────────────────────────────
 
-async function buildSystemPrompt(): Promise<string> {
+async function buildSystemPrompt(workspaceId: string): Promise<string> {
   const db = getLibsqlDb();
   const config = getWorkspaceConfigCached();
   const goals = await db
-    .prepare("SELECT id, name, description FROM goals WHERE status = 'active' ORDER BY sort_order")
-    .all<{ id: string; name: string; description: string }>();
+    .prepare(
+      "SELECT id, name, description FROM goals WHERE workspace_id = ? AND status = 'active' ORDER BY sort_order",
+    )
+    .all<{ id: string; name: string; description: string }>(workspaceId);
 
   const goalList = goals.map((g) => `- "${g.id}": ${g.name} — ${g.description}`).join('\n') || '(none)';
   const stages = config.lifecycle.stages
@@ -129,20 +131,47 @@ action items, or anomalies to fill quota.`;
 
 // ─── Persistence helpers ──────────────────────────────────────────────────
 
-async function upsertEntity(canonical: string, type: string): Promise<string> {
+async function upsertEntity(workspaceId: string, canonical: string, type: string): Promise<string> {
   const db = getLibsqlDb();
+  // Look up within this workspace first. The legacy UNIQUE(canonical_form,
+  // entity_type) constraint applies cross-workspace, so a different
+  // workspace can't reuse the same (canonical, type) pair without colliding;
+  // we paper over by giving each workspace a uuid-suffixed id and tolerating
+  // the ON CONFLICT failure as a no-op via INSERT OR IGNORE-style retry.
   const existing = await db
-    .prepare('SELECT id FROM entities WHERE canonical_form = ? AND entity_type = ?')
-    .get<{ id: string }>(canonical, type);
+    .prepare(
+      'SELECT id FROM entities WHERE canonical_form = ? AND entity_type = ? AND workspace_id = ?',
+    )
+    .get<{ id: string }>(canonical, type, workspaceId);
   if (existing) return existing.id;
   const id = uuid();
-  await db
-    .prepare('INSERT INTO entities (id, canonical_form, entity_type, aliases) VALUES (?, ?, ?, ?)')
-    .run(id, canonical, type, '[]');
-  return id;
+  try {
+    await db
+      .prepare(
+        'INSERT INTO entities (id, canonical_form, entity_type, aliases, workspace_id) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(id, canonical, type, '[]', workspaceId);
+    return id;
+  } catch (err) {
+    // UNIQUE(canonical_form, entity_type) collision with another workspace's
+    // row. Re-look up scoped to this workspace; if still missing, fall back
+    // to the cross-workspace row id (best-effort — the entity is logically
+    // shared but readers will filter on workspace_id of the entity row).
+    const re = await db
+      .prepare(
+        'SELECT id FROM entities WHERE canonical_form = ? AND entity_type = ? AND workspace_id = ?',
+      )
+      .get<{ id: string }>(canonical, type, workspaceId);
+    if (re) return re.id;
+    const any = await db
+      .prepare('SELECT id FROM entities WHERE canonical_form = ? AND entity_type = ?')
+      .get<{ id: string }>(canonical, type);
+    if (any) return any.id;
+    throw err;
+  }
 }
 
-async function persistEntities(itemId: string, list: Enrichment['entities']): Promise<void> {
+async function persistEntities(workspaceId: string, itemId: string, list: Enrichment['entities']): Promise<void> {
   const db = getLibsqlDb();
   // Replace all AI-generated mentions for this item — keep the door open for
   // a second pass to refine. We identify "AI mentions" as those without
@@ -157,7 +186,7 @@ async function persistEntities(itemId: string, list: Enrichment['entities']): Pr
     const canonical = e.canonical_form.trim();
     const surface = (e.surface_form || canonical).trim();
     if (!canonical || !surface) continue;
-    const entityId = await upsertEntity(canonical, e.type);
+    const entityId = await upsertEntity(workspaceId, canonical, e.type);
     await db.prepare(insertSql).run(itemId, entityId, surface, 0.85);
   }
 }
@@ -192,17 +221,36 @@ async function persistAnomalies(itemId: string, workspaceId: string, list: Enric
   }
 }
 
-async function storeTopicTags(itemId: string, topics: string[]): Promise<void> {
+async function storeTopicTags(workspaceId: string, itemId: string, topics: string[]): Promise<void> {
   const db = getLibsqlDb();
   for (const raw of topics) {
     const name = raw.toLowerCase().trim();
     if (name.length < 2) continue;
-    const tagId = `topic:${name}`;
+    // Workspace-prefix the tag id so two workspaces with the same topic
+    // name don't collide on the legacy UNIQUE(name, category) constraint.
+    const tagId = `${workspaceId}:topic:${name}`;
     const existing = await db.prepare('SELECT id FROM tags WHERE id = ?').get(tagId);
     if (!existing) {
-      await db
-        .prepare('INSERT INTO tags (id, name, category) VALUES (?, ?, ?)')
-        .run(tagId, name, 'topic');
+      try {
+        await db
+          .prepare('INSERT INTO tags (id, name, category, workspace_id) VALUES (?, ?, ?, ?)')
+          .run(tagId, name, 'topic', workspaceId);
+      } catch {
+        // UNIQUE(name, category) collision with another workspace's tag row;
+        // the post-migration plan is workspace-prefixed names. Until that
+        // migration runs, fall back to the existing shared id so item_tags
+        // FK still resolves.
+        const fallback = `topic:${name}`;
+        await db
+          .prepare(
+            `INSERT OR IGNORE INTO tags (id, name, category, workspace_id) VALUES (?, ?, ?, ?)`,
+          )
+          .run(fallback, name, 'topic', workspaceId);
+        await db
+          .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
+          .run(itemId, fallback);
+        continue;
+      }
     }
     await db
       .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
@@ -210,7 +258,7 @@ async function storeTopicTags(itemId: string, topics: string[]): Promise<void> {
   }
 }
 
-async function storeGoalTags(itemId: string, goalIds: string[]): Promise<void> {
+async function storeGoalTags(workspaceId: string, itemId: string, goalIds: string[]): Promise<void> {
   const db = getLibsqlDb();
   await db
     .prepare(
@@ -219,14 +267,16 @@ async function storeGoalTags(itemId: string, goalIds: string[]): Promise<void> {
     .run(itemId);
   for (const goalId of goalIds) {
     const goal = await db
-      .prepare('SELECT name FROM goals WHERE id = ?')
-      .get<{ name: string }>(goalId);
+      .prepare('SELECT name FROM goals WHERE id = ? AND workspace_id = ?')
+      .get<{ name: string }>(goalId, workspaceId);
     if (!goal) continue;
+    // Goal-tag id stays equal to the goal id (legacy contract — item_tags.tag_id
+    // joins both tags and goals). Stamp workspace_id on insert.
     const existing = await db.prepare('SELECT id FROM tags WHERE id = ?').get(goalId);
     if (!existing) {
       await db
-        .prepare(`INSERT INTO tags (id, name, category) VALUES (?, ?, 'goal')`)
-        .run(goalId, goal.name);
+        .prepare(`INSERT INTO tags (id, name, category, workspace_id) VALUES (?, ?, 'goal', ?)`)
+        .run(goalId, goal.name, workspaceId);
     }
     await db
       .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
@@ -292,7 +342,7 @@ export async function enrichItemFully(
     const { object } = await generateObject({
       model: getModel('enrich'),
       maxOutputTokens: 2000,
-      system: await buildSystemPrompt(),
+      system: await buildSystemPrompt(workspaceId),
       schema: EnrichmentSchema,
       prompt: content,
     });
@@ -316,9 +366,9 @@ export async function enrichItemFully(
     .run(result.summary, result.trace_role, result.substance, traceEventAt, itemId);
 
   // 2. Persist derived rows
-  await storeTopicTags(itemId, result.topics);
-  await storeGoalTags(itemId, result.goals);
-  await persistEntities(itemId, result.entities);
+  await storeTopicTags(workspaceId, itemId, result.topics);
+  await storeGoalTags(workspaceId, itemId, result.goals);
+  await persistEntities(workspaceId, itemId, result.entities);
   await persistAnomalies(itemId, workspaceId, result.anomaly_signals);
 
   return { ok: true, enrichment: result };

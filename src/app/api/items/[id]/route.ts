@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import { getActiveWorkspaceId } from '@/lib/active-workspace';
 
 interface VersionRow {
   id: string;
@@ -53,6 +54,20 @@ export async function GET(
     if (!itemRaw) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
+
+    // Verify the item's source is configured in the active workspace.
+    // If not, we hide its existence (404) — users in workspace A must not
+    // be able to inspect items belonging to a connector configured only
+    // in workspace B.
+    const workspaceId = await getActiveWorkspaceId();
+    const visible = await db
+      .prepare(
+        'SELECT 1 AS hit FROM workspace_connector_configs WHERE workspace_id = ? AND source = ? LIMIT 1',
+      )
+      .get<{ hit: number }>(workspaceId, itemRaw.source as string);
+    if (!visible) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
     // gap_analysis is stored as a JSON string; parse it once here so the
     // drawer can render shipped/missing arrays without parsing client-side.
     const item = {
@@ -99,12 +114,14 @@ export async function GET(
       )
       .all<LinkedItemRow>(id, id, id);
 
-    // Goal tags
+    // Goal tags — scope goals to the active workspace so a tag id collision
+    // can't surface another workspace's goal name on this item.
     const goals = await db
       .prepare(
-        `SELECT g.name FROM item_tags it JOIN goals g ON g.id = it.tag_id WHERE it.item_id = ?`,
+        `SELECT g.name FROM item_tags it JOIN goals g ON g.id = it.tag_id
+         WHERE it.item_id = ? AND g.workspace_id = ?`,
       )
-      .all<GoalRow>(id);
+      .all<GoalRow>(id, workspaceId);
 
     // Workstream memberships
     const workstreamRows = await db

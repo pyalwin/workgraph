@@ -1,13 +1,23 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import {
+  buildWorkspaceItemFilter,
+  getRequestWorkspaceId,
+} from '@/lib/active-workspace';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   await ensureSchemaAsync();
   const db = getLibsqlDb();
 
+  const workspaceId = await getRequestWorkspaceId(req.nextUrl.searchParams);
+  const filter = await buildWorkspaceItemFilter(workspaceId, 'wi');
+
+  // Workstreams are visible if any of their member work_items belong to a
+  // source configured in the active workspace. We aggregate from the
+  // workspace-filtered work_items rather than from workstreams directly.
   const rows = await db
     .prepare(
       `SELECT
@@ -17,12 +27,13 @@ export async function GET() {
         SUM(wsi.is_terminal) AS terminal_count,
         GROUP_CONCAT(DISTINCT wi.source) AS sources
       FROM workstreams ws
-      LEFT JOIN workstream_items wsi ON wsi.workstream_id = ws.id
-      LEFT JOIN work_items wi ON wi.id = wsi.item_id
+      JOIN workstream_items wsi ON wsi.workstream_id = ws.id
+      JOIN work_items wi ON wi.id = wsi.item_id
+      WHERE ${filter.sql}
       GROUP BY ws.id
       ORDER BY ws.latest_at DESC`,
     )
-    .all<any>();
+    .all<any>(...filter.params);
 
   const workstreams = rows.map(r => ({
     id: r.id,

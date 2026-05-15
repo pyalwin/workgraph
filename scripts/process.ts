@@ -103,7 +103,7 @@ async function run() {
 
   // Side-channel: metrics + project recaps (kept from prior pipeline)
   console.log('\n  Metrics + project recaps...');
-  computeAllMetrics();
+  computeAllMetrics('default');
   const recap = await generateAllRecaps();
   console.log(`    recaps=${recap.generated}`);
 

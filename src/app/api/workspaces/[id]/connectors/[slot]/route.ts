@@ -12,6 +12,15 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+// Lightweight "is the OAuth token valid + is the API enabled?" probes for
+// direct-API connectors. A 200 means the token works and the project has
+// the API enabled; non-200 surfaces the underlying Google error verbatim.
+const DIRECT_API_PROBES: Record<string, string> = {
+  gmail: 'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+  gdrive: 'https://www.googleapis.com/drive/v3/about?fields=user',
+  gcal: 'https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1',
+};
+
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string; slot: string }> },
@@ -88,6 +97,39 @@ export async function PATCH(
       if (!cfg) return NextResponse.json({ ok: false, error: 'No config to test' }, { status: 404 });
       const t0 = Date.now();
       console.error(`[test ${cfg.source}] starting…`);
+
+      // Direct-API connectors don't have an MCP server. Probe the provider
+      // API directly with the saved OAuth token.
+      const { getConnector } = await import('@/lib/connectors/registry');
+      const { isMCPConnector } = await import('@/lib/connectors/types');
+      const connector = getConnector(cfg.source);
+      if (!isMCPConnector(connector)) {
+        try {
+          const { getOAuthTokenByProvider } = await import('@/lib/oauth/refresh');
+          const token = await getOAuthTokenByProvider(workspaceId, connector.oauthProvider);
+          const probe = DIRECT_API_PROBES[cfg.source];
+          if (!probe) {
+            throw new Error(`No test probe registered for direct-API connector "${cfg.source}"`);
+          }
+          const res = await fetch(probe, {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          });
+          if (!res.ok) {
+            const txt = await res.text().catch(() => '');
+            throw new Error(`API ${res.status} ${res.statusText}: ${txt.slice(0, 200)}`);
+          }
+          const ms = Date.now() - t0;
+          console.error(`[test ${cfg.source}] ✓ SUCCESS (direct) in ${ms}ms`);
+          await markConnectorTested(workspaceId, decodedSlot, { ok: true });
+          return NextResponse.json({ ok: true, ms });
+        } catch (err: any) {
+          const ms = Date.now() - t0;
+          console.error(`[test ${cfg.source}] ✗ FAILED (direct) in ${ms}ms: ${err.message}`);
+          await markConnectorTested(workspaceId, decodedSlot, { ok: false, error: err.message });
+          return NextResponse.json({ ok: false, error: err.message }, { status: 200 });
+        }
+      }
+
       try {
         const { connectMCP, resolveServerConfig } = await import('@/lib/connectors/mcp-client');
         const server = await resolveServerConfig(cfg.serverId, cfg.source, workspaceId, process.env);

@@ -2,6 +2,7 @@ import { ingestItems, ingestLinks, type LinkRowInput } from '../sync/ingest';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
 import { createLinksForItem } from '../crossref';
+import { persistPipelineLinksForItems } from '../pipelines/persist';
 
 let _initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
@@ -25,6 +26,10 @@ export interface RunOptions {
 export interface RunPipelineOptions extends RunOptions {
   client: MCPClient | null;     // null means caller will provide raw responses (stdin mode)
   rawPages?: unknown[];         // For stdin mode: pre-fetched response pages
+  /** Optional — when provided, post-ingest pipeline matching runs for the
+   * workspace's founder-preset custom tables (deals/investors/candidates).
+   * No-op when omitted or when the workspace lacks those tables. */
+  workspaceId?: string;
 }
 
 export async function lastSyncedAt(source: string): Promise<string | null> {
@@ -305,6 +310,25 @@ export async function runConnector(connector: MCPConnector, opts: RunPipelineOpt
   }
 
   const result = await ingestItems(collected);
+
+  // Pipeline-link matching for founder-preset workspaces. Runs only when the
+  // caller passed a workspaceId. Failures must NOT fail the ingest — the
+  // helper has its own try/catch but we wrap defensively. (Phase D, spec 4.3)
+  if (opts.workspaceId) {
+    try {
+      await persistPipelineLinksForItems(
+        opts.workspaceId,
+        collected.map((i) => ({
+          source: i.source,
+          source_id: i.source_id,
+          title: i.title,
+          metadata: i.metadata,
+        })),
+      );
+    } catch (err: any) {
+      log(`pipeline matching skipped: ${err?.message || String(err)}`);
+    }
+  }
 
   // Resolve link refs to work_items.id and insert
   if (pendingLinks.length > 0) {

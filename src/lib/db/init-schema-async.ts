@@ -37,11 +37,13 @@ const DDL = `
     derived_from TEXT NOT NULL DEFAULT 'manual',
     kind TEXT NOT NULL DEFAULT 'goal',
     parent_id TEXT,
-    project_key TEXT
+    project_key TEXT,
+    workspace_id TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_goals_kind ON goals(kind);
   CREATE INDEX IF NOT EXISTS idx_goals_parent ON goals(parent_id);
   CREATE INDEX IF NOT EXISTS idx_goals_project ON goals(project_key);
+  CREATE INDEX IF NOT EXISTS idx_goals_workspace ON goals(workspace_id);
 
   CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -85,8 +87,10 @@ const DDL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     category TEXT,
+    workspace_id TEXT,
     UNIQUE(name, category)
   );
+  CREATE INDEX IF NOT EXISTS idx_tags_workspace ON tags(workspace_id);
 
   CREATE TABLE IF NOT EXISTS item_tags (
     item_id TEXT REFERENCES work_items(id),
@@ -147,8 +151,10 @@ const DDL = `
     id TEXT PRIMARY KEY DEFAULT 'default',
     config TEXT NOT NULL DEFAULT '{}',
     enabled INTEGER NOT NULL DEFAULT 1,
+    auth_user_id TEXT,
     updated_at TEXT DEFAULT (datetime('now'))
   );
+  CREATE INDEX IF NOT EXISTS idx_workspace_config_auth_user ON workspace_config(auth_user_id);
 
   CREATE TABLE IF NOT EXISTS workspace_connector_configs (
     id TEXT PRIMARY KEY,
@@ -498,10 +504,12 @@ const DDL = `
     metadata TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT,
+    workspace_id TEXT,
     UNIQUE(canonical_form, entity_type)
   );
   CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
   CREATE INDEX IF NOT EXISTS idx_entities_canonical ON entities(canonical_form);
+  CREATE INDEX IF NOT EXISTS idx_entities_workspace ON entities(workspace_id);
 
   CREATE TABLE IF NOT EXISTS entity_mentions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -525,10 +533,12 @@ const DDL = `
   CREATE TABLE IF NOT EXISTS chat_threads (
     id TEXT PRIMARY KEY,
     title TEXT,
+    workspace_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_chat_threads_updated ON chat_threads(updated_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_chat_threads_workspace ON chat_threads(workspace_id);
 
   CREATE TABLE IF NOT EXISTS chat_messages (
     id TEXT PRIMARY KEY,
@@ -689,6 +699,26 @@ const DDL = `
   );
   CREATE INDEX IF NOT EXISTS idx_project_backlog_project ON project_backlog_items(workspace_id, project_key, state);
   CREATE INDEX IF NOT EXISTS idx_project_backlog_kind ON project_backlog_items(workspace_id, project_key, kind);
+
+  -- pipeline_links: many-to-many between custom pipeline rows
+  -- (deals / investors / candidates) and ingested work_items
+  -- (gmail thread / gcal event / gdrive file). Auto-populated by the
+  -- matching helper after each sync; manual pin/unpin overrides the
+  -- automated reason. The unique index makes re-ingest idempotent.
+  CREATE TABLE IF NOT EXISTS pipeline_links (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    pipeline_table TEXT NOT NULL,
+    pipeline_row_id TEXT NOT NULL,
+    item_source TEXT NOT NULL,
+    item_source_id TEXT NOT NULL,
+    match_reason TEXT NOT NULL,
+    confidence REAL NOT NULL DEFAULT 0.7,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pipeline_links_row ON pipeline_links(pipeline_table, pipeline_row_id);
+  CREATE INDEX IF NOT EXISTS idx_pipeline_links_item ON pipeline_links(item_source, item_source_id);
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_pipeline_links ON pipeline_links(pipeline_table, pipeline_row_id, item_source, item_source_id);
 `;
 
 /**
@@ -729,10 +759,46 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
     // running on a fresh DB ("no such table") or after the column is
     // already present ("duplicate column") is harmless.
     `ALTER TABLE agent_jobs ADD COLUMN workspace_id TEXT`,
+    // Backoff + retry support: when a job hits a 429 / rate-limit, the
+    // agent (or server) marks it 'queued' again with a deferred retry time
+    // so subsequent polls skip it until the cooldown expires.
+    `ALTER TABLE agent_jobs ADD COLUMN next_retry_at TEXT`,
+    `ALTER TABLE agent_jobs ADD COLUMN last_error TEXT`,
+    `CREATE INDEX IF NOT EXISTS idx_agent_jobs_status_retry ON agent_jobs(status, next_retry_at, created_at)`,
+    // Founder preset rename: candidates → people (broader scope: covers
+    // team, advisors, contractors, alumni, etc. via a 'relationship' field
+    // in addition to candidate-pipeline rows). Move data + adjust foreign
+    // references in pipeline_links + synthetic work_items so the renamed
+    // table inherits everything seamlessly.
+    `ALTER TABLE candidates RENAME TO people`,
+    `ALTER TABLE people ADD COLUMN relationship TEXT`,
+    `UPDATE people SET relationship = 'candidate' WHERE relationship IS NULL`,
+    `CREATE INDEX IF NOT EXISTS idx_people_relationship ON people(relationship)`,
+    `UPDATE pipeline_links SET pipeline_table = 'people' WHERE pipeline_table = 'candidates'`,
+    `UPDATE work_items SET source_id = REPLACE(source_id, 'candidates:', 'people:') WHERE source = 'pipeline' AND source_id LIKE 'candidates:%'`,
+    `UPDATE work_items SET item_type = 'person' WHERE source = 'pipeline' AND item_type = 'candidate'`,
     `ALTER TABLE almanac_docs ADD COLUMN title TEXT`,
     `ALTER TABLE agents ADD COLUMN claude_available INTEGER`,
     `ALTER TABLE agents ADD COLUMN claude_version TEXT`,
     `ALTER TABLE project_summaries ADD COLUMN created_via TEXT`,
+    // Direct-API connector support: per-connector incremental sync cursor
+    // (Drive startPageToken / Calendar nextSyncToken / Gmail historyId) and
+    // the OAuth provider key the connector authenticates against (e.g.
+    // 'google' shared across gmail/gdrive/gcal). Both nullable.
+    `ALTER TABLE workspace_connector_configs ADD COLUMN sync_marker TEXT`,
+    `ALTER TABLE workspace_connector_configs ADD COLUMN oauth_provider TEXT`,
+    // Phase 3: workspace scoping for goals/chat_threads/tags/entities. Each
+    // adds a nullable workspace_id; the DDL block above also includes the
+    // column on a fresh CREATE TABLE so first-deploy installs are correct.
+    // Existing rows are backfilled to 'default' by the backfill block.
+    `ALTER TABLE goals ADD COLUMN workspace_id TEXT`,
+    `ALTER TABLE chat_threads ADD COLUMN workspace_id TEXT`,
+    `ALTER TABLE tags ADD COLUMN workspace_id TEXT`,
+    `ALTER TABLE entities ADD COLUMN workspace_id TEXT`,
+    // Phase 4: bind workspace_config to the authenticated user. Existing
+    // rows stay NULL ("unclaimed") and get claimed by the first user who
+    // logs in. The first-user claim is performed by getUserWorkspaceId().
+    `ALTER TABLE workspace_config ADD COLUMN auth_user_id TEXT`,
   ];
   for (const sql of migrations) {
     try {
@@ -850,6 +916,30 @@ async function backfillProjectConnectors(db: ReturnType<typeof getLibsqlDb>): Pr
   }
 }
 
+/**
+ * Phase 3 backfill: stamp legacy rows in goals/chat_threads/tags/entities
+ * with workspace_id='default' so they remain visible to the default
+ * workspace after Phase 3 enables workspace-scoped reads. Idempotent — the
+ * WHERE clause skips rows already stamped, so re-running on an upgraded DB
+ * is a no-op.
+ */
+async function backfillWorkspaceScopedTables(db: ReturnType<typeof getLibsqlDb>): Promise<void> {
+  const statements = [
+    `UPDATE goals SET workspace_id = 'default' WHERE workspace_id IS NULL`,
+    `UPDATE chat_threads SET workspace_id = 'default' WHERE workspace_id IS NULL`,
+    `UPDATE tags SET workspace_id = 'default' WHERE workspace_id IS NULL`,
+    `UPDATE entities SET workspace_id = 'default' WHERE workspace_id IS NULL`,
+  ];
+  for (const sql of statements) {
+    try {
+      await db.exec(sql);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[schema migration] workspace backfill non-fatal failure for "${sql}":`, msg);
+    }
+  }
+}
+
 export async function ensureSchemaAsync(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
@@ -861,6 +951,7 @@ export async function ensureSchemaAsync(): Promise<void> {
     await runAdditiveMigrations(db);
     await db.exec(DDL);
     await backfillProjectConnectors(db);
+    await backfillWorkspaceScopedTables(db);
   })();
   // Don't cache a rejected promise — a transient DDL failure should not
   // permanently break every subsequent caller until the process restarts.

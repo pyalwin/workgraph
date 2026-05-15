@@ -330,6 +330,17 @@ function truncate(s: string, n: number): string {
 }
 
 function ConnectorIcon({ preset }: { preset: ConnectorPreset }) {
+  if (preset.iconAsset) {
+    return (
+      <div
+        className="shrink-0 w-10 h-10 rounded-lg grid place-items-center bg-white border border-black/[0.06]"
+        aria-hidden
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={preset.iconAsset} alt="" width={22} height={22} />
+      </div>
+    );
+  }
   const Icon: IconType | undefined = preset.iconKey
     ? (SiIcons as unknown as Record<string, IconType>)[preset.iconKey]
     : undefined;

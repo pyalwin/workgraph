@@ -127,15 +127,17 @@ function normalizeCanonical(canonical: string, type: EntityType): string {
   return s;
 }
 
-function entityKey(canonical: string, type: EntityType): string {
+function entityKey(workspaceId: string, canonical: string, type: EntityType): string {
   const normalized = normalizeCanonical(canonical, type);
   const slug = normalized.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-  return `${type}:${slug}`;
+  // Workspace-prefix the id so two workspaces with the same canonical
+  // (entity_type, canonical_form) don't collide on the legacy unique index.
+  return `${workspaceId}:${type}:${slug}`;
 }
 
-async function upsertEntity(canonical: string, type: EntityType, surface: string): Promise<string> {
+async function upsertEntity(workspaceId: string, canonical: string, type: EntityType, surface: string): Promise<string> {
   const db = getLibsqlDb();
-  const id = entityKey(canonical, type);
+  const id = entityKey(workspaceId, canonical, type);
   const normalized = normalizeCanonical(canonical, type);
 
   const existing = await db
@@ -143,13 +145,26 @@ async function upsertEntity(canonical: string, type: EntityType, surface: string
     .get<{ id: string; aliases: string }>(id);
 
   if (!existing) {
-    await db
-      .prepare(
-        `INSERT INTO entities (id, canonical_form, entity_type, aliases)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .run(id, normalized, type, JSON.stringify([surface]));
-    return id;
+    try {
+      await db
+        .prepare(
+          `INSERT INTO entities (id, canonical_form, entity_type, aliases, workspace_id)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(id, normalized, type, JSON.stringify([surface]), workspaceId);
+      return id;
+    } catch {
+      // UNIQUE(canonical_form, entity_type) collision with another workspace.
+      // Fall back to legacy non-prefixed id and stamp workspace_id.
+      const legacyId = `${type}:${normalized.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')}`;
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO entities (id, canonical_form, entity_type, aliases, workspace_id)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run(legacyId, normalized, type, JSON.stringify([surface]), workspaceId);
+      return legacyId;
+    }
   }
 
   // Merge surface_form into aliases if new
@@ -261,20 +276,20 @@ function extractStructuredMetadataEntities(item: {
  * Wrapped in try/catch: a broken dual-write must never poison the per-item
  * extraction — the new entity_mentions row is the source of truth.
  */
-async function writeLegacyEntityTag(itemId: string, entityId: string, canonical: string, type: EntityType): Promise<void> {
+async function writeLegacyEntityTag(workspaceId: string, itemId: string, entityId: string, canonical: string, type: EntityType): Promise<void> {
   void entityId;
   try {
     const db = getLibsqlDb();
     const slug = canonical.toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     const tagName = `${type}:${canonical.toLowerCase().trim()}`;
-    const tagId = `entity:${type}:${slug}`;
+    const tagId = `${workspaceId}:entity:${type}:${slug}`;
 
     const existingTag = await db.prepare('SELECT id FROM tags WHERE id = ?').get(tagId);
     if (!existingTag) {
       try {
         await db
-          .prepare(`INSERT INTO tags (id, name, category) VALUES (?, ?, 'entity')`)
-          .run(tagId, tagName);
+          .prepare(`INSERT INTO tags (id, name, category, workspace_id) VALUES (?, ?, 'entity', ?)`)
+          .run(tagId, tagName, workspaceId);
       } catch { /* unique constraint race / collision — fine, tag row exists */ }
     }
     // Verify the tag actually exists before FK-dependent insert
@@ -289,7 +304,7 @@ async function writeLegacyEntityTag(itemId: string, entityId: string, canonical:
   }
 }
 
-export async function extractEntitiesForItem(itemId: string): Promise<number> {
+export async function extractEntitiesForItem(workspaceId: string, itemId: string): Promise<number> {
   const db = getLibsqlDb();
   const item = await db
     .prepare('SELECT id, source, title, body, author, metadata FROM work_items WHERE id = ?')
@@ -306,7 +321,7 @@ export async function extractEntitiesForItem(itemId: string): Promise<number> {
 
   let stored = 0;
   for (const e of entities) {
-    const entityId = await upsertEntity(e.canonical_form, e.entity_type, e.surface_form);
+    const entityId = await upsertEntity(workspaceId, e.canonical_form, e.entity_type, e.surface_form);
     await recordMention(
       item.id,
       entityId,
@@ -315,7 +330,7 @@ export async function extractEntitiesForItem(itemId: string): Promise<number> {
       e.end_offset,
       e.confidence ?? 1.0,
     );
-    await writeLegacyEntityTag(item.id, entityId, e.canonical_form, e.entity_type);
+    await writeLegacyEntityTag(workspaceId, item.id, entityId, e.canonical_form, e.entity_type);
     stored++;
   }
 
@@ -323,6 +338,7 @@ export async function extractEntitiesForItem(itemId: string): Promise<number> {
 }
 
 export async function extractAllEntities(options: {
+  workspaceId?: string;
   limit?: number;
   force?: boolean;
   concurrency?: number;
@@ -330,6 +346,9 @@ export async function extractAllEntities(options: {
   await ensureInit();
   await seedWorkspaceConfig();
   const db = getLibsqlDb();
+  // Default to 'default' for legacy CLI scripts that don't carry workspace
+  // context. Inngest paths thread the explicit workspace through.
+  const workspaceId = options.workspaceId ?? 'default';
 
   const limit = options.limit ?? 2000;
   const concurrency = options.concurrency ?? 4;
@@ -358,7 +377,7 @@ export async function extractAllEntities(options: {
         const idx = i + j + 1;
         process.stdout.write(`  [${idx}/${items.length}] ${item.id.slice(0, 8)}...`);
         try {
-          const n = await extractEntitiesForItem(item.id);
+          const n = await extractEntitiesForItem(workspaceId, item.id);
           console.log(` ${n} entities`);
           return n;
         } catch (err: any) {

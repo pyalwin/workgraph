@@ -18,6 +18,13 @@ export default authkitProxy({
       '/auth/signout',
       '/api/inngest',
       '/api/agent/:path*',
+      // /api/mcp is reached by the Claude CLI subprocess during chat —
+      // subprocesses have no session cookies, so AuthKit would 303 them
+      // to the WorkOS login flow and the MCP handshake would never land.
+      // Workspace context comes through an X-Workspace-Id header that
+      // the route honors instead. Localhost-only by default (gated by
+      // NODE_ENV inside the route).
+      '/api/mcp',
     ],
   },
   debug: false,
@@ -39,6 +46,6 @@ export const config = {
     // deliberately NOT in the exclusion list. Same applies to
     // .../sections/:id/regen — anchored exclusions let browser-auth
     // subroutes still run through authkit.
-    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|robots.txt|sitemap.xml|api/agent/(?:heartbeat|jobs|pair/(?:start|poll))|api/inngest|api/almanac/docs/[^/]+/outline$|api/almanac/docs/[^/]+/sections/[^/]+$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|robots.txt|sitemap.xml|api/agent/(?:heartbeat|jobs|pair/(?:start|poll))|api/inngest|api/mcp|api/almanac/docs/[^/]+/outline$|api/almanac/docs/[^/]+/sections/[^/]+$).*)',
   ],
 };

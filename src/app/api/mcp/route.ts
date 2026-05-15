@@ -1,12 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { chatTools } from '@/lib/ai/chat-tools';
+import { buildChatTools } from '@/lib/ai/chat-tools';
+import { getActiveWorkspaceId } from '@/lib/active-workspace';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const ENABLED = process.env.MCP_SERVER_ENABLED === '1';
+// MCP server is enabled by default in dev (NODE_ENV !== 'production') so the
+// Claude Code chat backend can call workgraph data tools (countItems, listItems,
+// searchKnowledge, etc.) via --mcp-config. In production set
+// MCP_SERVER_ENABLED=1 explicitly — the endpoint is unauthenticated, so don't
+// expose it publicly.
+const ENABLED =
+  process.env.MCP_SERVER_ENABLED === '1' ||
+  (process.env.NODE_ENV !== 'production' && process.env.MCP_SERVER_ENABLED !== '0');
 
 /**
  * Build a fresh McpServer per request (stateless transport). Each tool from
@@ -17,8 +25,9 @@ const ENABLED = process.env.MCP_SERVER_ENABLED === '1';
  * Disabled by default — set MCP_SERVER_ENABLED=1 to expose. The endpoint is
  * unauthenticated, so only enable behind a network/proxy that adds auth.
  */
-function buildServer(): McpServer {
+function buildServer(workspaceId: string): McpServer {
   const server = new McpServer({ name: 'workgraph', version: '0.1.0' });
+  const chatTools = buildChatTools(workspaceId);
 
   for (const [name, tool] of Object.entries(chatTools)) {
     // The AI SDK's zod and MCP SDK's zod have separate type roots in
@@ -60,7 +69,17 @@ async function handle(req: NextRequest): Promise<Response> {
     sessionIdGenerator: undefined, // stateless mode
     enableJsonResponse: true,
   });
-  const server = buildServer();
+  // Workspace resolution priority:
+  //   1. X-Workspace-Id header — used by the chat route when bridging the
+  //      CLI subprocess into MCP (subprocesses have no session cookies).
+  //   2. ?workspace= query param.
+  //   3. Cookie-based session (legitimate browser callers).
+  const headerWs = req.headers.get('x-workspace-id');
+  const url = new URL(req.url);
+  const queryWs = url.searchParams.get('workspace');
+  const workspaceId = headerWs?.trim() || queryWs?.trim() || (await getActiveWorkspaceId());
+  console.log(`[mcp] ${req.method} /api/mcp workspace=${workspaceId} ${headerWs ? '(header)' : queryWs ? '(query)' : '(cookie)'}`);
+  const server = buildServer(workspaceId);
   await server.connect(transport);
   return transport.handleRequest(req);
 }

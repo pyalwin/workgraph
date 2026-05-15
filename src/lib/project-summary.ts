@@ -1,7 +1,6 @@
-import { generateText } from 'ai';
 import { ensureSchemaAsync } from './db/init-schema-async';
 import { getLibsqlDb } from './db/libsql';
-import { getModel } from './ai';
+import { runPrompt } from './ai/runner';
 import { inngest } from '@/inngest/client';
 import { buildProjectItemFilter } from './project-connectors';
 import { resolveAlmanacWorkspaceId } from './almanac/workspace-resolver';
@@ -216,8 +215,8 @@ export async function generateAndStore(projectKey: string, projectName: string):
 
   // Generate
   try {
-    const { text: summary } = await generateText({
-      model: getModel('project-summary'),
+    const { text: summary } = await runPrompt({
+      task: 'project-summary',
       maxOutputTokens: 800,
       prompt: `You are writing a detailed project health summary for an engineering leadership dashboard. Audience: VP of Engineering who wants to understand what's happening in this project at a glance.
 

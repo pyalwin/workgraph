@@ -21,7 +21,7 @@ import { loadAnomaly, markAnomalyHandled } from '@/lib/anomaly-actions';
 import { getConnectorConfigBySource } from '@/lib/connectors/config-store';
 import { connectMCP, resolveServerConfig } from '@/lib/connectors/mcp-client';
 import { getConnector } from '@/lib/connectors/registry';
-import type { MCPClient } from '@/lib/connectors/types';
+import { isMCPConnector, type MCPClient } from '@/lib/connectors/types';
 
 export const dynamic = 'force-dynamic';
 // Creating an issue can stall on slow MCP transports — give it a wide window
@@ -110,6 +110,12 @@ export async function POST(
   let client: MCPClient | null = null;
   try {
     const connector = getConnector('jira');
+    if (!isMCPConnector(connector)) {
+      return NextResponse.json(
+        { ok: false, error: 'JIRA ticket creation requires an MCP connector' },
+        { status: 500 },
+      );
+    }
     const server = await resolveServerConfig(connector.serverId, 'jira', anomaly.workspace_id, process.env);
     if (!server) {
       return NextResponse.json(

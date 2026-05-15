@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import {
+  buildWorkspaceItemFilter,
+  getActiveWorkspaceId,
+} from '@/lib/active-workspace';
 
 interface ItemRow {
   id: string;
@@ -24,6 +28,9 @@ export async function GET(
     const { id } = await params;
     const db = getLibsqlDb();
 
+    const workspaceId = await getActiveWorkspaceId();
+    const filter = await buildWorkspaceItemFilter(workspaceId, 'wi');
+
     const items = await db
       .prepare(
         `SELECT wi.id, wi.source, wi.source_id, wi.item_type, wi.title,
@@ -31,11 +38,11 @@ export async function GET(
                 wi.created_at, wi.updated_at
          FROM work_items wi
          JOIN item_tags it ON it.item_id = wi.id
-         WHERE it.tag_id = ?
+         WHERE it.tag_id = ? AND ${filter.sql}
          ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC
          LIMIT 500`,
       )
-      .all<ItemRow>(id);
+      .all<ItemRow>(id, ...filter.params);
 
     return NextResponse.json({ items });
   } catch (error) {

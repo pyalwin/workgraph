@@ -91,22 +91,38 @@ export async function chunkAllPending(opts: { force?: boolean; limit?: number } 
   const limit = opts.limit ?? 100000;
   const force = opts.force ?? false;
 
-  const rows = await db
+  // Paginated load — pulling all candidate work_items (each up to 32KB
+  // body + metadata) in one query overflows libSQL's response cap.
+  // Step 1: collect candidate ids. Step 2: fetch full rows in batches.
+  const idRows = await db
     .prepare(
-      `SELECT wi.id, wi.source, wi.source_id, wi.item_type, wi.title, wi.body, wi.author, wi.url, wi.metadata, wi.created_at
-       FROM work_items wi
+      `SELECT wi.id FROM work_items wi
        ${force ? '' : 'LEFT JOIN item_chunks ic ON ic.item_id = wi.id WHERE ic.id IS NULL'}
        ORDER BY wi.created_at DESC
        LIMIT ?`,
     )
-    .all<WorkItemForChunking>(limit);
+    .all<{ id: string }>(limit);
 
+  const BATCH = 50;
+  let processed = 0;
   let chunks = 0;
-  for (const item of rows) {
-    const c = chunkItem(item);
-    if (c.length === 0) continue;
-    await persistChunks(item.id, c);
-    chunks += c.length;
+  for (let i = 0; i < idRows.length; i += BATCH) {
+    const batchIds = idRows.slice(i, i + BATCH).map((r) => r.id);
+    const placeholders = batchIds.map(() => '?').join(',');
+    const rows = await db
+      .prepare(
+        `SELECT wi.id, wi.source, wi.source_id, wi.item_type, wi.title, wi.body, wi.author, wi.url, wi.metadata, wi.created_at
+         FROM work_items wi
+         WHERE wi.id IN (${placeholders})`,
+      )
+      .all<WorkItemForChunking>(...batchIds);
+    for (const item of rows) {
+      const c = chunkItem(item);
+      processed += 1;
+      if (c.length === 0) continue;
+      await persistChunks(item.id, c);
+      chunks += c.length;
+    }
   }
-  return { items: rows.length, chunks };
+  return { items: processed, chunks };
 }

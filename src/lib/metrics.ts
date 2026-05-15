@@ -1,9 +1,22 @@
 import { v4 as uuid } from 'uuid';
 import { getLibsqlDb } from './db/libsql';
+import { buildWorkspaceItemFilter } from './active-workspace';
 
-export async function computeMetricsSnapshot(goalId: string): Promise<void> {
+/**
+ * Computes a metrics snapshot for a goal scoped to the given workspace.
+ *
+ * Although this function writes the snapshot row, the read aggregates that
+ * feed it must be workspace-scoped — otherwise a goal's totals would leak
+ * counts of work_items belonging to connectors not configured in this
+ * workspace.
+ */
+export async function computeMetricsSnapshot(
+  workspaceId: string,
+  goalId: string,
+): Promise<void> {
   const db = getLibsqlDb();
   const today = new Date().toISOString().split('T')[0];
+  const filter = await buildWorkspaceItemFilter(workspaceId, 'wi');
 
   const counts = (await db
     .prepare(
@@ -14,26 +27,33 @@ export async function computeMetricsSnapshot(goalId: string): Promise<void> {
         SUM(CASE WHEN wi.status = 'stale' THEN 1 ELSE 0 END) as stale
       FROM item_tags it
       JOIN work_items wi ON wi.id = it.item_id
-      WHERE it.tag_id = ?`,
+      WHERE it.tag_id = ? AND ${filter.sql}`,
     )
-    .get(goalId)) as any;
+    .get(goalId, ...filter.params)) as any;
 
   const linkCount = (await db
     .prepare(
       `SELECT COUNT(*) as c FROM links
-       WHERE source_item_id IN (SELECT item_id FROM item_tags WHERE tag_id = ?)
-          OR target_item_id IN (SELECT item_id FROM item_tags WHERE tag_id = ?)`,
+       WHERE source_item_id IN (
+              SELECT it.item_id FROM item_tags it
+              JOIN work_items wi ON wi.id = it.item_id
+              WHERE it.tag_id = ? AND ${filter.sql})
+          OR target_item_id IN (
+              SELECT it.item_id FROM item_tags it
+              JOIN work_items wi ON wi.id = it.item_id
+              WHERE it.tag_id = ? AND ${filter.sql})`,
     )
-    .get(goalId, goalId)) as any;
+    .get(goalId, ...filter.params, goalId, ...filter.params)) as any;
 
   const velocity = (await db
     .prepare(
       `SELECT COUNT(*) as c FROM work_items wi
        JOIN item_tags it ON it.item_id = wi.id
        WHERE it.tag_id = ? AND wi.status = 'done'
-         AND wi.updated_at >= datetime('now', '-7 days')`,
+         AND wi.updated_at >= datetime('now', '-7 days')
+         AND ${filter.sql}`,
     )
-    .get(goalId)) as any;
+    .get(goalId, ...filter.params)) as any;
 
   await db
     .prepare(
@@ -53,21 +73,31 @@ export async function computeMetricsSnapshot(goalId: string): Promise<void> {
     );
 }
 
-export async function computeAllMetrics(): Promise<void> {
+export async function computeAllMetrics(workspaceId: string): Promise<void> {
   const db = getLibsqlDb();
+  const filter = await buildWorkspaceItemFilter(workspaceId, 'wi');
   const goals = await db
-    .prepare("SELECT id FROM goals WHERE status = 'active'")
-    .all<{ id: string }>();
+    .prepare("SELECT id FROM goals WHERE workspace_id = ? AND status = 'active'")
+    .all<{ id: string }>(workspaceId);
   for (const g of goals) {
-    await computeMetricsSnapshot(g.id);
+    await computeMetricsSnapshot(workspaceId, g.id);
   }
 
   await db
     .prepare(
       `UPDATE goals SET
-        item_count = (SELECT COUNT(*) FROM item_tags WHERE tag_id = goals.id),
-        source_count = (SELECT COUNT(DISTINCT wi.source) FROM item_tags it JOIN work_items wi ON wi.id = it.item_id WHERE it.tag_id = goals.id),
-        updated_at = datetime('now')`,
+        item_count = (
+          SELECT COUNT(*) FROM item_tags it
+          JOIN work_items wi ON wi.id = it.item_id
+          WHERE it.tag_id = goals.id AND ${filter.sql}
+        ),
+        source_count = (
+          SELECT COUNT(DISTINCT wi.source) FROM item_tags it
+          JOIN work_items wi ON wi.id = it.item_id
+          WHERE it.tag_id = goals.id AND ${filter.sql}
+        ),
+        updated_at = datetime('now')
+       WHERE workspace_id = ?`,
     )
-    .run();
+    .run(...filter.params, ...filter.params, workspaceId);
 }

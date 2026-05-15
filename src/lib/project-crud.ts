@@ -112,6 +112,11 @@ export async function deleteProject(projectKey: string): Promise<boolean> {
   await db.prepare(`DELETE FROM project_connectors WHERE project_key = ?`).run(key);
   await db.prepare(`DELETE FROM project_github_configs WHERE project_key = ?`).run(key);
   await db.prepare(`DELETE FROM almanac_docs WHERE project_key = ?`).run(key);
+  // goals are workspace-scoped (Phase 3); deleting a project clears its
+  // OKRs across every workspace that may have rows for the same project_key.
+  // In practice a project_key is owned by one workspace so this is the same
+  // row set as before, but the explicit project_key match is the intended
+  // contract.
   await db.prepare(`DELETE FROM goals WHERE project_key = ?`).run(key);
   await db.prepare(`DELETE FROM project_summaries WHERE project_key = ?`).run(key);
 

@@ -5763,3 +5763,110 @@ body.theme-mono .item-priority { background: var(--bone-2); color: var(--ink-2);
     overflow-x: auto;
   }
 }
+
+/* ─── Legal pages (privacy, terms) ─────────────── */
+.legal-page {
+  min-height: 100vh;
+  background: var(--bg, #fbf9f4);
+  color: var(--ink-1, #1a1813);
+  display: flex;
+  flex-direction: column;
+}
+.legal-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 2rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  max-width: 880px;
+  margin: 0 auto;
+  width: 100%;
+}
+.legal-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+}
+.legal-brand-mark {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #1a1813;
+  color: #fbf9f4;
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+.legal-nav-links {
+  display: flex;
+  gap: 1.25rem;
+  font-size: 0.85rem;
+}
+.legal-nav-links a {
+  color: var(--ink-2, #4a4640);
+  text-decoration: none;
+}
+.legal-nav-links a:hover {
+  color: var(--ink-1, #1a1813);
+  text-decoration: underline;
+}
+.legal-prose {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 2.5rem 2rem 5rem;
+  width: 100%;
+  font-size: 0.95rem;
+  line-height: 1.62;
+}
+.legal-prose h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.4rem;
+}
+.legal-prose h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 2.2rem 0 0.6rem;
+  letter-spacing: -0.01em;
+}
+.legal-prose p,
+.legal-prose ul {
+  margin: 0 0 0.85rem;
+}
+.legal-prose ul {
+  padding-left: 1.4rem;
+}
+.legal-prose ul li {
+  margin-bottom: 0.35rem;
+}
+.legal-prose a {
+  color: #b04a1d;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal-prose a:hover {
+  color: #8c3a16;
+}
+.legal-prose strong {
+  font-weight: 600;
+  color: var(--ink-1, #1a1813);
+}
+.legal-meta {
+  color: var(--ink-3, #6c6862);
+  font-size: 0.82rem;
+  margin: 0 0 1.6rem;
+}
+.legal-disclaimer {
+  margin-top: 2.4rem;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.02);
+  color: var(--ink-3, #6c6862);
+  font-size: 0.82rem;
+  font-style: italic;
+}

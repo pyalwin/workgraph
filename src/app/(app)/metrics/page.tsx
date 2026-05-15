@@ -1,5 +1,9 @@
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import {
+  buildWorkspaceItemFilter,
+  getActiveWorkspaceId,
+} from '@/lib/active-workspace';
 import { MetricsClient, type GoalDisplay } from './metrics-client';
 
 export const dynamic = 'force-dynamic';
@@ -152,10 +156,12 @@ export default async function MetricsPage() {
   try {
     await ensureSchemaAsync();
     const db = getLibsqlDb();
+    const workspaceId = await getActiveWorkspaceId();
+    const filter = await buildWorkspaceItemFilter(workspaceId, 'wi');
 
     const totalItemsRow = await db
-      .prepare('SELECT COUNT(*) as c FROM work_items')
-      .get<{ c: number }>();
+      .prepare(`SELECT COUNT(*) as c FROM work_items wi WHERE ${filter.sql}`)
+      .get<{ c: number }>(...filter.params);
     totalItems = totalItemsRow?.c ?? 0;
 
     const goalRows = await db
@@ -168,12 +174,12 @@ export default async function MetricsPage() {
           SUM(CASE WHEN wi.updated_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) as velocity_7d
         FROM goals g
         LEFT JOIN item_tags it ON it.tag_id = g.id
-        LEFT JOIN work_items wi ON wi.id = it.item_id
-        WHERE g.status = 'active'
+        LEFT JOIN work_items wi ON wi.id = it.item_id AND ${filter.sql}
+        WHERE g.workspace_id = ? AND g.status = 'active'
         GROUP BY g.id
         ORDER BY g.sort_order`,
       )
-      .all<GoalRow>();
+      .all<GoalRow>(...filter.params, workspaceId);
 
     const perSourceRows = await db
       .prepare(
@@ -181,9 +187,10 @@ export default async function MetricsPage() {
          FROM goals g
          JOIN item_tags it ON it.tag_id = g.id
          JOIN work_items wi ON wi.id = it.item_id
+         WHERE g.workspace_id = ? AND ${filter.sql}
          GROUP BY g.id, wi.source`,
       )
-      .all<{ goal_id: string; source: string; count: number }>();
+      .all<{ goal_id: string; source: string; count: number }>(workspaceId, ...filter.params);
 
     const perSource = new Map<string, Record<string, number>>();
     for (const r of perSourceRows) {
@@ -202,11 +209,13 @@ export default async function MetricsPage() {
          FROM goals g
          JOIN item_tags it ON it.tag_id = g.id
          JOIN work_items wi ON wi.id = it.item_id
-         WHERE wi.updated_at >= datetime('now','-91 days')
+         WHERE g.workspace_id = ?
+           AND wi.updated_at >= datetime('now','-91 days')
+           AND ${filter.sql}
          GROUP BY g.id, week
          ORDER BY g.id, week`,
       )
-      .all<{ goal_id: string; week: string; c: number }>();
+      .all<{ goal_id: string; week: string; c: number }>(workspaceId, ...filter.params);
 
     const velByGoal = new Map<string, number[]>();
     for (const v of velocityRows) {
@@ -226,9 +235,10 @@ export default async function MetricsPage() {
          FROM goals g
          JOIN item_tags it ON it.tag_id = g.id
          JOIN work_items wi ON wi.id = it.item_id
+         WHERE g.workspace_id = ? AND ${filter.sql}
          ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC`,
       )
-      .all<HighlightRow & { goal_id: string }>();
+      .all<HighlightRow & { goal_id: string }>(workspaceId, ...filter.params);
 
     const highlightByGoal = new Map<string, HighlightRow[]>();
     for (const h of highlightRows) {

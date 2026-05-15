@@ -15,6 +15,7 @@ import { withAuth } from '@workos-inc/authkit-nextjs';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { getUserAliases, seedAliasesFromAuth } from '@/lib/sync/identity';
+import { buildWorkspaceItemFilter } from '@/lib/active-workspace';
 
 const PRIORITY_ORDER: Record<string, number> = { p0: 0, p1: 1, p2: 2, p3: 3 };
 
@@ -59,6 +60,7 @@ interface OpenAnomaly {
 
 async function gatherTracker(workspaceId: string, authUserId: string) {
   const db = getLibsqlDb();
+  const filter = await buildWorkspaceItemFilter(workspaceId, 'wi');
 
   const myItems = await db
     .prepare(
@@ -70,10 +72,11 @@ async function gatherTracker(workspaceId: string, authUserId: string) {
        WHERE wi.source = 'jira'
          AND wi.status IN ('active','open')
          AND json_extract(wi.metadata, '$.is_mine') = 1
+         AND ${filter.sql}
        ORDER BY COALESCE(wi.updated_at, wi.created_at) DESC
        LIMIT 50`,
     )
-    .all<OpenItem>();
+    .all<OpenItem>(...filter.params);
 
   myItems.sort((a, b) => {
     const pa = PRIORITY_ORDER[a.ai_priority ?? 'p3'] ?? 3;
@@ -93,11 +96,12 @@ async function gatherTracker(workspaceId: string, authUserId: string) {
          JOIN work_items wi ON wi.id = ai.source_item_id
          WHERE ai.state = 'open'
            AND LOWER(COALESCE(ai.assignee, '')) IN (${placeholders})
+           AND ${filter.sql}
          ORDER BY COALESCE(ai.user_priority, ai.ai_priority, 'p9') ASC,
                   ai.due_at ASC NULLS LAST
          LIMIT 20`,
       )
-      .all<OpenActionItem>(...aliases);
+      .all<OpenActionItem>(...aliases, ...filter.params);
   }
 
   const ownedGoals = await db
@@ -105,14 +109,17 @@ async function gatherTracker(workspaceId: string, authUserId: string) {
       `SELECT g.id, g.name, g.target_metric, g.target_value, g.target_at,
               g.ai_confidence, g.derived_from,
               (SELECT COUNT(*) FROM item_tags it JOIN work_items wi ON wi.id = it.item_id
-                 WHERE it.tag_id = g.id AND wi.status IN ('done','closed','resolved')) AS done_count,
-              (SELECT COUNT(*) FROM item_tags it WHERE it.tag_id = g.id) AS total_count
+                 WHERE it.tag_id = g.id AND wi.status IN ('done','closed','resolved')
+                   AND ${filter.sql}) AS done_count,
+              (SELECT COUNT(*) FROM item_tags it JOIN work_items wi ON wi.id = it.item_id
+                 WHERE it.tag_id = g.id AND ${filter.sql}) AS total_count
        FROM goals g
-       WHERE g.owner_user_id = ?
+       WHERE g.workspace_id = ?
+         AND g.owner_user_id = ?
          AND g.status = 'active'
        ORDER BY g.target_at ASC NULLS LAST`,
     )
-    .all<OwnedGoal>(authUserId);
+    .all<OwnedGoal>(...filter.params, ...filter.params, workspaceId, authUserId);
 
   const openAnomalies = await db
     .prepare(

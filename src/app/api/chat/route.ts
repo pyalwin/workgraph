@@ -8,7 +8,8 @@ import {
   type UIMessage,
 } from 'ai';
 import { getModel } from '@/lib/ai';
-import { chatTools } from '@/lib/ai/chat-tools';
+import { buildChatTools } from '@/lib/ai/chat-tools';
+import { getActiveWorkspaceId } from '@/lib/active-workspace';
 import { getOpenUIPrompt } from '@/lib/ai/openui-prompt';
 import { getCliBackend, type BackendId } from '@/lib/ai/cli-backends';
 import {
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
   };
   const messages = body.messages;
   const backendId: BackendId = body.backend ?? 'sdk';
+  const workspaceId = await getActiveWorkspaceId();
 
   // Resolve thread: reuse existing, or auto-create on first turn. When the
   // client provides an id that doesn't exist yet, create the row WITH that
@@ -82,12 +84,12 @@ export async function POST(req: NextRequest) {
   let threadId = body.id;
   let isNewThread = false;
   if (threadId) {
-    if (!(await getChatThread(threadId))) {
-      await createChatThread(undefined, threadId);
+    if (!(await getChatThread(workspaceId, threadId))) {
+      await createChatThread(workspaceId, undefined, threadId);
       isNewThread = true;
     }
   } else {
-    threadId = (await createChatThread()).id;
+    threadId = (await createChatThread(workspaceId)).id;
     isNewThread = true;
   }
 
@@ -131,12 +133,40 @@ export async function POST(req: NextRequest) {
         writer.write({ type: 'start' });
         writer.write({ type: 'start-step' });
         try {
+          // Bridge Workgraph data tools into the CLI session via MCP.
+          // The /api/mcp endpoint exposes the same tools the SDK chat uses
+          // (countItems, listItems, searchKnowledge, etc.) under MCP, so
+          // Claude Code can reach the workspace data without leaving its
+          // session. Skipped if origin can't be derived (rare).
+          const origin = req.headers.get('origin')
+            || (req.headers.get('host') ? `http://${req.headers.get('host')}` : null);
+          const mcpServers = origin
+            ? {
+                workgraph: {
+                  type: 'http' as const,
+                  url: `${origin}/api/mcp`,
+                  // Workspace context for the MCP endpoint — the CLI
+                  // subprocess has no session cookies, so we tunnel the
+                  // workspace id through a header the route honors.
+                  headers: { 'X-Workspace-Id': workspaceId },
+                },
+              }
+            : undefined;
+          if (mcpServers) {
+            console.log(`[chat] bridging MCP → ${mcpServers.workgraph.url} workspace=${workspaceId}`);
+          } else {
+            console.warn('[chat] no origin/host header — MCP bridge skipped; CLI will not see workgraph tools');
+          }
+
           for await (const evt of backend.stream({
             prompt: transcript,
-            systemPrompt: SYSTEM_PROMPT,
+            systemPrompt: SYSTEM_PROMPT + (mcpServers
+              ? '\n\nTOOL ACCESS\n- You have a Workgraph MCP server attached as `workgraph`. Use its tools (countItems, listItems, searchKnowledge, getById, listProjects, listDecisions, runQuery, etc.) to query workspace data. For any data question — emails, meetings, PRs, tickets, decisions — call the matching MCP tool first; do not answer "I don\'t have access" without trying a tool call.'
+              : ''),
             cwd: process.cwd(),
             model: body.model,
             signal: req.signal,
+            mcpServers,
           })) {
             if (evt.type === 'text-delta') {
               ensureTextStarted();
@@ -163,10 +193,10 @@ export async function POST(req: NextRequest) {
       },
       onFinish: async ({ messages: finalMessages }) => {
         try {
-          await replaceChatMessages(threadId!, finalMessages);
+          await replaceChatMessages(workspaceId, threadId!, finalMessages);
           if (isNewThread) {
             const title = deriveThreadTitle(finalMessages);
-            if (title) await renameChatThread(threadId!, title);
+            if (title) await renameChatThread(workspaceId, threadId!, title);
           }
         } catch (err) {
           console.error('[chat] persist failed:', (err as Error).message);
@@ -184,7 +214,7 @@ export async function POST(req: NextRequest) {
     model: getModel('chat'),
     system: SYSTEM_PROMPT,
     messages: modelMessages,
-    tools: chatTools,
+    tools: buildChatTools(workspaceId),
     stopWhen: stepCountIs(25),
   });
 
@@ -192,10 +222,10 @@ export async function POST(req: NextRequest) {
     originalMessages: messages,
     onFinish: async ({ messages: finalMessages }) => {
       try {
-        await replaceChatMessages(threadId!, finalMessages);
+        await replaceChatMessages(workspaceId, threadId!, finalMessages);
         if (isNewThread) {
           const title = deriveThreadTitle(finalMessages);
-          if (title) await renameChatThread(threadId!, title);
+          if (title) await renameChatThread(workspaceId, threadId!, title);
         }
       } catch (err) {
         console.error('[chat] persist failed:', (err as Error).message);

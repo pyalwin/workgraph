@@ -23,6 +23,7 @@ import { v4 as uuid } from 'uuid';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
 import { getConnector } from '../connectors/registry';
+import { isMCPConnector } from '../connectors/types';
 
 let _initPromise: Promise<void> | null = null;
 async function ensureInit(): Promise<void> {
@@ -525,6 +526,9 @@ export async function runGithubTrailsSync(
   }
 
   const connector = getConnector('github');
+  if (!isMCPConnector(connector)) {
+    throw new Error('GitHub connector must be MCP');
+  }
   const server = await resolveServerConfig(connector.serverId, 'github', workspaceId, process.env);
   if (!server) {
     return {

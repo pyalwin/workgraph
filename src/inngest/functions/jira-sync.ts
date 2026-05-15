@@ -211,9 +211,9 @@ export const jiraSyncWorkspace = inngest.createFunction(
         const hasOkrs = await db
           .prepare(
             `SELECT COUNT(*) AS c FROM goals
-             WHERE project_key = ? AND kind='objective' AND derived_from='ai_okr' AND status='active'`,
+             WHERE project_key = ? AND workspace_id = ? AND kind='objective' AND derived_from='ai_okr' AND status='active'`,
           )
-          .get<{ c: number }>(projectKey);
+          .get<{ c: number }>(projectKey, workspaceId);
         if (hasOkrs && hasOkrs.c === 0) out.push(projectKey);
       }
       return out;

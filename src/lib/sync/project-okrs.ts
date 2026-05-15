@@ -199,7 +199,7 @@ interface PersistedOKR {
   keyResultIds: string[];
 }
 
-async function persist(projectKey: string, projectName: string, okrs: OKRs): Promise<PersistedOKR[]> {
+async function persist(workspaceId: string, projectKey: string, projectName: string, okrs: OKRs): Promise<PersistedOKR[]> {
   const db = getLibsqlDb();
 
   // Wipe AI-generated OKRs for this project so we start fresh. User-
@@ -207,27 +207,31 @@ async function persist(projectKey: string, projectName: string, okrs: OKRs): Pro
   // suggested them originally and the user has since edited them.
   const aiObjectiveRows = await db
     .prepare(
-      `SELECT id FROM goals WHERE project_key = ? AND kind='objective' AND derived_from='ai_okr'`,
+      `SELECT id FROM goals WHERE project_key = ? AND workspace_id = ? AND kind='objective' AND derived_from='ai_okr'`,
     )
-    .all<{ id: string }>(projectKey);
+    .all<{ id: string }>(projectKey, workspaceId);
   const aiObjectiveIds = aiObjectiveRows.map((r) => r.id);
 
   if (aiObjectiveIds.length > 0) {
     const placeholders = aiObjectiveIds.map(() => '?').join(',');
     await db
-      .prepare(`DELETE FROM goals WHERE parent_id IN (${placeholders}) AND derived_from='ai_okr'`)
-      .run(...aiObjectiveIds);
+      .prepare(
+        `DELETE FROM goals WHERE parent_id IN (${placeholders}) AND derived_from='ai_okr' AND workspace_id = ?`,
+      )
+      .run(...aiObjectiveIds, workspaceId);
     await db
-      .prepare(`DELETE FROM goals WHERE id IN (${placeholders}) AND derived_from='ai_okr'`)
-      .run(...aiObjectiveIds);
+      .prepare(
+        `DELETE FROM goals WHERE id IN (${placeholders}) AND derived_from='ai_okr' AND workspace_id = ?`,
+      )
+      .run(...aiObjectiveIds, workspaceId);
   }
 
   const insertSql = `
     INSERT INTO goals (
       id, name, description, status, origin, kind, parent_id,
       project_key, target_metric, target_value, target_at,
-      ai_confidence, derived_from, keywords
-    ) VALUES (?, ?, ?, 'active', 'inferred', ?, ?, ?, ?, ?, ?, ?, 'ai_okr', '[]')`;
+      ai_confidence, derived_from, keywords, workspace_id
+    ) VALUES (?, ?, ?, 'active', 'inferred', ?, ?, ?, ?, ?, ?, ?, 'ai_okr', '[]', ?)`;
 
   const out: PersistedOKR[] = [];
   for (const obj of okrs.objectives) {
@@ -243,6 +247,7 @@ async function persist(projectKey: string, projectName: string, okrs: OKRs): Pro
       null,
       null,
       0.8,
+      workspaceId,
     );
 
     const krIds: string[] = [];
@@ -259,6 +264,7 @@ async function persist(projectKey: string, projectName: string, okrs: OKRs): Pro
         kr.target_value,
         kr.target_at,
         0.75,
+        workspaceId,
       );
       krIds.push(krId);
     }
@@ -293,7 +299,8 @@ export async function generateProjectOKRs(
     return { ok: false, reason: (err as Error).message };
   }
 
-  const persisted = await persist(projectKey, ctx.projectName, result);
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
+  const persisted = await persist(workspaceId, projectKey, ctx.projectName, result);
   return {
     ok: true,
     objectives: persisted.length,
@@ -324,11 +331,12 @@ export interface ProjectKeyResult {
 export async function getProjectOKRs(projectKey: string): Promise<ProjectOKR[]> {
   await ensureInit();
   const db = getLibsqlDb();
+  const workspaceId = await resolveAlmanacWorkspaceId(projectKey);
   const objectives = await db
     .prepare(
       `SELECT id, name, description, ai_confidence, derived_from
        FROM goals
-       WHERE project_key = ? AND kind = 'objective' AND status = 'active'
+       WHERE project_key = ? AND workspace_id = ? AND kind = 'objective' AND status = 'active'
        ORDER BY created_at ASC`,
     )
     .all<{
@@ -337,14 +345,14 @@ export async function getProjectOKRs(projectKey: string): Promise<ProjectOKR[]> 
       description: string | null;
       ai_confidence: number | null;
       derived_from: string;
-    }>(projectKey);
+    }>(projectKey, workspaceId);
 
   if (objectives.length === 0) return [];
 
   const krSql = `SELECT id, name, description, target_metric, target_value, target_at,
             ai_confidence, derived_from
      FROM goals
-     WHERE parent_id = ? AND kind = 'key_result' AND status = 'active'
+     WHERE parent_id = ? AND workspace_id = ? AND kind = 'key_result' AND status = 'active'
      ORDER BY created_at ASC`;
 
   const out: ProjectOKR[] = [];
@@ -358,7 +366,7 @@ export async function getProjectOKRs(projectKey: string): Promise<ProjectOKR[]> 
       target_at: string | null;
       ai_confidence: number | null;
       derived_from: string;
-    }>(o.id);
+    }>(o.id, workspaceId);
     out.push({
       id: o.id,
       title: o.name,

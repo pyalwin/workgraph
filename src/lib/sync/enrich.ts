@@ -1,7 +1,6 @@
-import { generateText } from 'ai';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
-import { getModel } from '../ai';
+import { runPrompt } from '../ai/runner';
 import { getWorkspaceConfigCached, seedWorkspaceConfig } from '../workspace-config';
 
 export type TraceRole = string | null;
@@ -35,12 +34,14 @@ async function ensureInit(): Promise<void> {
   return _initPromise;
 }
 
-async function buildSystemPrompt(): Promise<string> {
+async function buildSystemPrompt(workspaceId: string): Promise<string> {
   const db = getLibsqlDb();
   const config = getWorkspaceConfigCached();
   const goals = await db
-    .prepare("SELECT id, name, description FROM goals WHERE status = 'active' ORDER BY sort_order")
-    .all<{ id: string; name: string; description: string }>();
+    .prepare(
+      "SELECT id, name, description FROM goals WHERE workspace_id = ? AND status = 'active' ORDER BY sort_order",
+    )
+    .all<{ id: string; name: string; description: string }>(workspaceId);
 
   const goalList = goals.map((g) => `- "${g.id}": ${g.name} — ${g.description}`).join('\n');
   const stages = config.lifecycle.stages
@@ -101,8 +102,11 @@ async function callHaiku(
   ].filter(Boolean).join('\n\n');
 
   try {
-    const { text: rawText } = await generateText({
-      model: getModel('enrich'),
+    // Route through runPrompt so Settings → AI → Task routing applies. When
+    // 'enrich' is set to Claude Code, this spawns the local claude CLI
+    // (subscription-billed) instead of burning the Vercel Gateway free tier.
+    const { text: rawText } = await runPrompt({
+      task: 'enrich',
       maxOutputTokens: 600,
       system: systemPrompt,
       prompt: content,
@@ -132,7 +136,9 @@ async function callHaiku(
       goals: Array.isArray(parsed.goals) ? parsed.goals.map((g: unknown) => String(g)) : [],
     };
   } catch (err: any) {
-    console.error(`  Haiku error: ${err.message}`);
+    // Includes the routed backend in the message so the operator can tell
+    // whether SDK quota or CLI failure caused it.
+    console.error(`  enrich error: ${err.message}`);
     return null;
   }
 }
@@ -145,17 +151,32 @@ function normalizeEnum<T extends string>(value: unknown, allowed: ReadonlyArray<
   return hit ?? null;
 }
 
-async function storeTags(itemId: string, category: string, names: string[], confidence: number = 1.0): Promise<void> {
+async function storeTags(workspaceId: string, itemId: string, category: string, names: string[], confidence: number = 1.0): Promise<void> {
   const db = getLibsqlDb();
   for (const name of names) {
     if (!name || name.length < 2) continue;
     const normalized = name.toLowerCase().trim();
-    const tagId = `${category}:${normalized}`;
+    const tagId = `${workspaceId}:${category}:${normalized}`;
     const existing = await db.prepare('SELECT id FROM tags WHERE id = ?').get<{ id: string }>(tagId);
     if (!existing) {
-      await db
-        .prepare('INSERT INTO tags (id, name, category) VALUES (?, ?, ?)')
-        .run(tagId, normalized, category);
+      try {
+        await db
+          .prepare('INSERT INTO tags (id, name, category, workspace_id) VALUES (?, ?, ?, ?)')
+          .run(tagId, normalized, category, workspaceId);
+      } catch {
+        // UNIQUE(name, category) collision with another workspace's tag.
+        // Fall back to the legacy shared id and stamp workspace.
+        const fallback = `${category}:${normalized}`;
+        await db
+          .prepare(
+            `INSERT OR IGNORE INTO tags (id, name, category, workspace_id) VALUES (?, ?, ?, ?)`,
+          )
+          .run(fallback, normalized, category, workspaceId);
+        await db
+          .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, ?)')
+          .run(itemId, fallback, confidence);
+        continue;
+      }
     }
     await db
       .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, ?)')
@@ -163,7 +184,7 @@ async function storeTags(itemId: string, category: string, names: string[], conf
   }
 }
 
-async function storeGoalTags(itemId: string, goalIds: string[]): Promise<void> {
+async function storeGoalTags(workspaceId: string, itemId: string, goalIds: string[]): Promise<void> {
   const db = getLibsqlDb();
   await db
     .prepare(
@@ -171,21 +192,21 @@ async function storeGoalTags(itemId: string, goalIds: string[]): Promise<void> {
     )
     .run(itemId);
   const activeGoals = await db
-    .prepare("SELECT id FROM goals WHERE status = 'active'")
-    .all<{ id: string }>();
+    .prepare("SELECT id FROM goals WHERE workspace_id = ? AND status = 'active'")
+    .all<{ id: string }>(workspaceId);
   for (const g of activeGoals) {
     await db.prepare('DELETE FROM item_tags WHERE item_id = ? AND tag_id = ?').run(itemId, g.id);
   }
   for (const goalId of goalIds) {
     const goal = await db
-      .prepare('SELECT name FROM goals WHERE id = ?')
-      .get<{ name: string }>(goalId);
+      .prepare('SELECT name FROM goals WHERE id = ? AND workspace_id = ?')
+      .get<{ name: string }>(goalId, workspaceId);
     if (!goal) continue;
     const existing = await db.prepare('SELECT id FROM tags WHERE id = ?').get<{ id: string }>(goalId);
     if (!existing) {
       await db
-        .prepare(`INSERT INTO tags (id, name, category) VALUES (?, ?, 'goal')`)
-        .run(goalId, goal.name);
+        .prepare(`INSERT INTO tags (id, name, category, workspace_id) VALUES (?, ?, 'goal', ?)`)
+        .run(goalId, goal.name, workspaceId);
     }
     await db
       .prepare('INSERT OR IGNORE INTO item_tags (item_id, tag_id, confidence) VALUES (?, ?, 1.0)')
@@ -212,7 +233,7 @@ function computeTraceEventAt(item: {
   return item.created_at;
 }
 
-export async function enrichItem(itemId: string, systemPrompt: string): Promise<boolean> {
+export async function enrichItem(workspaceId: string, itemId: string, systemPrompt: string): Promise<boolean> {
   const db = getLibsqlDb();
   const item = (await db
     .prepare(
@@ -235,20 +256,25 @@ export async function enrichItem(itemId: string, systemPrompt: string): Promise<
     )
     .run(result.summary, result.trace_role, result.substance, traceEventAt, itemId);
 
-  await storeTags(itemId, 'topic', result.topics);
-  await storeTags(itemId, 'entity', result.entities);
-  await storeGoalTags(itemId, result.goals);
+  await storeTags(workspaceId, itemId, 'topic', result.topics);
+  await storeTags(workspaceId, itemId, 'entity', result.entities);
+  await storeGoalTags(workspaceId, itemId, result.goals);
 
   return true;
 }
 
 export async function enrichAll(
-  options: { limit?: number; force?: boolean; concurrency?: number } = {},
+  options: { workspaceId?: string; limit?: number; force?: boolean; concurrency?: number } = {},
 ): Promise<{ enriched: number; failed: number; total: number }> {
   await ensureInit();
   await seedWorkspaceConfig();
   const db = getLibsqlDb();
 
+  // Default to 'default' workspace when not provided — preserves the prior
+  // behavior of CLI scripts (process.ts, enrich.ts) that don't carry
+  // workspace context. Inngest sync paths that DO know the workspace pass
+  // it through enrichItemFully (the rich variant) instead.
+  const workspaceId = options.workspaceId ?? 'default';
   const limit = options.limit ?? 1000;
   const concurrency = options.concurrency ?? 5;
   const whereClause = options.force ? '' : 'WHERE enriched_at IS NULL';
@@ -263,7 +289,7 @@ export async function enrichAll(
     return { enriched: 0, failed: 0, total: 0 };
   }
 
-  const systemPrompt = await buildSystemPrompt();
+  const systemPrompt = await buildSystemPrompt(workspaceId);
   const result = { enriched: 0, failed: 0, total: items.length };
 
   for (let i = 0; i < items.length; i += concurrency) {
@@ -271,7 +297,7 @@ export async function enrichAll(
     const promises = batch.map(async (item, j) => {
       const idx = i + j + 1;
       process.stdout.write(`  [${idx}/${items.length}] ${item.title.slice(0, 55)}...`);
-      const success = await enrichItem(item.id, systemPrompt);
+      const success = await enrichItem(workspaceId, item.id, systemPrompt);
       console.log(success ? ' OK' : ' FAIL');
       return success;
     });

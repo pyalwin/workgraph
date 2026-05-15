@@ -9,6 +9,7 @@ import { getConnector, listConnectors } from '../src/lib/connectors/registry';
 import { runConnector, lastSyncedAt } from '../src/lib/connectors/runner';
 import { connectMCP, resolveServerConfig, type MCPClient } from '../src/lib/connectors/mcp-client';
 import { getConnectorConfigBySource } from '../src/lib/connectors/config-store';
+import { isMCPConnector } from '../src/lib/connectors/types';
 
 interface CliFlags {
   source: string | null;
@@ -89,7 +90,8 @@ async function main() {
 
   if (flags.list) {
     for (const c of listConnectors()) {
-      console.log(`${c.source.padEnd(12)} ${c.label.padEnd(28)} server=${c.serverId}`);
+      const server = isMCPConnector(c) ? c.serverId : `direct(${(c as { oauthProvider: string }).oauthProvider})`;
+      console.log(`${c.source.padEnd(12)} ${c.label.padEnd(28)} server=${server}`);
     }
     return;
   }
@@ -100,6 +102,10 @@ async function main() {
   }
 
   const connector = getConnector(flags.source);
+  if (!isMCPConnector(connector)) {
+    console.error(`[sync-mcp] ${connector.source} is a direct-API connector — sync-mcp only handles MCP connectors. Use the workspace UI or the direct-API runner.`);
+    process.exit(2);
+  }
 
   // Pull the saved per-workspace options (owner, username, etc.) so adapters
   // can read them from ctx.options without each one needing env vars.

@@ -1,4 +1,4 @@
-import type { MCPConnector } from './types';
+import type { Connector } from './types';
 import { atlassianConnector } from './adapters/atlassian';
 import { linearConnector } from './adapters/linear';
 import { notionConnector } from './adapters/notion';
@@ -10,8 +10,9 @@ import { slackConnector } from './adapters/slack';
 import { teamsConnector } from './adapters/teams';
 import { confluenceConnector } from './adapters/confluence';
 import { gcalConnector } from './adapters/gcal';
+import { gmailConnector } from './adapters/gmail';
 
-export const connectors: Record<string, MCPConnector> = {
+export const connectors: Record<string, Connector> = {
   jira: atlassianConnector,
   atlassian: atlassianConnector, // alias
   linear: linearConnector,
@@ -25,9 +26,10 @@ export const connectors: Record<string, MCPConnector> = {
   teams: teamsConnector,
   confluence: confluenceConnector,
   gcal: gcalConnector,
+  gmail: gmailConnector,
 };
 
-export function getConnector(key: string): MCPConnector {
+export function getConnector(key: string): Connector {
   const connector = connectors[key.toLowerCase()];
   if (!connector) {
     const available = Object.keys(connectors).join(', ');
@@ -36,9 +38,9 @@ export function getConnector(key: string): MCPConnector {
   return connector;
 }
 
-export function listConnectors(): MCPConnector[] {
+export function listConnectors(): Connector[] {
   // Dedup by reference (since aliases share the same object)
-  const seen = new Set<MCPConnector>();
+  const seen = new Set<Connector>();
   for (const c of Object.values(connectors)) seen.add(c);
   return Array.from(seen);
 }

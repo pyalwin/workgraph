@@ -788,7 +788,11 @@ function createVectorTables() {
 
 export function seedGoals() {
   const db = getDb();
-  const existing = db.prepare('SELECT COUNT(*) as c FROM goals').get() as { c: number };
+  // Phase 3: seed only the default workspace. Other workspaces start with
+  // zero goals; a fresh workspace must not see this default-workspace seed.
+  const existing = db
+    .prepare("SELECT COUNT(*) as c FROM goals WHERE workspace_id = 'default'")
+    .get() as { c: number };
   if (existing.c > 0) return;
 
   const goals = [
@@ -799,9 +803,9 @@ export function seedGoals() {
     { id: 'onboarding', name: 'Onboarding', description: 'Login revamp, passkeys, onboarding flow, time-to-value', keywords: JSON.stringify(['login','passkey','onboarding','time-to-value','signup','totp','welcome','implementation','account setup']), sort_order: 5 },
   ];
 
-  const insert = db.prepare('INSERT INTO goals (id, name, description, keywords, status, origin, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  const insert = db.prepare('INSERT INTO goals (id, name, description, keywords, status, origin, sort_order, workspace_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
   for (const g of goals) {
-    insert.run(g.id, g.name, g.description, g.keywords, 'active', 'inferred', g.sort_order);
+    insert.run(g.id, g.name, g.description, g.keywords, 'active', 'inferred', g.sort_order, 'default');
   }
 }
 

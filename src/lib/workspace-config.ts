@@ -174,6 +174,7 @@ export const DEFAULT_WORKSPACE_CONFIG: WorkspaceConfig = {
     gdrive: { kind: 'document', label: 'Google Drive' },
     confluence: { kind: 'document', label: 'Confluence' },
     gcal: { kind: 'meeting', label: 'Google Calendar' },
+    pipeline: { kind: 'pipeline', label: 'Pipeline' },
   },
   sourceMappings: {
     jira: { project: 'tracker_project', component: 'capability', label: 'capability', assignee: 'actor', reporter: 'actor' },
@@ -183,7 +184,7 @@ export const DEFAULT_WORKSPACE_CONFIG: WorkspaceConfig = {
     github: { repo: 'system', author: 'actor', pull_request: 'artifact', commit: 'artifact' },
     meeting: { organizer: 'actor', participant: 'actor' },
     notion: { workspace: 'organization', page: 'artifact' },
-    gmail: { sender: 'actor', thread: 'communication_space' },
+    gmail: { sender: 'actor', recipient: 'actor', thread: 'communication_space', attachment: 'artifact' },
     gdrive: { owner: 'actor', folder: 'communication_space', file: 'artifact' },
   },
   linking: {
@@ -217,6 +218,98 @@ const ENGINEERING_UI: WorkspaceUiConfig = {
     source: 'Source', sources: 'Sources', searchPlaceholder: 'Search projects, tickets, PRs, decisions...',
   },
 };
+
+const FOUNDER_UI: WorkspaceUiConfig = {
+  menu: [
+    { id: 'overview', label: 'Today', href: '/dashboard', module: 'overview' },
+    { id: 'deals', label: 'Deals', href: '/tables/deals', module: 'deals' },
+    { id: 'investors', label: 'Investors', href: '/tables/investors', module: 'investors' },
+    { id: 'people', label: 'People', href: '/tables/people', module: 'people' },
+    { id: 'projects', label: 'Threads', href: '/projects', module: 'projects' },
+    { id: 'knowledge', label: 'Knowledge', href: '/knowledge', module: 'knowledge' },
+    { id: 'goals', label: 'Bets', href: '/metrics', module: 'goals' },
+  ],
+  roles: [
+    { id: 'founder', label: 'Founder/CEO', description: 'Sets direction and runs the company', primarySource: 'Gmail' },
+    { id: 'cofounder', label: 'Co-founder', description: 'Co-leads the company', primarySource: 'Gmail' },
+    { id: 'ea', label: 'Chief of Staff / EA', description: 'Manages founder operations and inbox', primarySource: 'Gmail' },
+  ],
+  terminology: {
+    goal: 'Bet', goals: 'Bets',
+    project: 'Thread', projects: 'Threads',
+    decision: 'Decision', decisions: 'Decisions',
+    artifact: 'Document', artifacts: 'Documents',
+    source: 'Source', sources: 'Sources',
+    searchPlaceholder: 'Search emails, meetings, deals, investors, people...',
+  },
+};
+
+const FOUNDER_CUSTOM_TABLES: CustomTableConfig[] = [
+  {
+    id: 'deals',
+    label: 'Deals',
+    module: 'deals',
+    columns: [
+      { name: 'id', type: 'text', required: true, primaryKey: true },
+      { name: 'name', type: 'text', required: true },
+      { name: 'domain', type: 'text', indexed: true },
+      { name: 'stage', type: 'text' },
+      { name: 'amount', type: 'real' },
+      { name: 'owner', type: 'text' },
+      { name: 'primary_contact', type: 'text' },
+      { name: 'next_step', type: 'text' },
+      { name: 'next_step_due', type: 'datetime' },
+      { name: 'last_touch', type: 'datetime' },
+      { name: 'created_at', type: 'datetime' },
+      { name: 'notes', type: 'text' },
+    ],
+  },
+  {
+    id: 'investors',
+    label: 'Investors',
+    module: 'investors',
+    columns: [
+      { name: 'id', type: 'text', required: true, primaryKey: true },
+      { name: 'firm', type: 'text', required: true },
+      { name: 'partner', type: 'text' },
+      { name: 'partner_email', type: 'text', indexed: true },
+      { name: 'round', type: 'text' },
+      { name: 'stage', type: 'text' },
+      { name: 'check_size', type: 'real' },
+      { name: 'lead', type: 'boolean' },
+      { name: 'last_touch', type: 'datetime' },
+      { name: 'next_step', type: 'text' },
+      { name: 'created_at', type: 'datetime' },
+      { name: 'notes', type: 'text' },
+    ],
+  },
+  {
+    id: 'people',
+    label: 'People',
+    module: 'people',
+    // Broader than candidates — covers current team, candidates, advisors,
+    // contractors, mentors, alumni, etc. The relationship column slices
+    // the table into the founder's mental categories without forcing
+    // multiple tables for what's structurally the same shape (a person
+    // + email + history). Stage semantics shift with relationship:
+    // candidates use the sourcing→offer pipeline, team uses active/leave,
+    // advisors use active/inactive, etc.
+    columns: [
+      { name: 'id', type: 'text', required: true, primaryKey: true },
+      { name: 'name', type: 'text', required: true },
+      { name: 'email', type: 'text', indexed: true },
+      { name: 'relationship', type: 'text', indexed: true },
+      { name: 'role', type: 'text' },
+      { name: 'stage', type: 'text' },
+      { name: 'referrer', type: 'text' },
+      { name: 'start_date', type: 'datetime' },
+      { name: 'compensation', type: 'text' },
+      { name: 'last_touch', type: 'datetime' },
+      { name: 'created_at', type: 'datetime' },
+      { name: 'notes', type: 'text' },
+    ],
+  },
+];
 
 function mergeWorkspaceConfig(raw: Partial<WorkspaceConfig> | null | undefined): WorkspaceConfig {
   if (!raw) return DEFAULT_WORKSPACE_CONFIG;
@@ -364,10 +457,40 @@ export async function listWorkspaceConfigs(): Promise<WorkspaceConfig[]> {
   });
 }
 
+/**
+ * Lists workspaces visible to a given authenticated user. Returns
+ * workspaces owned by the user (auth_user_id matches). Unclaimed
+ * workspaces (auth_user_id IS NULL) are NOT included — they would
+ * otherwise leak across users on shared deployments. Use
+ * getUserWorkspaceId() if you need first-time claim semantics.
+ */
+export async function listWorkspaceConfigsForUser(authUserId: string): Promise<WorkspaceConfig[]> {
+  await ensureInit();
+  const rows = await getLibsqlDb()
+    .prepare('SELECT id, config, enabled FROM workspace_config WHERE auth_user_id = ? ORDER BY id')
+    .all<{ id: string; config: string; enabled: number }>(authUserId);
+  return rows.map((row) => {
+    try {
+      const parsed = JSON.parse(row.config) as Partial<WorkspaceConfig>;
+      const cfg = mergeWorkspaceConfig({ ...parsed, enabled: row.enabled === 1 });
+      cache.set(row.id, cfg);
+      return cfg;
+    } catch {
+      return DEFAULT_WORKSPACE_CONFIG;
+    }
+  });
+}
+
 export async function createWorkspaceConfig(input: {
   name: string;
   preset?: string;
   modules?: Record<string, boolean>;
+  /**
+   * WorkOS user id of the workspace owner. When provided, the workspace is
+   * stamped with this id so it counts toward the user's "one workspace"
+   * limit and is filtered to only this user in list endpoints.
+   */
+  authUserId?: string | null;
 }): Promise<WorkspaceConfig> {
   await ensureInit();
   const db = getLibsqlDb();
@@ -386,22 +509,45 @@ export async function createWorkspaceConfig(input: {
   const preset = input.preset || 'custom-workspace';
   const presetUi = uiForPreset(preset);
   const presetModules = modulesForPreset(preset);
+  const presetCustomTables = customTablesForPreset(preset);
   const config = mergeWorkspaceConfig({
     ...DEFAULT_WORKSPACE_CONFIG,
     id,
     name: input.name.trim(),
     preset,
     enabled: true,
-    customTables: DEFAULT_WORKSPACE_CONFIG.customTables,
+    customTables: presetCustomTables,
     modules: { ...presetModules, ...(input.modules ?? {}) },
     ui: presetUi,
   });
 
-  await db
-    .prepare('INSERT INTO workspace_config (id, config, enabled) VALUES (?, ?, 1)')
-    .run(id, JSON.stringify(config));
+  if (input.authUserId) {
+    await db
+      .prepare('INSERT INTO workspace_config (id, config, enabled, auth_user_id) VALUES (?, ?, 1, ?)')
+      .run(id, JSON.stringify(config), input.authUserId);
+  } else {
+    await db
+      .prepare('INSERT INTO workspace_config (id, config, enabled) VALUES (?, ?, 1)')
+      .run(id, JSON.stringify(config));
+  }
   cache.set(id, config);
   return config;
+}
+
+/**
+ * Returns the auth_user_id stamped on a workspace, or null if it's
+ * unclaimed. Used by API routes to verify the requesting user owns the
+ * workspace they're touching. Library helpers below (saveWorkspaceConfig,
+ * setWorkspaceEnabled, deleteWorkspaceConfig) intentionally do NOT call
+ * this — they're invoked from non-request contexts (workers, sync
+ * pipelines) where there is no auth user to compare against.
+ */
+export async function getWorkspaceOwner(id: string): Promise<string | null> {
+  await ensureInit();
+  const row = await getLibsqlDb()
+    .prepare('SELECT auth_user_id FROM workspace_config WHERE id = ?')
+    .get<{ auth_user_id: string | null }>(id);
+  return row?.auth_user_id ?? null;
 }
 
 function modulesForPreset(preset: string): Record<string, boolean> {
@@ -410,11 +556,19 @@ function modulesForPreset(preset: string): Record<string, boolean> {
   if (preset === 'sales') return { overview: true, projects: false, knowledge: true, goals: true };
   if (preset === 'legal' || preset === 'finance' || preset === 'operations')
     return { overview: true, projects: false, knowledge: true, goals: true };
+  if (preset === 'founder')
+    return { overview: true, projects: true, knowledge: true, goals: true, deals: true, investors: true, people: true };
   return DEFAULT_WORKSPACE_CONFIG.modules;
+}
+
+function customTablesForPreset(preset: string): CustomTableConfig[] {
+  if (preset === 'founder') return FOUNDER_CUSTOM_TABLES;
+  return [];
 }
 
 function uiForPreset(preset: string): WorkspaceUiConfig {
   if (preset === 'engineering') return ENGINEERING_UI;
+  if (preset === 'founder') return FOUNDER_UI;
 
   if (preset === 'sales') {
     return {

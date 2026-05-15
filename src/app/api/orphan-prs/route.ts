@@ -13,6 +13,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import {
+  buildWorkspaceItemFilter,
+  getRequestWorkspaceId,
+} from '@/lib/active-workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -48,6 +52,9 @@ export async function GET(req: NextRequest) {
   const repoFilter = req.nextUrl.searchParams.get('repo');
   const projectFilter = req.nextUrl.searchParams.get('project');
   const hasCandidates = req.nextUrl.searchParams.get('has_candidates') === 'true';
+
+  const workspaceId = await getRequestWorkspaceId(req.nextUrl.searchParams);
+  const wsFilter = await buildWorkspaceItemFilter(workspaceId, 'wi');
 
   // Pull the orphan PRs first (the pr_opened row is the canonical event for
   // diff_text and functional_summary; siblings are reviews/merges).
@@ -88,9 +95,10 @@ export async function GET(req: NextRequest) {
        JOIN work_items wi ON wi.id = c.candidate_item_id
        WHERE c.pr_ref IN (${placeholders})
          AND c.dismissed_at IS NULL
+         AND ${wsFilter.sql}
        ORDER BY c.pr_ref, c.score DESC`,
     )
-    .all<CandidateRow>(...refs);
+    .all<CandidateRow>(...refs, ...wsFilter.params);
 
   // Group candidates by pr_ref and optionally filter by project.
   const byRef = new Map<string, CandidateRow[]>();

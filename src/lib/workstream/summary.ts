@@ -7,10 +7,9 @@
  * Sonnet reads the evolution and writes the decision trace. Stored on
  * workstreams.narrative and workstreams.timeline_events (JSON).
  */
-import { generateText } from 'ai';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
-import { getModel } from '../ai';
+import { runPrompt } from '../ai/runner';
 import { listWorkstreams } from './assemble';
 import { getWorkspaceConfigCached } from '../workspace-config';
 
@@ -143,8 +142,8 @@ Return ONLY valid JSON, no markdown fences, no commentary.`;
 
 async function callSonnet(prompt: { system: string; user: string }): Promise<WorkstreamSummaryPayload | null> {
   try {
-    const { text: rawText } = await generateText({
-      model: getModel('narrative'),
+    const { text: rawText } = await runPrompt({
+      task: 'narrative',
       maxOutputTokens: 4000,
       system: prompt.system,
       prompt: prompt.user,

@@ -32,6 +32,13 @@ export interface CliBackendOptions {
    * should only read the prompt and emit text. Defaults to false (chat use).
    */
   disableTools?: boolean;
+  /**
+   * Inline MCP server config the CLI should expose to the model. Used by
+   * the chat path to bridge Workgraph data tools (countItems, listItems,
+   * searchKnowledge, etc.) into Claude Code sessions. The backend writes
+   * this to a temp file and passes --mcp-config <path>.
+   */
+  mcpServers?: Record<string, { type: 'http'; url: string; headers?: Record<string, string> }>;
 }
 
 export interface CliBackend {

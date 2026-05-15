@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
+import { getActiveWorkspaceId } from '@/lib/active-workspace';
 import { getWorkspaceConfig, seedWorkspaceConfig } from '@/lib/workspace-config';
 
 export async function GET() {
@@ -8,18 +9,20 @@ export async function GET() {
     await ensureSchemaAsync();
     await seedWorkspaceConfig();
     const db = getLibsqlDb();
+    const workspaceId = await getActiveWorkspaceId();
 
     const row = await db
       .prepare("SELECT config FROM sync_config WHERE id = 'default'")
       .get<{ config: string }>();
     const config = row ? JSON.parse(row.config) : {};
 
-    // Also return goals for the goals management section
+    // Also return goals for the goals management section — scoped to the
+    // active workspace so a fresh workspace sees its own (empty) list.
     const goals = await db
       .prepare(
-        'SELECT id, name, description, keywords, status, sort_order FROM goals ORDER BY sort_order',
+        'SELECT id, name, description, keywords, status, sort_order FROM goals WHERE workspace_id = ? ORDER BY sort_order',
       )
-      .all();
+      .all(workspaceId);
 
     return NextResponse.json({ config, goals, workspaceConfig: await getWorkspaceConfig() });
   } catch (error: any) {

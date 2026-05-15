@@ -19,6 +19,7 @@ import { NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { inngest } from '@/inngest/client';
+import { getActiveWorkspaceId } from '@/lib/active-workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,7 +55,10 @@ export async function POST(
 
   const db = getLibsqlDb();
   // Confirm the target ticket exists and is a Jira item — guards against
-  // stale candidate lists pointing at deleted/migrated rows.
+  // stale candidate lists pointing at deleted/migrated rows. Also enforce
+  // that the target's source is configured in the active workspace, so a
+  // user can't attach a PR to a Jira ticket they shouldn't be able to see.
+  const workspaceId = await getActiveWorkspaceId();
   const target = await db
     .prepare(`SELECT id, source FROM work_items WHERE id = ?`)
     .get<{ id: string; source: string }>(issueItemId);
@@ -68,6 +72,18 @@ export async function POST(
     return NextResponse.json(
       { ok: false, error: 'Target must be a Jira work_item' },
       { status: 400 },
+    );
+  }
+  const visible = await db
+    .prepare(
+      `SELECT 1 AS hit FROM workspace_connector_configs
+       WHERE workspace_id = ? AND source = ? LIMIT 1`,
+    )
+    .get<{ hit: number }>(workspaceId, target.source);
+  if (!visible) {
+    return NextResponse.json(
+      { ok: false, error: 'Target work_item not found' },
+      { status: 404 },
     );
   }
 

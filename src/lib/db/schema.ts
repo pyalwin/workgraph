@@ -20,30 +20,37 @@ import {
 
 // ─────── core domain ───────────────────────────────────────────────────────
 
-export const goals = sqliteTable('goals', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  description: text('description'),
-  keywords: text('keywords').notNull().default('[]'),
-  status: text('status').notNull().default('active'),
-  origin: text('origin').notNull().default('manual'),
-  sortOrder: integer('sort_order'),
-  itemCount: integer('item_count').default(0),
-  sourceCount: integer('source_count').default(0),
-  createdAt: text('created_at').default(sql`(datetime('now'))`),
-  updatedAt: text('updated_at').default(sql`(datetime('now'))`),
-  // Phase 2.2 — measurable goals
-  ownerUserId: text('owner_user_id'),
-  targetMetric: text('target_metric'),
-  targetValue: real('target_value'),
-  targetAt: text('target_at'),
-  aiConfidence: real('ai_confidence'),
-  derivedFrom: text('derived_from').notNull().default('manual'),
-  // OKR support
-  kind: text('kind').notNull().default('goal'),           // 'goal' | 'objective' | 'key_result'
-  parentId: text('parent_id'),                            // key_result.parent_id → objective.id
-  projectKey: text('project_key'),                        // anchors AI-generated OKRs to their project
-});
+export const goals = sqliteTable(
+  'goals',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    description: text('description'),
+    keywords: text('keywords').notNull().default('[]'),
+    status: text('status').notNull().default('active'),
+    origin: text('origin').notNull().default('manual'),
+    sortOrder: integer('sort_order'),
+    itemCount: integer('item_count').default(0),
+    sourceCount: integer('source_count').default(0),
+    createdAt: text('created_at').default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').default(sql`(datetime('now'))`),
+    // Phase 2.2 — measurable goals
+    ownerUserId: text('owner_user_id'),
+    targetMetric: text('target_metric'),
+    targetValue: real('target_value'),
+    targetAt: text('target_at'),
+    aiConfidence: real('ai_confidence'),
+    derivedFrom: text('derived_from').notNull().default('manual'),
+    // OKR support
+    kind: text('kind').notNull().default('goal'),           // 'goal' | 'objective' | 'key_result'
+    parentId: text('parent_id'),                            // key_result.parent_id → objective.id
+    projectKey: text('project_key'),                        // anchors AI-generated OKRs to their project
+    // Phase 3 — workspace scoping. Nullable for backward compat with rows
+    // predating the migration; backfill stamps existing rows to 'default'.
+    workspaceId: text('workspace_id'),
+  },
+  (t) => [index('idx_goals_workspace').on(t.workspaceId)],
+);
 
 export const projects = sqliteTable('projects', {
   id: text('id').primaryKey(),
@@ -94,8 +101,15 @@ export const tags = sqliteTable(
     id: text('id').primaryKey(),
     name: text('name').notNull(),
     category: text('category'),
+    // Phase 3 — workspace scoping. New tag rows are workspace-prefixed in
+    // their id so the legacy UNIQUE(name, category) constraint still holds
+    // across workspaces.
+    workspaceId: text('workspace_id'),
   },
-  (t) => [uniqueIndex('uniq_tags_name_category').on(t.name, t.category)],
+  (t) => [
+    uniqueIndex('uniq_tags_name_category').on(t.name, t.category),
+    index('idx_tags_workspace').on(t.workspaceId),
+  ],
 );
 
 export const itemTags = sqliteTable(
@@ -196,6 +210,10 @@ export const workspaceConfig = sqliteTable('workspace_config', {
   updatedAt: text('updated_at').default(sql`(datetime('now'))`),
   // Added by migrateWorkspaceConfig()
   enabled: integer('enabled').notNull().default(1),
+  // Phase 4: binds the workspace to the WorkOS-authenticated user that owns
+  // it. NULL means "unclaimed" — the first user who reads workspaces will
+  // claim the alphabetically-first unclaimed row.
+  authUserId: text('auth_user_id'),
 });
 
 export const workspaceConnectorConfigs = sqliteTable(
@@ -217,6 +235,13 @@ export const workspaceConnectorConfigs = sqliteTable(
     lastSyncItems: integer('last_sync_items'),
     lastSyncError: text('last_sync_error'),
     lastSyncLog: text('last_sync_log'),
+    // Direct-API connector support (added by additive migration in
+    // init-schema-async.ts). syncMarker is the per-connector cursor for
+    // incremental sync (Drive startPageToken / Calendar nextSyncToken /
+    // Gmail historyId). oauthProvider keys into the shared OAuth provider
+    // table (e.g. 'google' for gmail+gdrive+gcal). Both nullable.
+    syncMarker: text('sync_marker'),
+    oauthProvider: text('oauth_provider'),
     createdAt: text('created_at').default(sql`(datetime('now'))`),
     updatedAt: text('updated_at').default(sql`(datetime('now'))`),
   },
@@ -430,11 +455,16 @@ export const entities = sqliteTable(
     metadata: text('metadata'),
     createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
     updatedAt: text('updated_at'),
+    // Phase 3 — workspace scoping. New entity rows are workspace-prefixed
+    // in their id so the legacy UNIQUE(canonical_form, entity_type)
+    // constraint still holds across workspaces.
+    workspaceId: text('workspace_id'),
   },
   (t) => [
     uniqueIndex('uniq_entities_canonical_type').on(t.canonicalForm, t.entityType),
     index('idx_entities_type').on(t.entityType),
     index('idx_entities_canonical').on(t.canonicalForm),
+    index('idx_entities_workspace').on(t.workspaceId),
   ],
 );
 
@@ -756,6 +786,72 @@ export const projectConnectors = sqliteTable(
   ],
 );
 
+// pipeline_links: many-to-many between custom pipeline rows
+// (deals/investors/candidates) and ingested work_items (gmail thread,
+// gcal event, gdrive file). Auto-populated by the post-ingest matching
+// helper; manual pin/unpin overrides via match_reason='manual'. The
+// unique index over (pipeline_table, pipeline_row_id, item_source,
+// item_source_id) makes re-ingest idempotent. See
+// docs/superpowers/specs/2026-05-10-founder-workspace-and-direct-api-gsuite-design.md
+// section 4.1.
+export const pipelineLinks = sqliteTable(
+  'pipeline_links',
+  {
+    id: text('id').primaryKey(),
+    workspaceId: text('workspace_id').notNull(),
+    pipelineTable: text('pipeline_table').notNull(),         // 'deals' | 'investors' | 'candidates'
+    pipelineRowId: text('pipeline_row_id').notNull(),
+    itemSource: text('item_source').notNull(),               // 'gmail' | 'gcal' | 'gdrive' (extensible)
+    itemSourceId: text('item_source_id').notNull(),
+    matchReason: text('match_reason').notNull(),             // 'domain_match' | 'email_match' | 'title_match' | 'manual'
+    confidence: real('confidence').notNull().default(0.7),
+    createdAt: text('created_at').default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    index('idx_pipeline_links_row').on(t.pipelineTable, t.pipelineRowId),
+    index('idx_pipeline_links_item').on(t.itemSource, t.itemSourceId),
+    uniqueIndex('uq_pipeline_links').on(
+      t.pipelineTable,
+      t.pipelineRowId,
+      t.itemSource,
+      t.itemSourceId,
+    ),
+  ],
+);
+
+// Phase 3 — chat threads/messages now mirrored in Drizzle so workspace-
+// scoped queries can be type-checked. Schema CREATE remains in
+// init-schema-async.ts (raw SQL).
+export const chatThreads = sqliteTable(
+  'chat_threads',
+  {
+    id: text('id').primaryKey(),
+    title: text('title'),
+    workspaceId: text('workspace_id'),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (t) => [
+    index('idx_chat_threads_updated').on(t.updatedAt),
+    index('idx_chat_threads_workspace').on(t.workspaceId),
+  ],
+);
+
+export const chatMessages = sqliteTable(
+  'chat_messages',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => chatThreads.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    parts: text('parts').notNull(),
+    sequence: integer('sequence').notNull(),
+    createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  },
+  (t) => [index('idx_chat_messages_thread').on(t.threadId, t.sequence)],
+);
+
 // Convenience: every table re-exported as `schema` for `drizzle({ schema })`.
 export const schema = {
   goals,
@@ -797,4 +893,7 @@ export const schema = {
   projectGithubConfigs,
   projectConnectors,
   projectBacklogItems,
+  pipelineLinks,
+  chatThreads,
+  chatMessages,
 };

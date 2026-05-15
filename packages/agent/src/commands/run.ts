@@ -135,6 +135,19 @@ async function executeJob(job: Job, config: AgentConfig): Promise<void> {
         { method: 'POST', body: { status: 'done', result: result.payload } },
         config,
       );
+    } else if (result.status === 'defer') {
+      await apiFetch(
+        `/api/agent/jobs/${job.id}/result`,
+        {
+          method: 'POST',
+          body: {
+            status: 'defer',
+            retry_after_seconds: result.retry_after_seconds,
+            error: result.error,
+          },
+        },
+        config,
+      );
     } else {
       await apiFetch(
         `/api/agent/jobs/${job.id}/result`,

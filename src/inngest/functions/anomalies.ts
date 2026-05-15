@@ -248,7 +248,8 @@ async function detectGoalDrift(workspaceId: string): Promise<AnomalyOut[]> {
        FROM goals g
        LEFT JOIN item_tags it ON it.tag_id = g.id
        LEFT JOIN work_items wi ON wi.id = it.item_id
-       WHERE g.status = 'active'
+       WHERE g.workspace_id = ?
+         AND g.status = 'active'
          AND g.target_at IS NOT NULL
          AND julianday(g.target_at) - julianday('now') BETWEEN 0 AND 30
        GROUP BY g.id`,
@@ -259,7 +260,7 @@ async function detectGoalDrift(workspaceId: string): Promise<AnomalyOut[]> {
       target_at: string | null;
       total: number;
       done: number;
-    }>();
+    }>(workspaceId);
   return rows
     .filter((r) => r.total > 0 && r.done / r.total < 0.5)
     .map((r) => ({

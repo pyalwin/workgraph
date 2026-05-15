@@ -5,10 +5,9 @@
  * returns explicit sections: Context, Decision, Rationale, Outcome,
  * Traceability. Each with strict size caps so the output is uniform.
  */
-import { generateText } from 'ai';
+import { runPrompt } from '../ai/runner';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
-import { getModel } from '../ai';
 import { getDecisionItems, listDecisions, type DecisionItem, type DecisionSummary } from './extract';
 import { getWorkspaceConfigCached } from '../workspace-config';
 
@@ -107,8 +106,8 @@ Rules:
 
 async function callSonnet(prompt: { system: string; user: string }): Promise<DecisionStructuredSummary | null> {
   try {
-    const { text: rawText } = await generateText({
-      model: getModel('decision'),
+    const { text: rawText } = await runPrompt({
+      task: 'decision',
       maxOutputTokens: 3000,
       system: prompt.system,
       prompt: prompt.user,

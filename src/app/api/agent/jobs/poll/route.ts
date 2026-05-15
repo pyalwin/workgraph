@@ -36,12 +36,16 @@ interface JobRow {
 async function tryAssignJob(identity: AgentIdentity): Promise<JobRow | null> {
   const db = getLibsqlDb();
 
-  // Find the oldest queued job for this workspace.
+  // Find the oldest queued job for this workspace whose retry cooldown
+  // (if any) has expired. Jobs that hit a 429 set next_retry_at to a
+  // future timestamp; the predicate keeps them invisible until then.
   const candidate = await db
     .prepare(
       `SELECT id, workspace_id, kind, status, params, attempt, created_at
        FROM agent_jobs
-       WHERE status = 'queued' AND workspace_id = ?
+       WHERE status = 'queued'
+         AND workspace_id = ?
+         AND (next_retry_at IS NULL OR next_retry_at <= datetime('now'))
        ORDER BY created_at ASC
        LIMIT 1`,
     )

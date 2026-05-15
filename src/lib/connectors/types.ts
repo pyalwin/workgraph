@@ -158,6 +158,60 @@ export interface MCPConnector {
   ) => Promise<Record<string, unknown>>;
 }
 
+export type ConnectorKind = 'mcp' | 'direct';
+
+export interface DirectRunContext extends ConnectorRunContext {
+  accessToken: string;
+  // Round-tripped from connector_configs.sync_marker (Drive startPageToken /
+  // Calendar nextSyncToken / Gmail historyId). Null on first run.
+  syncMarker: string | null;
+}
+
+export interface DirectAPIConnector {
+  kind: 'direct';
+  // Stable identifier matching workspace-config sources (e.g. 'gmail', 'gdrive').
+  source: string;
+  // Human label for logs.
+  label: string;
+  // Default item_type when toItem doesn't override.
+  itemType: string;
+  // OAUTH_PROVIDERS key (e.g. 'google'). The runner uses this to look up the
+  // access token via getOAuthTokenByProvider.
+  oauthProvider: string;
+
+  // Primary enumerator. Returns a page of raw items, an optional cursor for
+  // the next page, and an optional syncMarker to persist after the run
+  // completes (Drive startPageToken / Calendar nextSyncToken / Gmail historyId).
+  list: (ctx: DirectRunContext) => Promise<{
+    items: unknown[];
+    cursor: string | null;
+    syncMarker?: string;
+  }>;
+
+  // Optional follow-up to fetch full details for each list result.
+  detail?: (raw: unknown, ctx: DirectRunContext) => Promise<unknown>;
+
+  // Map a fully resolved raw record to a WorkItemInput. Return null to skip.
+  toItem: (raw: unknown) => WorkItemInput | null;
+
+  // Pass-through optional shapes — reuse the MCPConnector field signatures so
+  // downstream pipelines (derived items, links, cross-source ID detection)
+  // behave identically regardless of adapter kind.
+  derivedItems?: MCPConnector['derivedItems'];
+  links?: MCPConnector['links'];
+  idDetection?: MCPConnector['idDetection'];
+}
+
+// Discriminated union — back-compat: existing MCPConnector adapters do not
+// currently set a `kind` field, so we widen via the union (rather than
+// requiring `kind: 'mcp'` on MCPConnector itself) and treat a missing kind
+// as 'mcp' at the call site.
+export type Connector = (MCPConnector & { kind?: 'mcp' }) | DirectAPIConnector;
+
+export function isMCPConnector(c: Connector): c is MCPConnector & { kind?: 'mcp' } {
+  return c.kind !== 'direct';
+}
+
 export type MCPTransport =
   | { kind: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
   | { kind: 'http'; url: string; headers?: Record<string, string>; preferSse?: boolean };

@@ -252,7 +252,11 @@ export default async function LandingPage() {
           ·{' '}
           <a href="https://github.com/pyalwin/workgraph" target="_blank" rel="noopener noreferrer">
             github.com/pyalwin/workgraph
-          </a>
+          </a>{' '}
+          ·{' '}
+          <Link href="/privacy">Privacy</Link>{' '}
+          ·{' '}
+          <Link href="/terms">Terms</Link>
         </span>
       </footer>
     </main>

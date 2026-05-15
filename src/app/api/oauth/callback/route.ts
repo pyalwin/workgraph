@@ -10,6 +10,7 @@ import { getRegisteredClient } from '@/lib/oauth/clients';
 import { saveOAuthToken } from '@/lib/connectors/oauth-tokens';
 import { upsertConnectorConfig, getConnectorConfig } from '@/lib/connectors/config-store';
 import { getConnector } from '@/lib/connectors/registry';
+import { isMCPConnector } from '@/lib/connectors/types';
 import { CONNECTOR_PRESETS } from '@/lib/connectors/presets';
 
 export const dynamic = 'force-dynamic';
@@ -60,8 +61,13 @@ export async function GET(req: Request) {
     );
   }
 
-  const provider = getProvider(flow.source);
-  if (!provider) return errorPage('no_provider', `No OAuth provider for ${flow.source}.`);
+  // Resolve OAuth provider via the connector preset's oauth.provider field
+  // (for shared providers like 'google' that fan out to gmail/gdrive/gcal).
+  // Fall back to source for self-named providers.
+  const preset = CONNECTOR_PRESETS[flow.source];
+  const providerName = preset?.oauth?.provider ?? flow.source;
+  const provider = getProvider(providerName);
+  if (!provider) return errorPage('no_provider', `No OAuth provider for ${providerName}.`);
 
   // Resolve creds the same way /start did: env first, then DCR cache.
   let clientId: string;
@@ -171,9 +177,12 @@ export async function GET(req: Request) {
     ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
     : null;
 
+  // Save the token under the provider name (not the connector source). For
+  // shared providers like 'google', all three connectors (gmail/gdrive/gcal)
+  // resolve their token via getOAuthTokenByProvider(workspaceId, 'google').
   await saveOAuthToken({
     workspaceId: flow.workspaceId,
-    source: flow.source,
+    source: providerName,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token || null,
     tokenType: tokens.token_type || 'Bearer',
@@ -188,13 +197,12 @@ export async function GET(req: Request) {
   // injected at spawn time by resolveServerConfig.
   const adapter = getConnector(flow.source);
   const existing = await getConnectorConfig(flow.workspaceId, flow.slot);
-  const preset = CONNECTOR_PRESETS[flow.source];
   const isStdioOAuth = !!provider.stdioEnvVar && preset?.stdio;
   await upsertConnectorConfig({
     workspaceId: flow.workspaceId,
     slot: flow.slot,
     source: flow.source,
-    serverId: adapter.serverId,
+    serverId: isMCPConnector(adapter) ? adapter.serverId : flow.source,
     transport: isStdioOAuth ? 'stdio' : 'http',
     config: isStdioOAuth
       ? {

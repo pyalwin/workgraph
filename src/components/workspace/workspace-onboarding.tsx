@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWorkgraphState } from '@/components/workspace/workgraph-state';
 
@@ -43,6 +43,12 @@ export const WORKSPACE_PRESETS: WorkspacePreset[] = [
     connectors: ['ERP or accounting system', 'Sheets, warehouse, or BI', 'Gmail or Outlook', 'Drive, SharePoint, or DMS', 'Approval tools'],
   },
   {
+    id: 'founder',
+    name: 'Founder',
+    workflow: 'Inbox & day -> deals / investors / candidates -> threads -> bets -> follow-up',
+    connectors: ['Gmail', 'Google Calendar', 'Google Drive', 'Slack (optional)', 'GitHub or Linear (optional)'],
+  },
+  {
     id: 'custom-workspace',
     name: 'Custom',
     workflow: 'Signal -> discussion -> decision -> execution -> completion -> follow-up',
@@ -56,7 +62,22 @@ export function WorkspaceOnboarding() {
   const [selected, setSelected] = useState(WORKSPACE_PRESETS[0].id);
   const [name, setName] = useState(WORKSPACE_PRESETS[0].name);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const preset = WORKSPACE_PRESETS.find((p) => p.id === selected) ?? WORKSPACE_PRESETS[0];
+
+  // If the user already owns a workspace, skip onboarding.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/workspaces/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.hasWorkspace) router.replace('/dashboard');
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const choosePreset = (presetId: string) => {
     const next = WORKSPACE_PRESETS.find((p) => p.id === presetId) ?? WORKSPACE_PRESETS[0];
@@ -66,6 +87,7 @@ export function WorkspaceOnboarding() {
 
   const create = async () => {
     setSaving(true);
+    setError(null);
     try {
       const res = await fetch('/api/workspaces', {
         method: 'POST',
@@ -73,16 +95,20 @@ export function WorkspaceOnboarding() {
         body: JSON.stringify({ name, preset: selected }),
       });
       const data = await res.json();
-      if (data.workspace) {
-        await refreshWorkspaces();
-        const role = data.workspace.ui?.roles?.[0];
-        setState({
-          workspaceId: data.workspace.id,
-          role: role?.id || 'owner',
-          source: role?.primarySource || 'Primary System',
-        });
-        router.push('/settings?tab=connectors');
+      if (!res.ok || !data.workspace) {
+        setError(data?.error || 'Failed to create workspace');
+        return;
       }
+      await refreshWorkspaces();
+      const role = data.workspace.ui?.roles?.[0];
+      // The user now owns exactly this workspace; pin it client-side
+      // so the cookie + state stay in sync with the server resolution.
+      setState({
+        workspaceId: data.workspace.id,
+        role: role?.id || 'owner',
+        source: role?.primarySource || 'Primary System',
+      });
+      router.push('/settings?tab=connectors');
     } finally {
       setSaving(false);
     }
@@ -137,6 +163,9 @@ export function WorkspaceOnboarding() {
           <button className="btn btn-primary setup-create" onClick={create} disabled={saving || !name.trim()}>
             {saving ? 'Creating...' : 'Create Workspace'}
           </button>
+          {error && (
+            <div style={{ marginTop: 12, color: '#c53030', fontSize: '0.78rem' }}>{error}</div>
+          )}
         </div>
       </section>
     </div>

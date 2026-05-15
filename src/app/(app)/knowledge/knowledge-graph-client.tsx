@@ -6,6 +6,12 @@ import { Badge } from '@/components/ui/badge';
 import { Markdown } from '@/components/chat/prompt-kit/markdown';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
+// 3D view — default. Uses three.js for spatial cluster discovery, scales
+// better past ~2000 nodes. Stays mounted under a `viewMode` switch so we
+// can fall back to the 2D Canvas path (with all its custom nodeCanvasObject
+// rendering) if the 3D experience proves problematic or option B custom
+// three.js rendering is preferred later.
+const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), { ssr: false });
 
 /* ---- Types ---- */
 
@@ -201,6 +207,171 @@ function formatDate(dateStr: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatDateShort(ms: number): string {
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function DateRangeFilter({
+  bounds,
+  value,
+  onChange,
+  totalNodes,
+  filteredCount,
+}: {
+  bounds: { min: number; max: number };
+  value: { from: number | null; to: number | null };
+  onChange: (v: { from: number | null; to: number | null }) => void;
+  totalNodes: number;
+  filteredCount: number;
+}) {
+  const DAY = 86400_000;
+  const fullSpanDays = Math.max(1, Math.round((bounds.max - bounds.min) / DAY));
+  // Resolve the effective from/to (null = unconstrained = bounds end).
+  const effFrom = value.from ?? bounds.min;
+  const effTo = value.to ?? bounds.max;
+
+  const setFrom = (t: number) => {
+    const clamped = Math.max(bounds.min, Math.min(t, effTo));
+    onChange({ from: clamped <= bounds.min ? null : clamped, to: value.to });
+  };
+  const setTo = (t: number) => {
+    const clamped = Math.min(bounds.max, Math.max(t, effFrom));
+    onChange({ from: value.from, to: clamped >= bounds.max ? null : clamped });
+  };
+
+  const setLastN = (days: number) => {
+    const from = bounds.max - days * DAY;
+    onChange({ from: from <= bounds.min ? null : from, to: null });
+  };
+  const reset = () => onChange({ from: null, to: null });
+
+  const active = value.from !== null || value.to !== null;
+  const isLast = (days: number) => {
+    if (!active || value.to !== null) return false;
+    const expected = bounds.max - days * DAY;
+    return value.from !== null && Math.abs(value.from - expected) < DAY / 2;
+  };
+
+  // Compute thumb positions as percentage of the span.
+  const span = Math.max(1, bounds.max - bounds.min);
+  const fromPct = ((effFrom - bounds.min) / span) * 100;
+  const toPct = ((effTo - bounds.min) / span) * 100;
+
+  return (
+    <div className="px-5 pt-4 pb-3 border-b border-black/[0.07]">
+      <div className="flex items-baseline justify-between mb-2">
+        <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#999]">Date range</div>
+        <div className="text-[0.62rem] text-[#999] tabular-nums">
+          {active ? `${filteredCount} / ${totalNodes}` : `${totalNodes}`}
+        </div>
+      </div>
+
+      {/* Preset chips */}
+      <div className="flex flex-wrap gap-[4px] mb-3">
+        {[
+          { label: '7d', days: 7 },
+          { label: '30d', days: 30 },
+          { label: '90d', days: 90 },
+          { label: '1y', days: 365 },
+        ].map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            onClick={() => setLastN(p.days)}
+            className={
+              'px-2 py-[3px] rounded-md text-[0.67rem] font-medium border transition-colors ' +
+              (isLast(p.days)
+                ? 'bg-black text-white border-black'
+                : 'bg-white text-[#555] border-black/[0.1] hover:bg-black/[0.04]')
+            }
+          >
+            Last {p.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={reset}
+          className={
+            'px-2 py-[3px] rounded-md text-[0.67rem] font-medium border transition-colors ' +
+            (!active
+              ? 'bg-black text-white border-black'
+              : 'bg-white text-[#555] border-black/[0.1] hover:bg-black/[0.04]')
+          }
+        >
+          All
+        </button>
+      </div>
+
+      {/* Dual-thumb slider track */}
+      <div className="relative h-[24px] mb-2">
+        {/* Track */}
+        <div className="absolute top-[11px] left-0 right-0 h-[2px] bg-black/[0.08] rounded-full" />
+        {/* Active range */}
+        <div
+          className="absolute top-[11px] h-[2px] bg-black rounded-full"
+          style={{ left: `${fromPct}%`, right: `${100 - toPct}%` }}
+        />
+        {/* From thumb (range input) */}
+        <input
+          type="range"
+          min={bounds.min}
+          max={bounds.max}
+          step={DAY}
+          value={effFrom}
+          onChange={(e) => setFrom(Number(e.target.value))}
+          className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-auto"
+          style={{ WebkitAppearance: 'none', height: 24, zIndex: effFrom > (bounds.max + bounds.min) / 2 ? 3 : 2 }}
+        />
+        {/* To thumb */}
+        <input
+          type="range"
+          min={bounds.min}
+          max={bounds.max}
+          step={DAY}
+          value={effTo}
+          onChange={(e) => setTo(Number(e.target.value))}
+          className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-auto"
+          style={{ WebkitAppearance: 'none', height: 24, zIndex: 3 }}
+        />
+        <style jsx>{`
+          input[type='range']::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid #000;
+            cursor: grab;
+            margin-top: 0;
+            pointer-events: auto;
+          }
+          input[type='range']::-webkit-slider-thumb:active { cursor: grabbing; }
+          input[type='range']::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #fff;
+            border: 2px solid #000;
+            cursor: grab;
+            pointer-events: auto;
+          }
+          input[type='range']::-webkit-slider-runnable-track { background: transparent; height: 24px; }
+          input[type='range']::-moz-range-track { background: transparent; height: 24px; }
+        `}</style>
+      </div>
+
+      <div className="flex items-center justify-between text-[0.67rem] tabular-nums text-[#555]">
+        <span>{formatDateShort(effFrom)}</span>
+        <span className="text-[#999]">{fullSpanDays}d</span>
+        <span>{formatDateShort(effTo)}</span>
+      </div>
+    </div>
+  );
+}
+
 /* ---- Component ---- */
 
 export default function KnowledgeGraphClient() {
@@ -219,9 +390,19 @@ export default function KnowledgeGraphClient() {
     granola: true,
     notion: true,
     gmail: true,
+    gcal: true,
+    gdrive: true,
+    pipeline: true,
   });
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set());
+
+  // Date-range filter. Computed lazily from the loaded data; the user drags
+  // a dual-thumb slider to narrow the graph to a specific window.
+  const [dateRange, setDateRange] = useState<{ from: number | null; to: number | null }>({
+    from: null,
+    to: null,
+  });
 
   // Selection
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
@@ -235,6 +416,49 @@ export default function KnowledgeGraphClient() {
 
   // Coloring mode
   const [colorMode, setColorMode] = useState<'source' | 'trace_role'>('source');
+
+  // View mode — 3D (react-force-graph-3d) is the default for spatial cluster
+  // discovery. 2D path keeps the legacy canvas-based custom node rendering
+  // (badges, link-count sizing, parent-tinted children) for fallback or for
+  // option-B-style detailed renderings later. Stored in localStorage so the
+  // user's choice survives reloads.
+  const [viewMode, setViewModeRaw] = useState<'2d' | '3d'>('3d');
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('wg-graph-view-mode');
+      if (saved === '2d' || saved === '3d') setViewModeRaw(saved);
+    } catch {
+      /* localStorage unavailable — keep default */
+    }
+  }, []);
+  const setViewMode = useCallback((next: '2d' | '3d') => {
+    setViewModeRaw(next);
+    try { window.localStorage.setItem('wg-graph-view-mode', next); } catch { /* ignore */ }
+  }, []);
+
+  // Focus mode — when on, the graph shows only the selected node + its
+  // N-hop neighborhood. Lets you drill into one cluster without losing
+  // your place in the global view. Toggling off restores the full filtered
+  // graph. Persisted to localStorage so it survives reloads.
+  const [focusMode, setFocusModeRaw] = useState<boolean>(false);
+  const [focusDepth, setFocusDepth] = useState<1 | 2>(1);
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('wg-graph-focus');
+      if (saved === '1' || saved === '2') {
+        setFocusModeRaw(true);
+        setFocusDepth(saved === '2' ? 2 : 1);
+      } else if (saved === 'off') {
+        setFocusModeRaw(false);
+      }
+    } catch { /* ignore */ }
+  }, []);
+  const setFocusMode = useCallback((on: boolean) => {
+    setFocusModeRaw(on);
+    try {
+      window.localStorage.setItem('wg-graph-focus', on ? String(focusDepth) : 'off');
+    } catch { /* ignore */ }
+  }, [focusDepth]);
 
   // Workstream detail for selected node
   const [workstreams, setWorkstreams] = useState<WorkstreamDetail[]>([]);
@@ -301,11 +525,9 @@ export default function KnowledgeGraphClient() {
           const inboundCount = inboundCountMap[item.id] || 0;
           const baseVal = Math.max(2, linkCount * 2);
 
-          let meta: any = item.metadata;
-          if (typeof meta === 'string') {
-            try { meta = JSON.parse(meta); } catch { meta = null; }
-          }
-          const commits = (meta?.commits_count as number | undefined) ?? 0;
+          // /api/graph no longer ships full metadata to keep payloads small;
+          // it returns commits_count as its own column via json_extract.
+          const commits = (item.commits_count as number | undefined) ?? 0;
 
           let val = baseVal;
           if (isParent) {
@@ -484,11 +706,39 @@ export default function KnowledgeGraphClient() {
     return Array.from(types).sort();
   }, [graphData.nodes]);
 
+  // Available date bounds — derived from loaded nodes so the slider's min/max
+  // reflect the actual data, not arbitrary defaults.
+  const dateBounds = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const n of graphData.nodes) {
+      if (!n.created_at) continue;
+      const t = new Date(n.created_at).getTime();
+      if (isNaN(t)) continue;
+      if (t < min) min = t;
+      if (t > max) max = t;
+    }
+    if (!isFinite(min) || !isFinite(max)) {
+      const now = Date.now();
+      return { min: now - 90 * 86400_000, max: now };
+    }
+    return { min, max };
+  }, [graphData.nodes]);
+
   // Filter the graph data
   const filteredData = useMemo(() => {
     const filteredNodes = graphData.nodes.filter((node) => {
       // Source filter
       if (!sourceFilters[node.source]) return false;
+
+      // Date-range filter
+      if ((dateRange.from !== null || dateRange.to !== null) && node.created_at) {
+        const t = new Date(node.created_at).getTime();
+        if (!isNaN(t)) {
+          if (dateRange.from !== null && t < dateRange.from) return false;
+          if (dateRange.to !== null && t > dateRange.to) return false;
+        }
+      }
 
       // Status filter
       if (statusFilter !== 'All') {
@@ -509,15 +759,61 @@ export default function KnowledgeGraphClient() {
       return true;
     });
 
-    const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
+    let filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
+    let workingNodes = filteredNodes;
+
+    // Focus mode — narrow further to selected (or searched) node + its
+    // N-hop neighborhood. Useful when the full graph has thousands of
+    // nodes and the user wants to drill into one cluster without the
+    // visual noise of everything else.
+    const seedIds = new Set<string>();
+    if (focusMode) {
+      if (selectedNode) seedIds.add(selectedNode.id);
+      for (const id of searchHighlight) seedIds.add(id);
+    }
+    if (seedIds.size > 0) {
+      // BFS over rawEdges (not filtered links) so we always include
+      // neighbors even if the user's source/status filters hide them —
+      // a focus into a Gmail thread should show its linked Calendar event
+      // even if 'gcal' filter is off. The result is intersected with
+      // filteredNodeIds below so we don't reintroduce nodes the user has
+      // explicitly hidden via global filters.
+      const visited = new Set<string>(seedIds);
+      let frontier = new Set<string>(seedIds);
+      for (let hop = 0; hop < focusDepth; hop++) {
+        const next = new Set<string>();
+        for (const e of rawEdges) {
+          if (frontier.has(e.source_item_id) && !visited.has(e.target_item_id)) {
+            next.add(e.target_item_id);
+            visited.add(e.target_item_id);
+          }
+          if (frontier.has(e.target_item_id) && !visited.has(e.source_item_id)) {
+            next.add(e.source_item_id);
+            visited.add(e.source_item_id);
+          }
+        }
+        frontier = next;
+        if (frontier.size === 0) break;
+      }
+      // Intersect with the global filter set — focus narrows, never widens.
+      // EXCEPT for the seed nodes themselves: surface them even if a global
+      // filter would have hidden them (user explicitly asked to focus here).
+      const allowedInFocus = new Set<string>();
+      for (const id of visited) {
+        if (seedIds.has(id) || filteredNodeIds.has(id)) allowedInFocus.add(id);
+      }
+      workingNodes = graphData.nodes.filter((n) => allowedInFocus.has(n.id));
+      filteredNodeIds = allowedInFocus;
+    }
+
     const filteredLinks = graphData.links.filter((link) => {
       const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
       const targetId = typeof link.target === 'string' ? link.target : link.target.id;
       return filteredNodeIds.has(sourceId) && filteredNodeIds.has(targetId);
     });
 
-    return { nodes: filteredNodes, links: filteredLinks };
-  }, [graphData, sourceFilters, statusFilter, typeFilters]);
+    return { nodes: workingNodes, links: filteredLinks };
+  }, [graphData, sourceFilters, statusFilter, typeFilters, dateRange, focusMode, focusDepth, selectedNode, searchHighlight, rawEdges]);
 
   // Re-center when filters change
   useEffect(() => {
@@ -875,6 +1171,90 @@ export default function KnowledgeGraphClient() {
           </div>
         )}
 
+        {/* View mode + focus controls. */}
+        <div className="px-5 pt-4 pb-3 border-b border-black/[0.07]">
+          <div className="flex items-baseline justify-between mb-2">
+            <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#999]">View</div>
+            <div className="text-[0.62rem] text-[#999] tabular-nums">
+              {focusMode && (selectedNode || searchHighlight.size > 0)
+                ? `${filteredData.nodes.length} of ${graphData.nodes.length}`
+                : `${filteredData.nodes.length}`}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="inline-flex rounded-md border border-black/[0.1] overflow-hidden">
+              {(['3d', '2d'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setViewMode(mode)}
+                  className={
+                    'px-3 py-[4px] text-[0.72rem] font-medium transition-colors ' +
+                    (viewMode === mode
+                      ? 'bg-black text-white'
+                      : 'bg-white text-[#555] hover:bg-black/[0.04]')
+                  }
+                >
+                  {mode === '3d' ? '3D' : '2D'}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setFocusMode(!focusMode)}
+              title={
+                focusMode
+                  ? 'Showing only the selected node and its neighbors. Click to see everything.'
+                  : 'Show only the selected (or searched) node and its neighbors.'
+              }
+              className={
+                'px-3 py-[4px] rounded-md border text-[0.72rem] font-medium transition-colors ' +
+                (focusMode
+                  ? 'bg-black text-white border-black'
+                  : 'bg-white text-[#555] border-black/[0.1] hover:bg-black/[0.04]')
+              }
+            >
+              {focusMode ? '◉ Focus on' : '○ Focus'}
+            </button>
+          </div>
+          {focusMode && (
+            <div className="flex items-center gap-2 text-[0.67rem] text-[#777]">
+              <span>Depth</span>
+              {([1, 2] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => {
+                    setFocusDepth(d);
+                    try { window.localStorage.setItem('wg-graph-focus', String(d)); } catch { /* ignore */ }
+                  }}
+                  className={
+                    'px-2 py-[2px] rounded-md border text-[0.67rem] font-medium transition-colors ' +
+                    (focusDepth === d
+                      ? 'bg-[#333] text-white border-[#333]'
+                      : 'bg-white text-[#555] border-black/[0.1] hover:bg-black/[0.04]')
+                  }
+                >
+                  {d} hop{d > 1 ? 's' : ''}
+                </button>
+              ))}
+              {!selectedNode && searchHighlight.size === 0 && (
+                <span className="text-[#bbb] ml-1">click a node or search to focus</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Date Range Filter — dual-thumb slider over the loaded data's
+            actual created_at range, plus preset chips. */}
+        <DateRangeFilter
+          bounds={dateBounds}
+          value={dateRange}
+          onChange={setDateRange}
+          totalNodes={graphData.nodes.length}
+          filteredCount={filteredData.nodes.length}
+        />
+
         {/* Source Filters */}
         <div className="px-5 pt-4 pb-3">
           <div className="text-[0.62rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-3">Sources</div>
@@ -965,6 +1345,33 @@ export default function KnowledgeGraphClient() {
               <div className="text-[0.78rem] text-[#999]">Try adjusting the source or status filters</div>
             </div>
           </div>
+        ) : viewMode === '3d' ? (
+          <ForceGraph3D
+            ref={graphRef}
+            graphData={filteredData}
+            width={dimensions.width}
+            height={dimensions.height}
+            // Option A: defaults for nodes + edges, color and size derived
+            // from the same per-node fields the 2D path uses. No custom
+            // three.js mesh rendering yet — that's option B if/when needed.
+            nodeColor={(node: any) => (node as GraphNode).color || '#999'}
+            nodeVal={(node: any) => (node as GraphNode).val}
+            nodeLabel={(node: any) => (node as GraphNode).title}
+            nodeOpacity={0.9}
+            nodeRelSize={4}
+            linkColor={(link: any) => {
+              const t = String(link.link_type || '').toLowerCase();
+              return linkTypeColors[t] || 'rgba(150,150,150,0.25)';
+            }}
+            linkOpacity={0.5}
+            linkWidth={(link: any) => Math.max(0.5, (link.confidence ?? 0.5) * 1.5)}
+            linkDirectionalParticles={0}
+            backgroundColor="#0b0b10"
+            showNavInfo={false}
+            onNodeClick={(node: any) => handleNodeClick(node as GraphNode)}
+            onNodeHover={(node: any) => handleNodeHover(node as GraphNode | null)}
+            onBackgroundClick={() => setSelectedNode(null)}
+          />
         ) : (
           <ForceGraph2D
             ref={graphRef}

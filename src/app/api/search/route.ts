@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getLibsqlDb } from '@/lib/db/libsql';
 import { searchChunks } from '@/lib/embeddings/embed';
+import {
+  buildWorkspaceItemFilter,
+  getRequestWorkspaceId,
+} from '@/lib/active-workspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +35,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const hits = await searchChunks(q, k);
+    const workspaceId = await getRequestWorkspaceId(searchParams);
+    const hits = await searchChunks(q, k, { workspaceId });
 
     // Best-score chunk per item
     const bestByItem = new Map<string, typeof hits[0]>();
@@ -41,13 +46,17 @@ export async function GET(req: NextRequest) {
     }
 
     const db = getLibsqlDb();
-    const itemSql = `SELECT id, title, source, item_type, trace_role, substance, url, created_at
-      FROM work_items WHERE id = ?`;
+    const filter = await buildWorkspaceItemFilter(workspaceId, 'wi');
     const wsSql = `SELECT workstream_id FROM workstream_items WHERE item_id = ?`;
 
     const results: SearchResult[] = [];
     for (const [itemId, hit] of bestByItem) {
-      const item = await db.prepare(itemSql).get<any>(itemId);
+      const item = await db
+        .prepare(
+          `SELECT id, title, source, item_type, trace_role, substance, url, created_at
+           FROM work_items wi WHERE wi.id = ? AND ${filter.sql}`,
+        )
+        .get<any>(itemId, ...filter.params);
       if (!item) continue;
       const wss = await db.prepare(wsSql).all<{ workstream_id: string }>(itemId);
       results.push({

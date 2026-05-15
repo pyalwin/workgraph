@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ensureSchemaAsync } from '@/lib/db/init-schema-async';
 import { getConnectorConfig, upsertConnectorConfig } from '@/lib/connectors/config-store';
 import { getConnector } from '@/lib/connectors/registry';
+import { isMCPConnector } from '@/lib/connectors/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +33,9 @@ export async function POST(
     }
 
     const connector = getConnector(cfg.source);
+    if (!isMCPConnector(connector)) {
+      return NextResponse.json({ ok: false, error: 'Discovery not supported for direct-API connectors' }, { status: 400 });
+    }
     if (!connector.discover || !connector.supportedLists) {
       return NextResponse.json({ ok: false, error: `${connector.label} doesn't support discovery` }, { status: 400 });
     }

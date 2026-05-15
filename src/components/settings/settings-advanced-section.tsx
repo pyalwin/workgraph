@@ -66,6 +66,7 @@ const PRESETS = [
   { id: 'operations', label: 'Operations' },
   { id: 'legal', label: 'Legal' },
   { id: 'finance', label: 'Finance' },
+  { id: 'founder', label: 'Founder' },
 ];
 
 export function SettingsAdvancedSection() {
@@ -102,6 +103,14 @@ export function SettingsAdvancedSection() {
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<any>(null);
   const [syncResult, setSyncResult] = useState<any>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichAudit, setEnrichAudit] = useState<{ totalGmail: number; enriched: number; chunked: number; embedded: number; entityMentions: number; topicTags: number; gmailCategoryTags: number; withSummary: number; gmailLinks: number } | null>(null);
+  const [enrichResult, setEnrichResult] = useState<{ ok: boolean; enrich?: { scanned: number; enriched: number; skipped: number }; chunk?: { items: number; chunks: number } | null; embed?: { embedded?: number; failed?: number } | null; crossref?: { items: number; links: number } | null; pipeline?: { itemsMatched: number; scanned: number; synced: number } | null; error?: string } | null>(null);
+  const [enrichForce, setEnrichForce] = useState(false);
+  // Phase 4: each user owns exactly one workspace. Hide the "Add Workspace"
+  // form once the user has one.
+  const [hasWorkspace, setHasWorkspace] = useState(false);
+  const [workspaceCreateError, setWorkspaceCreateError] = useState<string | null>(null);
 
   const fetchSyncStatus = () => {
     fetch('/api/sync')
@@ -123,22 +132,36 @@ export function SettingsAdvancedSection() {
       .then((r) => r.json())
       .then((data) => setWorkspaces(data.workspaces || []))
       .catch(() => {});
+    fetch('/api/workspaces/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) setHasWorkspace(Boolean(data.hasWorkspace));
+      })
+      .catch(() => {});
     fetchSyncStatus();
+    fetch('/api/enrichment/gmail')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data) setEnrichAudit(data); })
+      .catch(() => {});
   }, []);
 
   const createWorkspace = async () => {
     if (!workspaceForm.name.trim()) return;
+    setWorkspaceCreateError(null);
     const res = await fetch('/api/workspaces', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(workspaceForm),
     });
     const data = await res.json();
-    if (data.workspace) {
-      setWorkspaces((prev) => [...prev, data.workspace]);
-      await refreshWorkspaces();
-      setWorkspaceForm((prev) => ({ ...prev, name: '' }));
+    if (!res.ok || !data.workspace) {
+      setWorkspaceCreateError(data?.error || 'Failed to create workspace');
+      return;
     }
+    setWorkspaces((prev) => [...prev, data.workspace]);
+    await refreshWorkspaces();
+    setHasWorkspace(true);
+    setWorkspaceForm((prev) => ({ ...prev, name: '' }));
   };
 
   const toggleWorkspaceEnabled = async (workspaceId: string, currentEnabled: boolean) => {
@@ -202,6 +225,29 @@ export function SettingsAdvancedSection() {
       setSyncResult({ ok: false, error: err.message });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleGmailEnrich = async (opts: { force?: boolean; skipLlm?: boolean } = {}) => {
+    setEnriching(true);
+    setEnrichResult(null);
+    const qs = new URLSearchParams();
+    if (opts.force) qs.set('force', 'true');
+    if (opts.skipLlm) qs.set('skipLlm', 'true');
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    try {
+      const res = await fetch(`/api/enrichment/gmail${query}`, { method: 'POST' });
+      const data = await res.json();
+      setEnrichResult(data);
+      // Refresh audit immediately after the run so the user sees the new counts.
+      fetch('/api/enrichment/gmail')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d) setEnrichAudit(d); })
+        .catch(() => {});
+    } catch (err: any) {
+      setEnrichResult({ ok: false, error: err.message });
+    } finally {
+      setEnriching(false);
     }
   };
 
@@ -451,54 +497,69 @@ export function SettingsAdvancedSection() {
                 </div>
               </div>
               <div>
-                <div className="text-[0.87rem] font-medium text-black tracking-tight">Add Custom Workspace</div>
-                <div className="text-[0.78rem] text-[#999] mt-[2px] mb-4">
-                  Start from the generic configurable ontology, then choose visible modules.
-                </div>
-                <div className="flex flex-col gap-3">
-                  <input
-                    type="text"
-                    placeholder="Workspace name"
-                    value={workspaceForm.name}
-                    onChange={(e) => setWorkspaceForm((prev) => ({ ...prev, name: e.target.value }))}
-                    className="w-full px-3 py-[7px] rounded-lg border border-black/[0.07] text-[0.82rem] text-[#333] placeholder:text-[#bbb] outline-none focus:border-black/20 transition-colors bg-white"
-                  />
-                  <select
-                    value={workspaceForm.preset}
-                    onChange={(e) => setWorkspaceForm((prev) => ({ ...prev, preset: e.target.value }))}
-                    className="w-full px-3 py-[7px] rounded-lg border border-black/[0.07] text-[0.82rem] text-[#333] outline-none focus:border-black/20 transition-colors bg-white"
-                  >
-                    {PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>{preset.label}</option>
-                    ))}
-                  </select>
-                  <div className="grid grid-cols-2 gap-2">
-                    {WORKSPACE_MODULES.map((module) => (
-                      <label key={module.id} className="flex items-center gap-[8px] py-[5px] px-[6px] rounded-lg cursor-pointer hover:bg-[#f5f5f5] transition-all">
-                        <input
-                          type="checkbox"
-                          checked={workspaceForm.modules[module.id] ?? false}
-                          onChange={() => setWorkspaceForm((prev) => ({
-                            ...prev,
-                            modules: {
-                              ...prev.modules,
-                              [module.id]: !(prev.modules[module.id] ?? false),
-                            },
-                          }))}
-                          className="w-[14px] h-[14px] accent-black cursor-pointer"
-                        />
-                        <span className="text-[0.78rem] text-[#333]">{module.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <button
-                    onClick={createWorkspace}
-                    disabled={!workspaceForm.name.trim()}
-                    className="bg-black text-white rounded-lg px-5 py-[7px] text-[0.82rem] font-medium border-none cursor-pointer hover:bg-[#333] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Add Workspace
-                  </button>
-                </div>
+                {hasWorkspace ? (
+                  <>
+                    <div className="text-[0.87rem] font-medium text-black tracking-tight">Workspace</div>
+                    <div className="text-[0.78rem] text-[#999] mt-[2px] mb-4">
+                      You already have a workspace. Each account is limited to one workspace —
+                      delete the existing one to create a different one.
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-[0.87rem] font-medium text-black tracking-tight">Add Workspace</div>
+                    <div className="text-[0.78rem] text-[#999] mt-[2px] mb-4">
+                      Start from the generic configurable ontology, then choose visible modules.
+                    </div>
+                    <div className="flex flex-col gap-3">
+                      <input
+                        type="text"
+                        placeholder="Workspace name"
+                        value={workspaceForm.name}
+                        onChange={(e) => setWorkspaceForm((prev) => ({ ...prev, name: e.target.value }))}
+                        className="w-full px-3 py-[7px] rounded-lg border border-black/[0.07] text-[0.82rem] text-[#333] placeholder:text-[#bbb] outline-none focus:border-black/20 transition-colors bg-white"
+                      />
+                      <select
+                        value={workspaceForm.preset}
+                        onChange={(e) => setWorkspaceForm((prev) => ({ ...prev, preset: e.target.value }))}
+                        className="w-full px-3 py-[7px] rounded-lg border border-black/[0.07] text-[0.82rem] text-[#333] outline-none focus:border-black/20 transition-colors bg-white"
+                      >
+                        {PRESETS.map((preset) => (
+                          <option key={preset.id} value={preset.id}>{preset.label}</option>
+                        ))}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        {WORKSPACE_MODULES.map((module) => (
+                          <label key={module.id} className="flex items-center gap-[8px] py-[5px] px-[6px] rounded-lg cursor-pointer hover:bg-[#f5f5f5] transition-all">
+                            <input
+                              type="checkbox"
+                              checked={workspaceForm.modules[module.id] ?? false}
+                              onChange={() => setWorkspaceForm((prev) => ({
+                                ...prev,
+                                modules: {
+                                  ...prev.modules,
+                                  [module.id]: !(prev.modules[module.id] ?? false),
+                                },
+                              }))}
+                              className="w-[14px] h-[14px] accent-black cursor-pointer"
+                            />
+                            <span className="text-[0.78rem] text-[#333]">{module.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        onClick={createWorkspace}
+                        disabled={!workspaceForm.name.trim()}
+                        className="bg-black text-white rounded-lg px-5 py-[7px] text-[0.82rem] font-medium border-none cursor-pointer hover:bg-[#333] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        Add Workspace
+                      </button>
+                      {workspaceCreateError && (
+                        <div className="text-[0.72rem] text-[#c53030]">{workspaceCreateError}</div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             <div className="mt-6 pt-6 border-t border-black/[0.07]">
@@ -628,6 +689,114 @@ export function SettingsAdvancedSection() {
               </div>
             )}
 
+            {/* Gmail enrichment audit — proves the LLM pipeline has been
+                delivered. Loaded on mount, refreshed after each Run. */}
+            {enrichAudit && (
+              <div className="rounded-lg bg-[#fafafa] px-4 py-3 mb-4 mt-4 border-t border-black/[0.07] pt-4">
+                <div className="text-[0.72rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-2">
+                  Gmail enrichment audit
+                </div>
+                <div className="grid grid-cols-3 gap-x-4 gap-y-2 text-[0.72rem] text-[#555]">
+                  <div>
+                    <div className="text-[#999]">Enriched</div>
+                    <div className="font-semibold text-black tabular-nums">{enrichAudit.enriched} / {enrichAudit.totalGmail}</div>
+                  </div>
+                  <div>
+                    <div className="text-[#999]">With summary</div>
+                    <div className="font-semibold text-black tabular-nums">{enrichAudit.withSummary}</div>
+                  </div>
+                  <div>
+                    <div className="text-[#999]">Embedded</div>
+                    <div className="font-semibold text-black tabular-nums">{enrichAudit.embedded} / {enrichAudit.totalGmail}</div>
+                  </div>
+                  <div>
+                    <div className="text-[#999]">Entity mentions</div>
+                    <div className="font-semibold text-black tabular-nums">{enrichAudit.entityMentions}</div>
+                  </div>
+                  <div>
+                    <div className="text-[#999]">Topic tags</div>
+                    <div className="font-semibold text-black tabular-nums">{enrichAudit.topicTags}</div>
+                  </div>
+                  <div>
+                    <div className="text-[#999]">Gmail edges</div>
+                    <div className="font-semibold text-black tabular-nums">{enrichAudit.gmailLinks}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Gmail enrichment — single action. Runs LLM classification +
+                entity extraction, reruns cross-references, materializes
+                pipeline graph edges. Replaces the older "Rebuild pipeline
+                edges" button (this does that and more). */}
+            <div className="flex items-center justify-between mb-4 pt-4 border-t border-black/[0.07]">
+              <div>
+                <div className="text-[0.87rem] font-medium text-black tracking-tight">Enrich Gmail &amp; rebuild graph</div>
+                <div className="text-[0.78rem] text-[#999] mt-[2px]">
+                  LLM-classify threads (category, topics, body entities, summary), normalize authors, rerun cross-references, and materialize pipeline edges.
+                </div>
+                <label className="flex items-center gap-2 mt-2 text-[0.72rem] text-[#777] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enrichForce}
+                    onChange={(e) => setEnrichForce(e.target.checked)}
+                    className="w-[13px] h-[13px] accent-black cursor-pointer"
+                  />
+                  Re-classify items that were already enriched
+                </label>
+              </div>
+              <button
+                onClick={() => handleGmailEnrich({ force: enrichForce })}
+                disabled={enriching}
+                className="bg-black text-white rounded-lg px-5 py-[7px] text-[0.82rem] font-medium border-none cursor-pointer hover:bg-[#333] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {enriching ? 'Running...' : 'Run'}
+              </button>
+            </div>
+
+            {enrichResult && (
+              <div className={
+                'rounded-lg px-4 py-3 mb-4 text-[0.78rem] ' +
+                (enrichResult.ok
+                  ? 'bg-[rgba(26,135,84,0.06)] text-[#1a8754]'
+                  : 'bg-[rgba(197,48,48,0.06)] text-[#c53030]')
+              }>
+                {enrichResult.ok ? (
+                  <div>
+                    <div className="font-medium">Gmail enrichment complete</div>
+                    {enrichResult.enrich && (
+                      <div className="text-[0.72rem] opacity-80 mt-1">
+                        Enriched <span className="font-semibold tabular-nums">{enrichResult.enrich.enriched}</span> of <span className="font-semibold tabular-nums">{enrichResult.enrich.scanned}</span> Gmail threads
+                        {enrichResult.enrich.skipped > 0 && <> · {enrichResult.enrich.skipped} skipped</>}
+                      </div>
+                    )}
+                    {(enrichResult.chunk || enrichResult.embed) && (
+                      <div className="text-[0.72rem] opacity-80 mt-1">
+                        Chunks: <span className="font-semibold tabular-nums">{enrichResult.chunk?.chunks ?? 0}</span> generated
+                        {' · '}
+                        Embeddings: <span className="font-semibold tabular-nums">{enrichResult.embed?.embedded ?? 0}</span> created
+                      </div>
+                    )}
+                    {enrichResult.crossref && (
+                      <div className="text-[0.72rem] opacity-80 mt-1">
+                        Cross-references: scanned <span className="font-semibold tabular-nums">{enrichResult.crossref.items}</span> items · created <span className="font-semibold tabular-nums">{enrichResult.crossref.links}</span> links
+                      </div>
+                    )}
+                    {enrichResult.pipeline && (
+                      <div className="text-[0.72rem] opacity-80 mt-1">
+                        Pipeline graph: re-matched <span className="font-semibold tabular-nums">{enrichResult.pipeline.itemsMatched}</span> · synced <span className="font-semibold tabular-nums">{enrichResult.pipeline.synced}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="font-medium">Enrichment failed</div>
+                    <div className="text-[0.72rem] opacity-80">{enrichResult.error}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Sync Status per source */}
             {syncStatus && (
               <div className="border-t border-black/[0.07] pt-4">
@@ -656,11 +825,24 @@ export function SettingsAdvancedSection() {
         </Card>
       </div>
 
-      {/* Data Sources */}
+      {/* Data Sources — only those that have actually been synced at least
+          once OR are already enabled in the workspace config. Avoids showing
+          aspirational toggles for connectors that aren't connected yet. */}
+      {(() => {
+        const connectedIds = new Set<string>(
+          Object.entries(syncStatus?.sources ?? {})
+            .filter(([, info]: [string, any]) => (info?.count ?? 0) > 0 || info?.lastSync)
+            .map(([source]) => source),
+        );
+        const visibleSources = DATA_SOURCES.filter(
+          (s) => connectedIds.has(s.id) || isSourceEnabled(s.id),
+        );
+        if (visibleSources.length === 0) return null;
+        return (
       <div className="mb-11">
         <h2 className="text-[0.67rem] font-semibold uppercase tracking-[0.07em] text-[#999] mb-4">Data Sources</h2>
         <div className="flex flex-col gap-[10px]">
-          {DATA_SOURCES.map((source) => (
+          {visibleSources.map((source) => (
             <Card key={source.id}>
               <CardContent className="pt-[22px]">
                 <div className="flex items-center justify-between">
@@ -742,6 +924,8 @@ export function SettingsAdvancedSection() {
           ))}
         </div>
       </div>
+        );
+      })()}
 
       {/* Strategic Goals */}
       <div className="mb-11">

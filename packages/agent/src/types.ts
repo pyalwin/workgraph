@@ -34,7 +34,14 @@ export interface Job {
 
 /**
  * JobResult — posted to POST /api/agent/jobs/:id/result.
+ *
+ * 'defer' tells the server to reschedule this job rather than mark it
+ * terminal. Used when a handler hits a rate-limit / quota that takes
+ * longer to recover than the agent should sleep in-process. The handler
+ * supplies retry_after_seconds based on its provider's policy; the server
+ * clamps to [60s, 24h] and counts attempts toward a hard cap.
  */
 export type JobResult =
   | { status: 'done'; payload: unknown }
-  | { status: 'failed'; error: string };
+  | { status: 'failed'; error: string }
+  | { status: 'defer'; retry_after_seconds: number; error?: string };

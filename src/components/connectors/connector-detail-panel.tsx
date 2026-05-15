@@ -6,6 +6,7 @@ import * as SiIcons from 'react-icons/si';
 import type { IconType } from 'react-icons';
 import { getPreset, presetFieldsToPayload, type ConnectorPreset } from '@/lib/connectors/presets';
 import { connectors as connectorRegistry } from '@/lib/connectors/registry';
+import { isMCPConnector } from '@/lib/connectors/types';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export interface SavedConnectorRow {
@@ -71,6 +72,7 @@ export function ConnectorDetailPanel({
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [confirmCleanup, setConfirmCleanup] = useState(false);
   const [confirmFullResync, setConfirmFullResync] = useState(false);
+  const [githubWindow, setGithubWindow] = useState<'7d' | '30d' | 'all'>('7d');
 
   useEffect(() => {
     const next: Record<string, string> = {};
@@ -104,7 +106,8 @@ export function ConnectorDetailPanel({
 
   const slotKey = saved?.slot || preset.source;
   const installed = saved?.status === 'configured';
-  const supportedLists = connectorRegistry[source]?.supportedLists ?? [];
+  const registryEntry = connectorRegistry[source];
+  const supportedLists = registryEntry && isMCPConnector(registryEntry) ? registryEntry.supportedLists ?? [] : [];
   const usesOAuth = (saved?.config?.options as any)?.oauth === true;
   const oauthAvailable = Boolean(preset.oauth);
   const oauthStartHref = oauthAvailable
@@ -170,10 +173,6 @@ export function ConnectorDetailPanel({
       setSyncing(false);
     }
   };
-
-  // GitHub-only: window selector for the trails sync. Other connectors use
-  // their adapter-specific incremental floor and the simple "Sync now" button.
-  const [githubWindow, setGithubWindow] = useState<'7d' | '30d' | 'all'>('7d');
 
   const test = async () => {
     setTesting(true);
@@ -429,6 +428,22 @@ export function ConnectorDetailPanel({
           return <Section title={sectionTitle}>{credentialFields}</Section>;
         })()}
 
+        {/* Sync window — primary configuration concern, visible whenever
+            the connector is installed. Was previously buried inside Advanced
+            settings; users couldn't find it. */}
+        {installed && (
+          <Section title="Sync window">
+            <BackfillFromControl
+              workspaceId={workspaceId}
+              slotKey={slotKey}
+              source={preset.source}
+              saved={saved}
+              transport={saved?.transport ?? preset.transport}
+              onChanged={onChanged}
+            />
+          </Section>
+        )}
+
         <section>
           <button
             type="button"
@@ -450,16 +465,6 @@ export function ConnectorDetailPanel({
                   </div>
                 )}
               </div>
-              {installed && (
-                <BackfillFromControl
-                  workspaceId={workspaceId}
-                  slotKey={slotKey}
-                  source={preset.source}
-                  saved={saved}
-                  transport={saved?.transport ?? preset.transport}
-                  onChanged={onChanged}
-                />
-              )}
             </div>
           )}
         </section>
@@ -772,6 +777,14 @@ function Pill({ tone, children }: { tone: 'emerald' | 'amber' | 'muted' | 'emera
 }
 
 function DetailIcon({ preset }: { preset: ConnectorPreset }) {
+  if (preset.iconAsset) {
+    return (
+      <div className="shrink-0 w-12 h-12 rounded-xl grid place-items-center bg-white border border-black/[0.08]" aria-hidden>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={preset.iconAsset} alt="" width={28} height={28} />
+      </div>
+    );
+  }
   const Icon: IconType | undefined = preset.iconKey
     ? (SiIcons as unknown as Record<string, IconType>)[preset.iconKey]
     : undefined;
@@ -806,31 +819,70 @@ interface BackfillFromControlProps {
   onChanged: () => void;
 }
 
+type BackfillMode = 'default' | 'last30' | 'last90' | 'last365' | 'custom' | 'all';
+
+function deriveInitialMode(options: Record<string, unknown> | undefined): BackfillMode {
+  const days = options?.backfillDays;
+  if (typeof days === 'number') {
+    if (days === 30) return 'last30';
+    if (days === 90) return 'last90';
+    if (days === 365) return 'last365';
+    return 'custom';
+  }
+  const from = options?.backfillFrom;
+  if (typeof from === 'string') {
+    if (from.toLowerCase() === 'all') return 'all';
+    if (from.trim()) return 'custom';
+  }
+  return 'default';
+}
+
 function BackfillFromControl({ workspaceId, slotKey, source, saved, transport, onChanged }: BackfillFromControlProps) {
-  const current = (saved?.config?.options as any)?.backfillFrom as string | undefined;
-  const initialMode = current === 'all' ? 'all' : current ? 'custom' : 'default';
-  const [mode, setMode] = useState<'default' | 'custom' | 'all'>(initialMode);
-  const [date, setDate] = useState(current && current !== 'all' ? current : '2026-01-01');
+  const initialOpts = (saved?.config?.options as Record<string, unknown> | undefined) || {};
+  const [mode, setMode] = useState<BackfillMode>(deriveInitialMode(initialOpts));
+  const [fromDate, setFromDate] = useState(
+    typeof initialOpts.backfillFrom === 'string' && initialOpts.backfillFrom !== 'all'
+      ? initialOpts.backfillFrom
+      : '',
+  );
+  const [untilDate, setUntilDate] = useState(
+    typeof initialOpts.backfillUntil === 'string' ? initialOpts.backfillUntil : '',
+  );
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
 
-  // Re-sync local state if saved changes externally (e.g. after install/cleanup polling)
   useEffect(() => {
-    const next = (saved?.config?.options as any)?.backfillFrom as string | undefined;
-    setMode(next === 'all' ? 'all' : next ? 'custom' : 'default');
-    if (next && next !== 'all') setDate(next);
+    const opts = (saved?.config?.options as Record<string, unknown> | undefined) || {};
+    setMode(deriveInitialMode(opts));
+    if (typeof opts.backfillFrom === 'string' && opts.backfillFrom !== 'all') {
+      setFromDate(opts.backfillFrom);
+    }
+    if (typeof opts.backfillUntil === 'string') {
+      setUntilDate(opts.backfillUntil);
+    }
   }, [saved?.config?.options]);
 
   const save = async () => {
     setSaving(true);
     setSavedMsg(null);
     try {
-      const value = mode === 'all' ? 'all' : mode === 'custom' ? date : ''; // '' = remove the override
       const nextOptions = { ...(saved?.config?.options || {}) } as Record<string, unknown>;
-      if (value) nextOptions.backfillFrom = value;
-      else delete nextOptions.backfillFrom;
+      // Clear all three before re-setting based on selected mode.
+      delete nextOptions.backfillDays;
+      delete nextOptions.backfillFrom;
+      delete nextOptions.backfillUntil;
 
-      const body: any = { slot: slotKey, source, transport, options: nextOptions };
+      if (mode === 'last30') nextOptions.backfillDays = 30;
+      else if (mode === 'last90') nextOptions.backfillDays = 90;
+      else if (mode === 'last365') nextOptions.backfillDays = 365;
+      else if (mode === 'all') nextOptions.backfillFrom = 'all';
+      else if (mode === 'custom') {
+        if (fromDate) nextOptions.backfillFrom = fromDate;
+        if (untilDate) nextOptions.backfillUntil = untilDate;
+      }
+      // mode === 'default' → all three deleted, fallback to 90d default
+
+      const body: Record<string, unknown> = { slot: slotKey, source, transport, options: nextOptions };
       if (saved?.config?.url) body.url = saved.config.url;
       if (saved?.config?.command) body.command = saved.config.command;
       if (saved?.config?.args) body.args = saved.config.args;
@@ -857,29 +909,55 @@ function BackfillFromControl({ workspaceId, slotKey, source, saved, transport, o
       <div className="font-sans flex items-center gap-3 flex-wrap text-xs text-[#444]">
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input type="radio" checked={mode === 'default'} onChange={() => setMode('default')} />
-          Default (2026-01-01)
+          Default (last 90 days)
         </label>
         <label className="flex items-center gap-1.5 cursor-pointer">
-          <input type="radio" checked={mode === 'custom'} onChange={() => setMode('custom')} />
-          From date:
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => { setDate(e.target.value); setMode('custom'); }}
-            className="h-7 px-1.5 rounded border border-black/10 text-xs font-sans"
-          />
+          <input type="radio" checked={mode === 'last30'} onChange={() => setMode('last30')} />
+          Last 30 days
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input type="radio" checked={mode === 'last90'} onChange={() => setMode('last90')} />
+          Last 90 days
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input type="radio" checked={mode === 'last365'} onChange={() => setMode('last365')} />
+          Last year
         </label>
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input type="radio" checked={mode === 'all'} onChange={() => setMode('all')} />
-          Sync all history
+          All history
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input type="radio" checked={mode === 'custom'} onChange={() => setMode('custom')} />
+          Custom range
         </label>
       </div>
+      {mode === 'custom' && (
+        <div className="font-sans flex items-center gap-2 flex-wrap text-xs text-[#444] pl-1">
+          <span className="text-[#888]">From</span>
+          <input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-7 px-1.5 rounded border border-black/10 text-xs font-sans"
+          />
+          <span className="text-[#888]">to</span>
+          <input
+            type="date"
+            value={untilDate}
+            onChange={(e) => setUntilDate(e.target.value)}
+            placeholder="today"
+            className="h-7 px-1.5 rounded border border-black/10 text-xs font-sans"
+          />
+          <small className="text-[#888]">Leave end blank for "until now".</small>
+        </div>
+      )}
       <div className="flex items-center gap-3 font-sans">
         <button
           type="button"
           className="btn btn-ghost text-xs !py-1"
           onClick={save}
-          disabled={saving || (mode === 'custom' && !date)}
+          disabled={saving || (mode === 'custom' && !fromDate)}
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
@@ -889,7 +967,7 @@ function BackfillFromControl({ workspaceId, slotKey, source, saved, transport, o
           </small>
         )}
         <small className="text-[#888] ml-auto">
-          Per-project incremental still wins for projects that already have items.
+          Per-bucket incremental still wins for items already synced.
         </small>
       </div>
     </div>

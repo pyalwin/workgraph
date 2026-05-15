@@ -34,6 +34,12 @@ export interface ConnectorPreset {
   // Simple Icons component name (from `react-icons/si`). Optional — falls back
   // to the monogram when no brand glyph exists (e.g. private internal tools).
   iconKey?: string;
+  // Optional path to an SVG asset under /public. Takes precedence over
+  // iconKey when set. Use this for brands whose guidelines disallow
+  // monochromatic recoloring of their logo (e.g. Google Drive,
+  // Google Calendar) — the Simple Icons glyph plus brandHex tint
+  // produces a recolored monogram which violates Google's brand rules.
+  iconAsset?: string;
   monogram: string;           // 1-2 character fallback glyph
   brandHex: string;           // brand color used for icon fill
 
@@ -219,41 +225,76 @@ export const CONNECTOR_PRESETS: Record<string, ConnectorPreset> = {
     status: 'guided',
   },
 
+  gmail: {
+    source: 'gmail',
+    label: 'Gmail',
+    blurb: 'Index inbox threads (subjects, participants, bodies) via the Gmail API.',
+    transport: 'http',
+    oauth: { provider: 'google', preferredOver: null },
+    category: 'communication',
+    popularity: 1,
+    iconAsset: '/brand/gmail.png',
+    monogram: 'GM',
+    brandHex: '#EA4335',
+    fields: [],
+    setupSteps: [
+      'Connect your Google Workspace once (one consent grants Gmail, Drive, and Calendar).',
+      'Sync runs against the Gmail API directly — no MCP server needed.',
+    ],
+    features: [
+      'Thread-level ingest with subject, participants, and bodies',
+      'Auto-link threads to deals/investors/candidates by participant email',
+      'History-based incremental sync',
+    ],
+    status: 'one-click',
+  },
+
   gdrive: {
     source: 'gdrive',
     label: 'Google Drive',
-    blurb: 'Sync Docs, Sheets, and Slides metadata + content via Google OAuth.',
-    transport: 'stdio',
+    blurb: 'Index Docs, Sheets, and Slides metadata + content via the Drive API.',
+    transport: 'http',
+    oauth: { provider: 'google', preferredOver: null },
     category: 'document',
     popularity: 2,
-    iconKey: 'SiGoogledrive',
+    iconAsset: '/brand/gdrive.png',
     monogram: 'GD',
     brandHex: '#1FA463',
-    stdio: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-gdrive'] },
-    fields: [
-      {
-        name: 'credentialsPath',
-        label: 'Path to OAuth credentials JSON',
-        placeholder: '/Users/you/.config/gdrive-creds.json',
-        required: true,
-      },
-    ],
+    fields: [],
     setupSteps: [
-      'Create an OAuth Client ID (Desktop) in Google Cloud Console.',
-      'Download the credentials.json file and save it locally.',
-      'On first sync, a browser window opens to grant Drive access.',
+      'Connect your Google Workspace once (one consent grants Gmail, Drive, and Calendar).',
+      'Drive content syncs via the official Drive API.',
     ],
-    authLink: {
-      label: 'Open Google Cloud credentials',
-      url: 'https://console.cloud.google.com/apis/credentials',
-    },
     features: [
-      'Docs, Sheets, and Slides metadata',
-      'Document content for indexing',
+      'Docs / Sheets / Slides exported to text for indexing',
       'Owner and modification history',
-      'Folder hierarchy',
+      'Folder hierarchy and starred files',
     ],
-    status: 'guided',
+    status: 'one-click',
+  },
+
+  gcal: {
+    source: 'gcal',
+    label: 'Google Calendar',
+    blurb: 'Sync calendar events with attendees, descriptions, and conferencing links.',
+    transport: 'http',
+    oauth: { provider: 'google', preferredOver: null },
+    category: 'meeting',
+    popularity: 2,
+    iconAsset: '/brand/gcal.png',
+    monogram: 'GC',
+    brandHex: '#4285F4',
+    fields: [],
+    setupSteps: [
+      'Connect your Google Workspace once (one consent grants Gmail, Drive, and Calendar).',
+      'Events sync via the Calendar API with sync-token-based incremental updates.',
+    ],
+    features: [
+      'Events with title, description, attendees, location',
+      'Hangout / Meet conferencing links',
+      'Auto-link to deals/investors/candidates by attendee email',
+    ],
+    status: 'one-click',
   },
 
   github: {
@@ -506,48 +547,6 @@ export const CONNECTOR_PRESETS: Record<string, ConnectorPreset> = {
     status: 'one-click',
   },
 
-  gcal: {
-    source: 'gcal',
-    label: 'Google Calendar',
-    blurb: 'Sync events from your Google Calendar(s).',
-    transport: 'stdio',
-    category: 'meeting',
-    popularity: 9,
-    badge: 'new',
-    iconKey: 'SiGooglecalendar',
-    monogram: 'GC',
-    brandHex: '#4285F4',
-    stdio: { command: 'npx', args: ['-y', '@cocal/google-calendar-mcp'] },
-    fields: [
-      {
-        name: 'credentialsPath',
-        label: 'OAuth credentials JSON path',
-        placeholder: '/Users/you/.config/gcal-creds.json',
-        required: true,
-      },
-      {
-        name: 'calendarId',
-        label: 'Calendar ID',
-        placeholder: 'primary',
-      },
-    ],
-    setupSteps: [
-      'Create an OAuth Client ID (Desktop) in Google Cloud Console.',
-      'Enable the Google Calendar API for the project.',
-      'Save the downloaded credentials.json locally.',
-    ],
-    authLink: {
-      label: 'Open Google Cloud credentials',
-      url: 'https://console.cloud.google.com/apis/credentials',
-    },
-    features: [
-      'Events with attendees and conferencing links',
-      'Recurring event metadata',
-      'Locations and descriptions',
-      'Updated/cancelled status',
-    ],
-    status: 'guided',
-  },
 };
 
 export function getPreset(source: string): ConnectorPreset | null {
@@ -615,9 +614,6 @@ export function presetFieldsToPayload(
     const hdr = JSON.stringify({ Authorization: `Bearer ${token}`, 'Notion-Version': '2022-06-28' });
     envEntries.push(`OPENAPI_MCP_HEADERS=${hdr}`);
   }
-  if (preset.source === 'gdrive' && command && opts.credentialsPath) {
-    envEntries.push(`GDRIVE_CREDENTIALS_PATH=${opts.credentialsPath}`);
-  }
   if (preset.source === 'github' && command) {
     if (token) envEntries.push(`GITHUB_PERSONAL_ACCESS_TOKEN=${token}`);
   }
@@ -657,11 +653,6 @@ export function presetFieldsToPayload(
     }
     if (opts.space) envEntries.push(`MCP_CONFLUENCE_SPACE=${opts.space}`);
   }
-  if (preset.source === 'gcal' && command) {
-    if (opts.credentialsPath) envEntries.push(`GOOGLE_OAUTH_CREDENTIALS=${opts.credentialsPath}`);
-    if (opts.calendarId) envEntries.push(`MCP_GCAL_CALENDAR_ID=${opts.calendarId}`);
-  }
-
   // We encode env-style hints into args so they survive a generic save; the
   // mcp-client merges any KEY=VALUE leading args back into the spawned env.
   if (envEntries.length && args) {

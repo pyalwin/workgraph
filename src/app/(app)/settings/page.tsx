@@ -8,6 +8,7 @@ import { ConnectorDetailPanel, type SavedConnectorRow } from '@/components/conne
 import { WORKSPACE_PRESETS, type WorkspacePreset } from '@/components/workspace/workspace-onboarding';
 import { optionsForSlot } from '@/lib/connectors/preset-mapping';
 import { SettingsAdvancedSection } from '@/components/settings/settings-advanced-section';
+import { SettingsAccountSection } from '@/components/settings/settings-account-section';
 import { AIProvidersSection } from '@/components/ai/ai-providers-section';
 import { AITaskBackendsSection } from '@/components/ai/ai-task-backends-section';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
@@ -197,6 +198,8 @@ function ProfileTab() {
       <div className="flex justify-end">
         <button className="btn btn-primary" onClick={apply}>Apply changes</button>
       </div>
+
+      <SettingsAccountSection />
     </div>
   );
 }

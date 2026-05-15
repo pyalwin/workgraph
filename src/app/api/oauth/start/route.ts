@@ -7,6 +7,7 @@ import {
 } from '@/lib/oauth/providers';
 import { generatePkce, generateState, saveFlowState } from '@/lib/oauth/state';
 import { resolveDcrClient } from '@/lib/oauth/discovery';
+import { getPreset } from '@/lib/connectors/presets';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,9 +30,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: 'source and workspace are required' }, { status: 400 });
   }
 
-  const provider = getProvider(source);
+  // Resolve OAuth provider via the preset's oauth.provider field — for
+  // shared providers (e.g. all of gmail/gdrive/gcal use provider 'google'),
+  // the connector source and the provider key differ. Fall back to source
+  // for self-named providers (jira, github, slack).
+  const preset = getPreset(source);
+  const providerName = preset?.oauth?.provider ?? source;
+  const provider = getProvider(providerName);
   if (!provider) {
-    return NextResponse.json({ ok: false, error: `No OAuth provider registered for source "${source}"` }, { status: 400 });
+    return NextResponse.json({ ok: false, error: `No OAuth provider registered for "${providerName}"` }, { status: 400 });
   }
 
   // Resolution order: env-provided creds → cached/registered DCR client → fail.

@@ -14,6 +14,11 @@ import { githubTrailsRefreshWorkspace, issuePrSummaryRefresh, unmatchedPrAiMatch
 import { chunkEmbedRun } from './chunk-embed';
 import { almanacFanOutSections, almanacAssemble, almanacHandleJobFailure } from './almanac';
 import { projectBacklogRefresh } from './project-backlog';
+import {
+  gmailEnrichOrchestrator,
+  gmailEnrichOnComplete,
+  gmailEnrichWaveComplete,
+} from './gmail-enrich';
 
 export const functions = [
   heartbeat,
@@ -33,4 +38,7 @@ export const functions = [
   almanacAssemble,
   almanacHandleJobFailure,
   projectBacklogRefresh,
+  gmailEnrichOrchestrator,
+  gmailEnrichOnComplete,
+  gmailEnrichWaveComplete,
 ];

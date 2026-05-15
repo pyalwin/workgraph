@@ -26,6 +26,13 @@ const MENTION_REGEX  = /@[\w.-]+/g;
 const CHANNEL_REGEX  = /#[\w-]+/g;
 
 export const LINK_THRESHOLD = 0.6;
+// Communication-source pairs (gmail/slack/teams/meeting) lack the structural
+// backbone (project keys, repos, channel ids) that ticket-shaped sources use
+// to clear the 0.6 threshold. They cap naturally lower even with strong
+// content overlap — semantic/topic/entity signals alone rarely sum past 0.4.
+// A lower threshold for these pairs lets meaningful clusters (e.g. credit-card
+// emails from different banks) actually materialize as edges.
+export const LINK_THRESHOLD_SUPPORT_PAIR = 0.3;
 export const WINDOW_DAYS = 90;
 const CHUNK_TOP_K = 8;
 
@@ -452,17 +459,27 @@ async function scoreEntities(aId: string, bId: string): Promise<{ score: number;
 
 async function scoreTopics(aId: string, bId: string): Promise<{ score: number; count: number }> {
   const db = getLibsqlDb();
+  // Count shared 'topic' tags AND 'gmail_category' tags — the LLM enrichment
+  // emits both, and a shared category (finance, fundraising) is a meaningful
+  // similarity signal even when topic tags don't overlap exactly.
   const row = await db
     .prepare(
-      `SELECT COUNT(*) AS c
+      `SELECT
+        SUM(CASE WHEN t.category = 'topic' THEN 1 ELSE 0 END) AS topics,
+        SUM(CASE WHEN t.category = 'gmail_category' THEN 1 ELSE 0 END) AS categories
        FROM item_tags ia
        JOIN item_tags ib ON ib.tag_id = ia.tag_id AND ib.item_id = ?
        JOIN tags t ON t.id = ia.tag_id
-       WHERE ia.item_id = ? AND t.category = 'topic'`,
+       WHERE ia.item_id = ? AND t.category IN ('topic', 'gmail_category')`,
     )
-    .get<{ c: number }>(bId, aId);
-  if (!row?.c) return { score: 0, count: 0 };
-  return { score: Math.min(1, row.c * 0.3), count: row.c };
+    .get<{ topics: number; categories: number }>(bId, aId);
+  const topics = row?.topics ?? 0;
+  const categories = row?.categories ?? 0;
+  if (!topics && !categories) return { score: 0, count: 0 };
+  // 1 shared topic → 0.5 (was 0.3); 2 → 1.0. Category contributes half as
+  // much per share since it's a coarser signal.
+  const score = Math.min(1, topics * 0.5 + categories * 0.25);
+  return { score, count: topics + categories };
 }
 
 async function scoreEmbedding(aId: string, bId: string): Promise<{ score: number; bestChunks?: [number, number] }> {
@@ -506,7 +523,42 @@ function scoreContext(a: WorkItemRow, b: WorkItemRow): { score: number; note?: s
     const pB = b.source_id.split('-')[0];
     if (pA === pB) return { score: 1, note: `same jira project ${pA}` };
   }
+
+  // GSuite shared-participant context: two Gmail threads / Calendar events /
+  // Drive docs share signal when their participant/attendee/owner sets
+  // overlap. This is what gives email-to-email pairs a context anchor —
+  // without it, the only signal is body similarity which often won't clear
+  // the threshold by itself.
+  const peopleA = readPeople(a.source, mA);
+  const peopleB = readPeople(b.source, mB);
+  if (peopleA.size > 0 && peopleB.size > 0) {
+    let shared = 0;
+    for (const p of peopleA) if (peopleB.has(p)) shared++;
+    // 1 shared participant ≈ just the inbox owner appearing in both
+    // (every email the user receives has them in the participants list) — not
+    // informative. Require 2+ for any signal. Then 2 → 0.5, 3 → 0.8, 4+ → 1.0.
+    if (shared >= 2) {
+      const score = shared >= 4 ? 1 : shared >= 3 ? 0.8 : 0.5;
+      return { score, note: `${shared} shared participants` };
+    }
+  }
   return { score: 0 };
+}
+
+function readPeople(source: string, meta: any): Set<string> {
+  const out = new Set<string>();
+  const addEmails = (arr: unknown) => {
+    if (!Array.isArray(arr)) return;
+    for (const raw of arr) {
+      const s = String(raw ?? '').toLowerCase();
+      const m = s.match(/[^\s<>"]+@[^\s<>"]+/);
+      if (m) out.add(m[0]);
+    }
+  };
+  if (source === 'gmail') addEmails(meta?.participants);
+  else if (source === 'gcal') addEmails(meta?.attendees);
+  else if (source === 'gdrive') addEmails(meta?.owners);
+  return out;
 }
 
 function temporalMultiplier(a: WorkItemRow, b: WorkItemRow): number {
@@ -578,12 +630,39 @@ export async function createLinksForItem(itemId: string): Promise<number> {
       const strongSignalCount = [emb.score, ent.score, top.score, auth, ctx.score].filter(s => s > 0.2).length;
       const corroboration = strongSignalCount >= 2 ? 1 : 0.75;
 
-      // Supportive-source downweight — Notion/Meeting/Gmail connections without
-      // an explicit reference are treated as supporting context, not primary
-      // structural links.
-      const supportMul = (isSupporting(item.source) || isSupporting(other.source)) ? 0.8 : 1;
+      // Supportive-source downweight — Notion/Meeting/Gmail connections to
+      // ticket-shaped sources are treated as supporting context. But when
+      // BOTH items are supportive-kind (e.g. two Gmail threads), they form
+      // a peer relationship — penalizing them is incorrect and prevents the
+      // graph from ever linking emails-to-emails. So apply the multiplier
+      // only on mixed pairs.
+      const bothSupporting = isSupporting(item.source) && isSupporting(other.source);
+      const mixedSupport =
+        !bothSupporting && (isSupporting(item.source) || isSupporting(other.source));
+      const supportMul = mixedSupport ? 0.8 : 1;
 
-      finalScore = Math.min(1, Math.max(hardScore, weighted * tmul * corroboration * supportMul));
+      let composite = weighted * tmul * corroboration * supportMul;
+
+      // Content-similarity floor: when both items are supportive-kind
+      // (no structural anchors available), a single strong content signal
+      // — shared topic, shared entity cluster, or multiple shared
+      // participants — is enough to link. The default weighted formula
+      // distributes weight across 5 signals and can't reach the threshold
+      // from any single signal, even maxed out. The floor sidesteps that
+      // by short-circuiting on the strongest single content signal.
+      if (bothSupporting) {
+        const strongestContent = Math.max(top.score, ent.score, ctx.score);
+        if (strongestContent >= 0.5) {
+          // Floor at 0.32 — just over the comm-pair threshold (0.30) so
+          // any single strong signal links the pair. final score still
+          // reflects the underlying signal for ranking.
+          const floor = 0.32 + (strongestContent - 0.5) * 0.4;
+          composite = Math.max(composite, floor);
+          signals.content_floor = floor;
+        }
+      }
+
+      finalScore = Math.min(1, Math.max(hardScore, composite));
       signals.embedding = emb.score;
       signals.entities = ent.score;
       signals.topics = top.score;
@@ -595,7 +674,13 @@ export async function createLinksForItem(itemId: string): Promise<number> {
       bestChunks = emb.bestChunks;
     }
 
-    if (finalScore < LINK_THRESHOLD) continue;
+    // Threshold tier — communication-pair vs default. When both items are
+    // supportive-kind (gmail/slack/meeting/notion), they can never reach
+    // 0.6 without structural anchors. The lower tier acknowledges that.
+    const bothSupportingForThreshold =
+      isSupporting(item.source) && isSupporting(other.source);
+    const threshold = bothSupportingForThreshold ? LINK_THRESHOLD_SUPPORT_PAIR : LINK_THRESHOLD;
+    if (finalScore < threshold) continue;
 
     const linkType = determineLinkType(item, other.source);
     const linkId = await upsertLink(item.id, other.id, linkType, finalScore);
@@ -619,7 +704,9 @@ export async function createLinksForItem(itemId: string): Promise<number> {
   return created;
 }
 
-export async function createLinksForAll(opts: { limit?: number } = {}): Promise<{ items: number; links: number }> {
+export async function createLinksForAll(
+  opts: { limit?: number; verbose?: boolean } = {},
+): Promise<{ items: number; links: number; failed: number }> {
   await ensureInit();
   const db = getLibsqlDb();
   const rows = await db
@@ -628,13 +715,30 @@ export async function createLinksForAll(opts: { limit?: number } = {}): Promise<
     )
     .all<{ id: string }>(...(opts.limit ? [opts.limit] : []));
 
+  // Per-item try/catch with brief yield every batch — a single libSQL
+  // ECONNRESET shouldn't kill the whole rebuild. setImmediate yield gives
+  // the event loop a chance to recover from transient socket pressure.
   let totalLinks = 0;
+  let failed = 0;
   let i = 0;
   for (const row of rows) {
     i++;
-    if (i % 25 === 0) process.stdout.write(`  [${i}/${rows.length}] links=${totalLinks}\r`);
-    totalLinks += await createLinksForItem(row.id);
+    try {
+      totalLinks += await createLinksForItem(row.id);
+    } catch (err) {
+      failed += 1;
+      if (opts.verbose) {
+        console.warn(`[crossref] item ${row.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (i % 25 === 0) {
+      if (opts.verbose) {
+        process.stdout.write(`  [${i}/${rows.length}] links=${totalLinks} failed=${failed}\r`);
+      }
+      // Yield to the event loop so socket buffers can flush.
+      await new Promise<void>((res) => setImmediate(res));
+    }
   }
-  process.stdout.write('\n');
-  return { items: rows.length, links: totalLinks };
+  if (opts.verbose) process.stdout.write('\n');
+  return { items: rows.length, links: totalLinks, failed };
 }

@@ -11,14 +11,12 @@ const fallbackMenu = [
 
 export function Topbar() {
   const pathname = usePathname();
-  const { setState, workspaces, activeWorkspace } = useWorkgraphState();
+  const { activeWorkspace } = useWorkgraphState();
   const modules = activeWorkspace.modules || {};
   const baseMenu = activeWorkspace.ui?.menu?.length ? activeWorkspace.ui.menu : fallbackMenu;
   const navItems = baseMenu.some((m) => m.href === '/chat')
     ? baseMenu
     : [...baseMenu, { id: 'chat', label: 'Chat', href: '/chat', module: 'chat' }];
-  const enabledWorkspaces = workspaces.filter((w) => w.enabled !== false);
-  const workspaceOptions = enabledWorkspaces.length > 0 ? enabledWorkspaces : [activeWorkspace];
   const searchPlaceholder = activeWorkspace.ui?.terminology?.searchPlaceholder || 'Search entities, artifacts, decisions...';
 
   return (
@@ -40,18 +38,8 @@ export function Topbar() {
         </nav>
       </div>
       <div className="top-right">
-        <select
-          className="workspace-select"
-          value={activeWorkspace.id}
-          onChange={(event) => setState({ workspaceId: event.target.value })}
-          title="Workspace"
-        >
-          {workspaceOptions.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>
-              {workspace.name}
-            </option>
-          ))}
-        </select>
+        {/* Phase 4: workspace switcher removed — each user owns exactly one
+            workspace, resolved server-side via getUserWorkspaceId(). */}
         <div className="search">
           <span>{searchPlaceholder}</span>
           <kbd>⌘K</kbd>

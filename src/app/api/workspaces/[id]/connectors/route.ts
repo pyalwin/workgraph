@@ -11,6 +11,7 @@ import {
   type ConnectorConfigPayload,
 } from '@/lib/connectors/config-store';
 import { connectors } from '@/lib/connectors/registry';
+import { isMCPConnector } from '@/lib/connectors/types';
 import { optionsForSlot } from '@/lib/connectors/preset-mapping';
 
 export const dynamic = 'force-dynamic';
@@ -81,11 +82,17 @@ export async function POST(
     };
 
 
-    if (transport === 'http' && !payload.url) {
-      return NextResponse.json({ ok: false, error: 'url is required for http transport' }, { status: 400 });
-    }
-    if (transport === 'stdio' && !payload.command) {
-      return NextResponse.json({ ok: false, error: 'command is required for stdio transport' }, { status: 400 });
+    // Direct-API connectors (Gmail/Drive/Calendar) auth via shared OAuth
+    // provider rather than an MCP server URL or stdio command — skip the
+    // transport-shape requirements for them.
+    const isDirect = !isMCPConnector(adapter);
+    if (!isDirect) {
+      if (transport === 'http' && !payload.url) {
+        return NextResponse.json({ ok: false, error: 'url is required for http transport' }, { status: 400 });
+      }
+      if (transport === 'stdio' && !payload.command) {
+        return NextResponse.json({ ok: false, error: 'command is required for stdio transport' }, { status: 400 });
+      }
     }
 
     // On update, carry over fields the install form doesn't re-send.
@@ -111,7 +118,7 @@ export async function POST(
       workspaceId,
       slot,
       source,
-      serverId: adapter.serverId,
+      serverId: isMCPConnector(adapter) ? adapter.serverId : source,
       transport,
       config: payload,
       status: 'configured',

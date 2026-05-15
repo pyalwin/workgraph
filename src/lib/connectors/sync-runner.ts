@@ -2,7 +2,10 @@ import { getConnector } from './registry';
 import { connectMCP, resolveServerConfig } from './mcp-client';
 import { getConnectorConfigBySource, markSyncStarted, markSyncFinished, upsertConnectorConfig } from './config-store';
 import { runConnector } from './runner';
+import { runDirectConnector } from './direct-runner';
+import { getLibsqlDb } from '../db/libsql';
 import type { SyncResult } from '../sync/types';
+import type { Connector } from './types';
 
 export interface RunSyncOptions {
   /** ISO date, 'all' for full backfill, or null/undefined for per-bucket incremental. */
@@ -31,16 +34,12 @@ export async function runConnectorSync(
   source: string,
   options: RunSyncOptions = {},
 ): Promise<RunSyncSummary> {
-  const connector = getConnector(source);
+  // getConnector returns MCPConnector today; widen to the discriminated
+  // Connector union here so the kind-branch typechecks. Phase C will move
+  // this widening into the registry itself.
+  const connector = getConnector(source) as unknown as Connector;
   const cfg = await getConnectorConfigBySource(workspaceId, source);
   const savedOptions = cfg?.config?.options ?? {};
-
-  const server = await resolveServerConfig(connector.serverId, source, workspaceId, process.env);
-  if (!server) {
-    throw new Error(
-      `No MCP server config for ${connector.serverId} (workspace=${workspaceId}, source=${source})`,
-    );
-  }
 
   // Translate the orchestrator's 'full' / 'all' sentinel — adapters drop the
   // updated >= clause when since is empty string.
@@ -54,6 +53,155 @@ export async function runConnectorSync(
       since = options.since;
       pageLimit = options.limit ?? 200;
     }
+  }
+
+  // Direct-API branch — skip MCP transport resolution entirely. The
+  // direct-runner reads the OAuth token via getOAuthTokenByProvider, pages
+  // through connector.list, and returns a nextSyncMarker we persist below.
+  if (connector.kind === 'direct') {
+    if (!cfg) {
+      throw new Error(
+        `No connector config for direct-API ${source} (workspace=${workspaceId}). Connect via OAuth first.`,
+      );
+    }
+
+    // Cooldown check — if a prior run hit a provider rate-limit (daily
+    // quota), options.rate_limit_until holds an ISO timestamp. Skip the
+    // sync silently until the cooldown expires.
+    const cooldownIso = (cfg.config?.options as Record<string, unknown> | undefined)?.rate_limit_until;
+    if (typeof cooldownIso === 'string') {
+      const until = Date.parse(cooldownIso);
+      if (Number.isFinite(until) && until > Date.now()) {
+        const remainingSec = Math.floor((until - Date.now()) / 1000);
+        const skipMsg = `${source}: skipped (rate-limit cooldown ${remainingSec}s remaining until ${cooldownIso})`;
+        console.warn(`[sync] ${skipMsg}`);
+        await markSyncFinished(workspaceId, slot, { ok: true, itemsSynced: 0, error: null });
+        return {
+          itemsSynced: 0,
+          itemsUpdated: 0,
+          errors: [],
+          links: [],
+          ok: true,
+          skipped: 'rate_limit_cooldown',
+          cooldown_until: cooldownIso,
+        } as any;
+      }
+      // Cooldown expired — clear it before resuming.
+      try {
+        const cleared = { ...(cfg.config?.options ?? {}) } as Record<string, unknown>;
+        delete cleared.rate_limit_until;
+        const db = getLibsqlDb();
+        await db
+          .prepare(
+            `UPDATE workspace_connector_configs
+             SET config = json_set(coalesce(config, '{}'), '$.options', json(?)),
+                 updated_at = datetime('now')
+             WHERE id = ?`,
+          )
+          .run(JSON.stringify(cleared), cfg.id);
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    await markSyncStarted(workspaceId, slot);
+    let directResult: Awaited<ReturnType<typeof runDirectConnector>>;
+    try {
+      // Re-read the row so we get sync_marker / oauth_provider columns that
+      // ConnectorConfig doesn't surface. Cheap; runs once per sync.
+      const db = getLibsqlDb();
+      const row = await db
+        .prepare(
+          'SELECT id, source, sync_marker, oauth_provider FROM workspace_connector_configs WHERE id = ?',
+        )
+        .get<{ id: string; source: string; sync_marker: string | null; oauth_provider: string | null }>(
+          cfg.id,
+        );
+      if (!row) throw new Error(`connector_config row vanished: ${cfg.id}`);
+
+      directResult = await runDirectConnector(connector, {
+        workspaceId,
+        configRow: {
+          id: row.id,
+          source: row.source,
+          sync_marker: row.sync_marker,
+          oauth_provider: row.oauth_provider,
+          options: savedOptions,
+        },
+        since,
+        limit: pageLimit,
+        dryRun: false,
+        verbose: true,
+      });
+
+      // Persist the new sync marker only on a successful run (no errors that
+      // would invalidate the marker — e.g. a partial page fetch shouldn't
+      // advance the cursor past items we never ingested).
+      const realErrorsBeforePersist = (directResult.errors ?? []).filter(
+        (e) => !e.startsWith('dry-run'),
+      );
+      if (
+        directResult.nextSyncMarker &&
+        directResult.nextSyncMarker !== row.sync_marker &&
+        realErrorsBeforePersist.length === 0
+      ) {
+        const now = new Date().toISOString();
+        await db
+          .prepare(
+            'UPDATE workspace_connector_configs SET sync_marker = ?, updated_at = ? WHERE id = ?',
+          )
+          .run(directResult.nextSyncMarker, now, row.id);
+      }
+    } catch (err: any) {
+      const message = err?.message || String(err);
+      // GoogleRateLimitError carries a recovery hint — store it in the
+      // connector config options as a cooldown so any later sync attempt
+      // skips this connector until the window expires. This is the
+      // sync-side analog of agent_jobs.next_retry_at.
+      if (err?.name === 'GoogleRateLimitError' && cfg) {
+        try {
+          const { GoogleRateLimitError } = await import('./google-fetch');
+          if (err instanceof GoogleRateLimitError) {
+            const cooldownUntil = new Date(Date.now() + err.retry_after_seconds * 1000).toISOString();
+            const updatedOptions = { ...(cfg.config?.options ?? {}), rate_limit_until: cooldownUntil };
+            const cooldownDb = getLibsqlDb();
+            await cooldownDb
+              .prepare(
+                `UPDATE workspace_connector_configs
+                 SET config = json_set(coalesce(config, '{}'), '$.options', json(?)),
+                     updated_at = datetime('now')
+                 WHERE id = ?`,
+              )
+              .run(JSON.stringify(updatedOptions), cfg.id);
+            console.warn(
+              `[sync] ${source}: ${err.reason ?? '?'} — cooldown until ${cooldownUntil} (${err.retry_after_seconds}s)`,
+            );
+          }
+        } catch (cooldownErr) {
+          console.warn('[sync] failed to record cooldown:', cooldownErr instanceof Error ? cooldownErr.message : String(cooldownErr));
+        }
+      }
+      await markSyncFinished(workspaceId, slot, { ok: false, error: message });
+      throw err;
+    }
+
+    const items = (directResult.itemsSynced ?? 0) + (directResult.itemsUpdated ?? 0);
+    const realErrors = (directResult.errors ?? []).filter((e) => !e.startsWith('dry-run'));
+    const ok = realErrors.length === 0;
+    await markSyncFinished(workspaceId, slot, {
+      ok,
+      itemsSynced: items,
+      error: realErrors.length ? realErrors.slice(0, 3).join('; ') : null,
+    });
+    return { ...directResult, ok };
+  }
+
+  // MCP branch (default): resolve transport, connect, run as before.
+  const server = await resolveServerConfig(connector.serverId, source, workspaceId, process.env);
+  if (!server) {
+    throw new Error(
+      `No MCP server config for ${connector.serverId} (workspace=${workspaceId}, source=${source})`,
+    );
   }
 
   await markSyncStarted(workspaceId, slot);
@@ -95,6 +243,7 @@ export async function runConnectorSync(
         dryRun: false,
         verbose: true,
         options: resolvedOptions,
+        workspaceId,
       });
     } finally {
       try {

@@ -98,6 +98,14 @@ export function WorkgraphStateProvider({ children }: { children: ReactNode }) {
         }));
         setWorkspaces(nextWorkspaces);
         setSetupComplete(Boolean(data.setupComplete ?? nextWorkspaces.some((w: WorkspaceSummary) => w.enabled !== false)));
+
+        // Phase 4: bind the active workspace to the user's owned workspace
+        // (the API only returns workspaces auth_user_id matches). Pick the
+        // first enabled one and sync state + cookie.
+        const owned = nextWorkspaces.find((w: WorkspaceSummary) => w.enabled !== false) ?? nextWorkspaces[0];
+        if (owned) {
+          setStateRaw((prev) => (prev.workspaceId === owned.id ? prev : { ...prev, workspaceId: owned.id }));
+        }
       }
     } catch {
       // Keep local fallback if workspace API is unavailable.
@@ -136,6 +144,14 @@ export function WorkgraphStateProvider({ children }: { children: ReactNode }) {
     if (!hydrated) return;
     try {
       localStorage.setItem('wg-tweaks', JSON.stringify(state));
+    } catch {
+      // ignore
+    }
+    // Mirror workspaceId into a cookie so server components and API routes
+    // can read the active workspace without a query param. Read by
+    // getActiveWorkspaceId() on the server.
+    try {
+      document.cookie = `wg-workspace=${encodeURIComponent(state.workspaceId)}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
     } catch {
       // ignore
     }
