@@ -61,7 +61,7 @@ switch (command) {
 
 Commands:
   login [--url <server>] [--dev]   Pair this machine with your Workgraph workspace
-                                   (defaults to https://workgraph-beta.vercel.app;
+                                   (defaults to https://workgraph.space;
                                     --dev pairs with http://localhost:3000;
                                     WORKGRAPH_SERVER_URL env var also accepted)
   status                           Show pairing status and verify token

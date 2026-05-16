@@ -12,7 +12,7 @@ import { writeConfig } from '../config.js';
  * set `WORKGRAPH_SERVER_URL` once in their shell rc. Most users hit the
  * hosted default and never think about it.
  */
-const HOSTED_DEFAULT_URL = 'https://workgraph-beta.vercel.app';
+const HOSTED_DEFAULT_URL = 'https://workgraph.space';
 const DEV_BASE_URL = 'http://localhost:3000';
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes

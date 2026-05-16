@@ -1,6 +1,6 @@
 # @workgraph/agent
 
-Local agent for [Workgraph](https://workgraph-beta.vercel.app). Polls the
+Local agent for [Workgraph](https://workgraph.space). Polls the
 cloud server for jobs and runs them against the Claude CLI on your machine
 — so your code never leaves your laptop.
 
@@ -18,7 +18,7 @@ workgraph login
 ```
 
 `workgraph login` defaults to the hosted Workgraph server at
-`https://workgraph-beta.vercel.app`. Self-hosters can override with
+`https://workgraph.space`. Self-hosters can override with
 `--url` or the `WORKGRAPH_SERVER_URL` env var.
 
 ## Commands
