@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { hostname, platform } from 'node:os';
 import { readConfig } from '../config.js';
 import { apiFetch } from '../client.js';
+import { ApiError } from '../client.js';
 import { EventSink } from '../sink.js';
 import { dispatch } from '../dispatcher.js';
 import { registerAllHandlers } from '../handlers/index.js';
@@ -10,7 +11,16 @@ import type { Job, AgentConfig } from '../types.js';
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const POLL_WAIT_MS = 25_000;
-const ERROR_BACKOFF_MS = 5_000;
+// Backoff schedule for transient errors (network blips, 5xx).
+// Exponential up to a cap, with jitter so multiple agents don't sync up.
+const TRANSIENT_BACKOFF_MIN_MS = 5_000;
+const TRANSIENT_BACKOFF_MAX_MS = 60_000;
+// 401/403 means the token is wrong or revoked. No amount of retrying fixes
+// that — back off hard, and exit after enough consecutive failures so we
+// don't burn server resources forever (the bug that prompted these knobs:
+// a stale launchd-managed agent kept 401-ing every 5s at 12 req/min).
+const AUTH_BACKOFF_MS = 60_000;
+const AUTH_FAIL_LIMIT = 5;
 
 export async function runCommand(): Promise<void> {
   // Register all custom job handlers before the poll loop starts.
@@ -37,8 +47,19 @@ export async function runCommand(): Promise<void> {
     running = false;
   });
 
-  // Run both loops concurrently. Each loop exits when `running` becomes false.
-  await Promise.all([heartbeatLoop(config, () => running), pollLoop(config, () => running)]);
+  // Both loops share a single "auth failed" gate. Either loop tripping the
+  // limit flips `running` to false so the whole agent exits, surfacing the
+  // problem instead of hammering the server forever.
+  const setStopped = (reason: string) => {
+    if (!running) return;
+    console.error(`Agent stopping: ${reason}`);
+    running = false;
+  };
+
+  await Promise.all([
+    heartbeatLoop(config, () => running, setStopped),
+    pollLoop(config, () => running, setStopped),
+  ]);
 
   console.log('Agent stopped.');
 }
@@ -47,18 +68,38 @@ export async function runCommand(): Promise<void> {
 // Heartbeat loop — fires every 30 s while running.
 // ────────────────────────────────────────────────────────────────
 
-async function heartbeatLoop(config: AgentConfig, isRunning: () => boolean): Promise<void> {
+async function heartbeatLoop(
+  config: AgentConfig,
+  isRunning: () => boolean,
+  stop: (reason: string) => void,
+): Promise<void> {
+  let authFailures = 0;
   // Send an initial heartbeat immediately.
-  await sendHeartbeat(config);
+  const initial = await sendHeartbeat(config);
+  if (initial === 'auth') authFailures++;
+  if (initial === 'auth' && authFailures >= AUTH_FAIL_LIMIT) {
+    stop(`heartbeat hit ${AUTH_FAIL_LIMIT} consecutive 401s — token likely revoked, re-run \`workgraph login\``);
+    return;
+  }
 
   while (isRunning()) {
-    await sleep(HEARTBEAT_INTERVAL_MS);
+    const interval = authFailures > 0 ? AUTH_BACKOFF_MS : HEARTBEAT_INTERVAL_MS;
+    await sleep(interval);
     if (!isRunning()) break;
-    await sendHeartbeat(config);
+    const outcome = await sendHeartbeat(config);
+    if (outcome === 'auth') {
+      authFailures++;
+      if (authFailures >= AUTH_FAIL_LIMIT) {
+        stop(`heartbeat hit ${AUTH_FAIL_LIMIT} consecutive 401s — token likely revoked, re-run \`workgraph login\``);
+        return;
+      }
+    } else {
+      authFailures = 0;
+    }
   }
 }
 
-async function sendHeartbeat(config: AgentConfig): Promise<void> {
+async function sendHeartbeat(config: AgentConfig): Promise<'ok' | 'auth' | 'other'> {
   // Detect all three CLIs in parallel — each times out independently at 2s.
   const [claudeCli, codexCli, geminiCli] = await Promise.all([
     detectCli('claude'),
@@ -75,9 +116,11 @@ async function sendHeartbeat(config: AgentConfig): Promise<void> {
   };
   try {
     await apiFetch('/api/agent/heartbeat', { method: 'POST', body: payload }, config);
+    return 'ok';
   } catch (err) {
-    // Heartbeat failure is non-fatal — just log and continue.
-    console.warn('[heartbeat] error:', err instanceof Error ? err.message : String(err));
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[heartbeat] error:', msg);
+    return err instanceof ApiError && (err.status === 401 || err.status === 403) ? 'auth' : 'other';
   }
 }
 
@@ -85,7 +128,14 @@ async function sendHeartbeat(config: AgentConfig): Promise<void> {
 // Poll loop — long-polls for the next job.
 // ────────────────────────────────────────────────────────────────
 
-async function pollLoop(config: AgentConfig, isRunning: () => boolean): Promise<void> {
+async function pollLoop(
+  config: AgentConfig,
+  isRunning: () => boolean,
+  stop: (reason: string) => void,
+): Promise<void> {
+  let authFailures = 0;
+  let transientBackoffMs = TRANSIENT_BACKOFF_MIN_MS;
+
   while (isRunning()) {
     try {
       const result = (await apiFetch(
@@ -96,6 +146,10 @@ async function pollLoop(config: AgentConfig, isRunning: () => boolean): Promise<
 
       const job = result?.job ?? null;
 
+      // Reset backoff state on any successful response (job or null).
+      authFailures = 0;
+      transientBackoffMs = TRANSIENT_BACKOFF_MIN_MS;
+
       if (job) {
         // Run the job asynchronously so the poll loop continues immediately.
         // For now there is no concurrency limit — jobs run one at a time because
@@ -105,9 +159,25 @@ async function pollLoop(config: AgentConfig, isRunning: () => boolean): Promise<
 
       // If job was null (timeout), immediately re-poll — no sleep needed.
     } catch (err) {
-      console.error('[poll] error:', err instanceof Error ? err.message : String(err));
-      // Back off before retrying to avoid hammering on persistent errors.
-      await sleep(ERROR_BACKOFF_MS);
+      const msg = err instanceof Error ? err.message : String(err);
+      const isAuth = err instanceof ApiError && (err.status === 401 || err.status === 403);
+
+      if (isAuth) {
+        authFailures++;
+        console.error(`[poll] auth error (${authFailures}/${AUTH_FAIL_LIMIT}):`, msg);
+        if (authFailures >= AUTH_FAIL_LIMIT) {
+          stop(`poll hit ${AUTH_FAIL_LIMIT} consecutive 401s — token likely revoked, re-run \`workgraph login\``);
+          return;
+        }
+        await sleep(AUTH_BACKOFF_MS);
+      } else {
+        console.error('[poll] error:', msg);
+        // Exponential with full jitter, capped. Keeps multiple agents from
+        // marching in lockstep when the server briefly returns 5xx.
+        const jittered = Math.floor(Math.random() * transientBackoffMs);
+        await sleep(Math.max(TRANSIENT_BACKOFF_MIN_MS, jittered));
+        transientBackoffMs = Math.min(transientBackoffMs * 2, TRANSIENT_BACKOFF_MAX_MS);
+      }
     }
   }
 }

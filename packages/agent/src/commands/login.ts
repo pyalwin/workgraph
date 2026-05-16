@@ -34,6 +34,30 @@ export async function loginCommand(argv: string[]): Promise<void> {
 
   console.log(`\nUsing server: ${baseUrl}`);
 
+  // If a service was installed by a previous pairing, stop + uninstall it
+  // BEFORE we mint a new token. Otherwise the launchd/systemd process keeps
+  // running with the old token and hammers the server with 401s every few
+  // seconds — exactly the bug that prompted this guard. The fresh pairing
+  // can re-install the service afterwards (same prompt as a first install).
+  try {
+    const { getInstaller } = await import('../service/index.js');
+    const installer = getInstaller();
+    if (installer) {
+      const status = await installer.status();
+      if (status.installed) {
+        console.log('Stopping previously-installed background service before re-pairing...');
+        await installer.uninstall();
+      }
+    }
+  } catch (err) {
+    // Best-effort. If the uninstall path fails we still want to let the
+    // user re-pair; they can clean up the orphan service manually.
+    console.warn(
+      'Could not stop the existing background service automatically:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
   // Step 1: Start device-flow pairing.
   let startRes: PairStartResponse;
   try {
