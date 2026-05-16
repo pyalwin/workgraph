@@ -21,7 +21,7 @@
     "prebuild": "node scripts/build-openui-prompt.mjs",
     "dev:web": "next dev",
     "dev:inngest": "npx --yes inngest-cli@latest dev",
-    "dev:agent": "npm --workspace @workgraph/agent run dev",
+    "dev:agent": "WORKGRAPH_CONFIG_DIR=$HOME/.workgraph-dev npm --workspace @workgraph/agent run dev",
     "dev:all": "concurrently -n web,inngest,agent -c blue,magenta,green --kill-others-on-fail \"npm run dev:web\" \"npm run dev:inngest\" \"npm run dev:agent\""
   },
   "dependencies": {

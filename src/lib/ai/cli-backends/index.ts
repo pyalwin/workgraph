@@ -60,7 +60,10 @@ async function readAgentReport(workspaceId: string | undefined): Promise<AgentRe
         gemini_available: number | null;
       }>(workspaceId);
     if (!row?.last_seen_at) return off;
-    const ageMs = Date.now() - Date.parse(row.last_seen_at);
+    // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS" with no timezone marker;
+    // `Date.parse` treats it as LOCAL time and silently shifts the age by
+    // the server's offset. Force-UTC by switching to ISO-8601 + 'Z'.
+    const ageMs = Date.now() - Date.parse(row.last_seen_at.replace(' ', 'T') + 'Z');
     if (!Number.isFinite(ageMs) || ageMs > AGENT_HEARTBEAT_WINDOW_MS) return off;
     return {
       claude: row.claude_available === 1,

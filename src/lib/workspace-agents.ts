@@ -33,12 +33,18 @@ async function ensureInit(): Promise<void> {
 
 export async function getAgentStatusForUser(userId: string): Promise<AgentStatus> {
   await ensureInit();
+  // The agent pairs into `agents` (written by /api/agent/pair, heartbeated by
+  // /api/agent/heartbeat). The legacy `workspace_agents` table was left as a
+  // TODO and is never populated, so the card always read "Not paired" even
+  // when a real agent was connected. Resolve via workspace ownership: user →
+  // workspace_config (owner) → agents (workspace_id).
   const row = await getLibsqlDb()
     .prepare(
-      `SELECT agent_id, hostname, platform, version, last_seen_at, status
-       FROM workspace_agents
-       WHERE user_id = ?
-       ORDER BY last_seen_at DESC
+      `SELECT a.id AS agent_id, a.hostname, a.platform, a.version, a.last_seen_at
+       FROM agents a
+       JOIN workspace_config w ON w.id = a.workspace_id
+       WHERE w.auth_user_id = ?
+       ORDER BY a.last_seen_at DESC
        LIMIT 1`,
     )
     .get<{
@@ -47,14 +53,19 @@ export async function getAgentStatusForUser(userId: string): Promise<AgentStatus
       platform: string | null;
       version: string | null;
       last_seen_at: string | null;
-      status: string;
     }>(userId);
 
   if (!row) return { paired: false, online: false };
 
-  const lastSeenMs = row.last_seen_at ? Date.parse(row.last_seen_at) : 0;
+  // SQLite stores UTC like "2026-05-16 13:23:41" with no timezone marker.
+  // `Date.parse` on that string interprets it as LOCAL time, which silently
+  // breaks "is this fresh?" checks by however many hours the server is
+  // offset from UTC. Coerce to a proper ISO-8601 UTC string before parsing.
+  const lastSeenMs = row.last_seen_at
+    ? Date.parse(row.last_seen_at.replace(' ', 'T') + 'Z')
+    : 0;
   const ageSec = lastSeenMs ? (Date.now() - lastSeenMs) / 1000 : Infinity;
-  const online = row.status === 'online' && ageSec < ONLINE_THRESHOLD_SEC;
+  const online = ageSec < ONLINE_THRESHOLD_SEC;
 
   return {
     paired: true,

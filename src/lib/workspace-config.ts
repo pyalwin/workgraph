@@ -494,17 +494,12 @@ export async function createWorkspaceConfig(input: {
 }): Promise<WorkspaceConfig> {
   await ensureInit();
   const db = getLibsqlDb();
-  const idBase =
-    input.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 40) || 'workspace';
-  let id = idBase;
-  let i = 2;
-  while (await db.prepare('SELECT 1 as ok FROM workspace_config WHERE id = ?').get<{ ok: number }>(id)) {
-    id = `${idBase}-${i++}`;
-  }
+  // Workspace IDs are opaque UUIDs. The user-facing label lives in
+  // `config.name`. This avoids slug collisions between users — two
+  // different accounts can both create a workspace named "Founder"
+  // without one getting an ugly `-2` suffix. Routes/cookies pass the
+  // id around as a string and don't depend on its format.
+  const id = crypto.randomUUID();
 
   const preset = input.preset || 'custom-workspace';
   const presetUi = uiForPreset(preset);

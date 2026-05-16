@@ -136,7 +136,9 @@ async function runViaLocalAgent(
     )
     .get<{ id: string; last_seen_at: string | null }>(workspaceId);
   if (!agent?.last_seen_at) return null;
-  const ageMs = Date.now() - Date.parse(agent.last_seen_at);
+  // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS" with no timezone marker;
+  // Date.parse treats it as local time. Coerce to ISO-8601 UTC.
+  const ageMs = Date.now() - Date.parse(agent.last_seen_at.replace(' ', 'T') + 'Z');
   if (!Number.isFinite(ageMs) || ageMs > 90_000) return null; // stale heartbeat
 
   // Enqueue the job. Params carry everything the agent's ai.generate
