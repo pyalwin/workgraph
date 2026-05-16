@@ -59,12 +59,19 @@ async function heartbeatLoop(config: AgentConfig, isRunning: () => boolean): Pro
 }
 
 async function sendHeartbeat(config: AgentConfig): Promise<void> {
-  const claudeCli = await detectClaudeCli();
+  // Detect all three CLIs in parallel — each times out independently at 2s.
+  const [claudeCli, codexCli, geminiCli] = await Promise.all([
+    detectCli('claude'),
+    detectCli('codex'),
+    detectCli('gemini'),
+  ]);
   const payload = {
     hostname: hostname(),
     platform: platform(),
     version: AGENT_VERSION,
     claude_cli: claudeCli,
+    codex_cli: codexCli,
+    gemini_cli: geminiCli,
   };
   try {
     await apiFetch('/api/agent/heartbeat', { method: 'POST', body: payload }, config);
@@ -168,14 +175,19 @@ async function executeJob(job: Job, config: AgentConfig): Promise<void> {
 // Claude CLI detection — exported so status.ts can reuse it.
 // ────────────────────────────────────────────────────────────────
 
-export async function detectClaudeCli(): Promise<{ available: boolean; version?: string }> {
+/**
+ * Generic binary-on-PATH detection. Spawns `<bin> <versionFlag>` with a
+ * 2s timeout, returns availability + version string. Used by the
+ * heartbeat to report claude / codex / gemini availability uniformly.
+ */
+export async function detectCli(bin: string, versionFlag = '--version'): Promise<{ available: boolean; version?: string }> {
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
-      child.kill();
+      try { child.kill(); } catch { /* ignore */ }
       resolve({ available: false });
     }, 2000);
 
-    const child = spawn('claude', ['--version'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const child = spawn(bin, [versionFlag], { stdio: ['ignore', 'pipe', 'ignore'] });
     let output = '';
     child.stdout?.on('data', (chunk: Buffer) => {
       output += chunk.toString();
@@ -193,6 +205,11 @@ export async function detectClaudeCli(): Promise<{ available: boolean; version?:
       resolve({ available: false });
     });
   });
+}
+
+/** Backwards-compatible wrapper — kept so existing callers still build. */
+export async function detectClaudeCli(): Promise<{ available: boolean; version?: string }> {
+  return detectCli('claude');
 }
 
 // ────────────────────────────────────────────────────────────────

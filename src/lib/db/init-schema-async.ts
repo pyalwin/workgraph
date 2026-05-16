@@ -780,6 +780,13 @@ async function runAdditiveMigrations(db: ReturnType<typeof getLibsqlDb>): Promis
     `ALTER TABLE almanac_docs ADD COLUMN title TEXT`,
     `ALTER TABLE agents ADD COLUMN claude_available INTEGER`,
     `ALTER TABLE agents ADD COLUMN claude_version TEXT`,
+    // Codex + Gemini CLI availability — reported by the agent's heartbeat
+    // so listAvailableBackends can decide whether to enable those backends
+    // for the workspace.
+    `ALTER TABLE agents ADD COLUMN codex_available INTEGER`,
+    `ALTER TABLE agents ADD COLUMN codex_version TEXT`,
+    `ALTER TABLE agents ADD COLUMN gemini_available INTEGER`,
+    `ALTER TABLE agents ADD COLUMN gemini_version TEXT`,
     `ALTER TABLE project_summaries ADD COLUMN created_via TEXT`,
     // Direct-API connector support: per-connector incremental sync cursor
     // (Drive startPageToken / Calendar nextSyncToken / Gmail historyId) and

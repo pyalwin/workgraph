@@ -1,6 +1,6 @@
 import { generateText } from 'ai';
 import { getModel, type AITask } from '@/lib/ai';
-import { getCliBackend, type BackendId } from '@/lib/ai/cli-backends';
+import type { BackendId } from '@/lib/ai/cli-backends';
 import { getTaskBackend } from '@/lib/ai/task-backend-store';
 
 export interface RunPromptOptions {
@@ -63,39 +63,21 @@ export async function runPrompt(opts: RunPromptOptions): Promise<{ text: string;
     return runSdk(opts);
   }
 
-  const cli = getCliBackend(backend);
-  if (!cli || !(await cli.isAvailable())) {
-    console.warn(`[runPrompt] backend '${backend}' unavailable, falling back to SDK for task '${opts.task}'`);
+  // All CLI backends (claude / codex / gemini) execute on the user's
+  // paired local agent — never spawn binaries in the web server process.
+  // The agent picks up the agent_jobs(kind='ai.generate') row, runs the
+  // appropriate driver, posts the result back. We poll for completion
+  // and fall back to SDK on timeout / unpaired agent / agent failure.
+  if (backend === 'claude' || backend === 'codex' || backend === 'gemini') {
+    const result = await runViaLocalAgent(opts, backend);
+    if (result) return { text: result, backend };
+    console.warn(`[runPrompt] ${backend} via local agent unavailable; falling back to SDK for task '${opts.task}'`);
     return runSdk(opts);
   }
 
-  let collected = '';
-  let aborted = false;
-  try {
-    for await (const evt of cli.stream({
-      prompt: opts.prompt,
-      systemPrompt: opts.system ?? '',
-      cwd: process.cwd(),
-      disableTools: true, // workflow prompts are pure summarization
-    })) {
-      if (evt.type === 'text-delta') collected += evt.text;
-      else if (evt.type === 'error') {
-        console.warn(`[runPrompt] ${cli.label} error: ${evt.message}`);
-        aborted = true;
-        break;
-      } else if (evt.type === 'finish') break;
-    }
-  } catch (err) {
-    console.warn(`[runPrompt] ${cli.label} threw: ${(err as Error).message}`);
-    aborted = true;
-  }
-
-  // CLI returned empty or errored — fall back to SDK rather than persisting noise.
-  if (aborted || !collected.trim()) {
-    return runSdk(opts);
-  }
-
-  return { text: collected.trim(), backend };
+  // Unknown backend — log + SDK fallback.
+  console.warn(`[runPrompt] unknown backend '${backend}'; falling back to SDK for task '${opts.task}'`);
+  return runSdk(opts);
 }
 
 async function runSdk(opts: RunPromptOptions): Promise<{ text: string; backend: BackendId }> {
@@ -110,4 +92,100 @@ async function runSdk(opts: RunPromptOptions): Promise<{ text: string; backend: 
     maxOutputTokens: opts.maxOutputTokens,
   });
   return { text, backend: 'sdk' };
+}
+
+/**
+ * Dispatch the prompt to the workspace's local agent. Inserts an
+ * agent_jobs(kind='ai.generate') row and polls for the result. Returns
+ * null on no-paired-agent / timeout / job failure so the caller can fall
+ * back to SDK.
+ *
+ * Polling interval starts tight (1s) and backs off to keep idle load low.
+ * Default total timeout 4 minutes — long enough for slow Claude turns,
+ * short enough that synchronous sync flows don't hang forever if the
+ * agent goes offline mid-run.
+ */
+async function runViaLocalAgent(
+  opts: RunPromptOptions,
+  cli: 'claude' | 'codex' | 'gemini' = 'claude',
+): Promise<string | null> {
+  const POLL_INITIAL_MS = 1_000;
+  const POLL_MAX_MS = 5_000;
+  const TIMEOUT_MS = 4 * 60 * 1000;
+
+  const { v4: uuid } = await import('uuid');
+  const { getLibsqlDb } = await import('@/lib/db/libsql');
+  const db = getLibsqlDb();
+
+  // Find a paired agent for the active workspace with recent heartbeat.
+  let workspaceId: string | null = null;
+  try {
+    const { getActiveWorkspaceId } = await import('@/lib/active-workspace');
+    workspaceId = await getActiveWorkspaceId();
+  } catch {
+    return null; // no request context (e.g. inngest worker without workspace) — can't dispatch
+  }
+  if (!workspaceId) return null;
+
+  const agent = await db
+    .prepare(
+      `SELECT id, last_seen_at FROM agents
+       WHERE workspace_id = ?
+       ORDER BY last_seen_at DESC NULLS LAST
+       LIMIT 1`,
+    )
+    .get<{ id: string; last_seen_at: string | null }>(workspaceId);
+  if (!agent?.last_seen_at) return null;
+  const ageMs = Date.now() - Date.parse(agent.last_seen_at);
+  if (!Number.isFinite(ageMs) || ageMs > 90_000) return null; // stale heartbeat
+
+  // Enqueue the job. Params carry everything the agent's ai.generate
+  // handler needs to reconstruct the call.
+  const jobId = uuid();
+  const params = JSON.stringify({
+    cli,                                  // which CLI the agent should run
+    task: opts.task,
+    system: opts.system ?? '',
+    prompt: opts.prompt,
+    maxOutputTokens: opts.maxOutputTokens ?? 800,
+  });
+  try {
+    await db
+      .prepare(
+        `INSERT INTO agent_jobs (id, workspace_id, kind, status, params)
+         VALUES (?, ?, 'ai.generate', 'queued', ?)`,
+      )
+      .run(jobId, workspaceId, params);
+  } catch {
+    return null;
+  }
+
+  // Poll until terminal.
+  const deadline = Date.now() + TIMEOUT_MS;
+  let interval = POLL_INITIAL_MS;
+  while (Date.now() < deadline) {
+    await new Promise<void>((res) => setTimeout(res, interval));
+    interval = Math.min(POLL_MAX_MS, Math.floor(interval * 1.5));
+    const row = await db
+      .prepare(`SELECT status, result FROM agent_jobs WHERE id = ?`)
+      .get<{ status: string; result: string | null }>(jobId);
+    if (!row) return null;
+    if (row.status === 'done') {
+      try {
+        const parsed = row.result ? JSON.parse(row.result) : null;
+        if (typeof parsed === 'string') return parsed;
+        if (parsed && typeof parsed.text === 'string') return parsed.text;
+        return null;
+      } catch {
+        return row.result; // raw text
+      }
+    }
+    if (row.status === 'failed' || row.status === 'cancelled') {
+      console.warn(`[runPrompt local-agent] job ${jobId} ${row.status}`);
+      return null;
+    }
+    // 'queued' / 'assigned' — keep polling
+  }
+  console.warn(`[runPrompt local-agent] job ${jobId} timed out after ${TIMEOUT_MS}ms`);
+  return null;
 }

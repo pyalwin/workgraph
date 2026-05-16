@@ -12,6 +12,9 @@ interface BackendOpt {
   id: string;
   label: string;
   available: boolean;
+  /** Optional explanation when unavailable. Surfaces in the option label
+   *  as a parenthetical so users know *why* it can't be picked. */
+  reason?: string;
 }
 
 const TASK_LABELS: Record<string, { label: string; hint: string }> = {
@@ -98,7 +101,7 @@ export function AITaskBackendsSection() {
                     {backends.map((b) => (
                       <option key={b.id} value={b.id} disabled={!b.available}>
                         {b.label}
-                        {!b.available ? ' (not installed)' : ''}
+                        {!b.available ? ` (${b.reason ?? 'unavailable'})` : ''}
                       </option>
                     ))}
                   </select>

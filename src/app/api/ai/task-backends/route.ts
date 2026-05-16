@@ -6,6 +6,7 @@ import {
   setTaskBackend,
 } from '@/lib/ai/task-backend-store';
 import { listAvailableBackends } from '@/lib/ai/cli-backends';
+import { getActiveWorkspaceId } from '@/lib/active-workspace';
 import type { AITask } from '@/lib/ai';
 import type { BackendId } from '@/lib/ai/cli-backends';
 
@@ -13,7 +14,11 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const stored = await listTaskBackends();
-  const backends = await listAvailableBackends();
+  // Pass workspace context so the Local Agent option reflects paired-agent
+  // heartbeat. Without this, the option always reports "no agent paired"
+  // even when one is alive.
+  const workspaceId = await getActiveWorkspaceId().catch(() => undefined);
+  const backends = await listAvailableBackends(workspaceId);
   const map = new Map(stored.map((r) => [r.task, r.backend_id]));
   const tasks = ALL_TASKS.map((t) => ({
     task: t,

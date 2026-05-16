@@ -86,7 +86,37 @@ export async function loginCommand(argv: string[]): Promise<void> {
         paired_at: new Date().toISOString(),
       });
       console.log(`\nPaired successfully. Agent ID: ${pollRes.agent_id}`);
-      console.log('Run `workgraph run` to start accepting jobs.');
+
+      // Offer to install as a background service so the user doesn't have
+      // to keep a terminal open. Only on supported OSes; skip the prompt
+      // entirely on Windows / other platforms.
+      const { getInstaller } = await import('../service/index.js');
+      const installer = getInstaller();
+      if (installer && (await shouldOfferService())) {
+        const yes = await confirmYes(
+          '\nInstall the agent as a background service so it runs automatically? [Y/n] ',
+        );
+        if (yes) {
+          try {
+            const { realpathSync } = await import('node:fs');
+            const binaryPath = (() => {
+              try { return realpathSync(process.argv[1]); }
+              catch { return process.argv[1]; }
+            })();
+            await installer.install({ binaryPath, nodePath: process.execPath });
+            console.log(`✓ Background service installed and started.`);
+            console.log(`  Status: workgraph service status`);
+            console.log(`  Logs:   workgraph service logs`);
+          } catch (err) {
+            console.error(`Service install failed: ${err instanceof Error ? err.message : String(err)}`);
+            console.error(`You can still run the agent manually with: workgraph run`);
+          }
+        } else {
+          console.log('Run `workgraph run` to start accepting jobs (or `workgraph service install` later).');
+        }
+      } else {
+        console.log('Run `workgraph run` to start accepting jobs.');
+      }
       return;
     }
 
@@ -130,4 +160,36 @@ function normalize(url: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Only offer the service install when:
+ *   - stdin is a TTY (we can actually read a y/n answer), AND
+ *   - the user didn't pass `--no-service` to opt out, AND
+ *   - WORKGRAPH_NO_SERVICE env var is not set.
+ * Always skip for CI / non-interactive environments.
+ */
+async function shouldOfferService(): Promise<boolean> {
+  if (!process.stdin.isTTY) return false;
+  if (process.argv.includes('--no-service')) return false;
+  if (process.env['WORKGRAPH_NO_SERVICE']) return false;
+  return true;
+}
+
+/**
+ * Tiny y/n prompt — defaults to yes on Enter. Returns false on Ctrl-D or
+ * any non-y answer (n / no / anything else).
+ */
+function confirmYes(prompt: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    process.stdout.write(prompt);
+    const onData = (chunk: Buffer) => {
+      process.stdin.removeListener('data', onData);
+      process.stdin.pause();
+      const answer = chunk.toString().trim().toLowerCase();
+      resolve(answer === '' || answer === 'y' || answer === 'yes');
+    };
+    process.stdin.resume();
+    process.stdin.once('data', onData);
+  });
 }

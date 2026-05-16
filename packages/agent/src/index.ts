@@ -35,6 +35,11 @@ switch (command) {
     await repoCommand(rest);
     break;
   }
+  case 'service': {
+    const { serviceCommand } = await import('./commands/service.js');
+    await serviceCommand(rest);
+    break;
+  }
   default: {
     const name = command ? `Unknown command: ${command}\n\n` : '';
     console.error(`${name}Usage: workgraph <command>
@@ -47,6 +52,12 @@ Commands:
   status                           Show pairing status and verify token
   logout                           Remove local credentials
   run                              Start polling for jobs (foreground)
+  service install                  Install as a background service so the agent
+                                   auto-starts at login (macOS LaunchAgent /
+                                   Linux systemd --user). No terminal needed.
+  service uninstall                Stop and remove the background service.
+  service status                   Show whether the background service is running.
+  service logs                     Tail recent service log output.
   repo add <owner/name> <path>     Map a local repo path (skips auto-clone)
   repo list                        Show mapped repos
   repo remove <owner/name>         Remove a repo mapping
