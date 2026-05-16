@@ -6,7 +6,10 @@ import * as SiIcons from 'react-icons/si';
 import type { IconType } from 'react-icons';
 import { CONNECTOR_PRESETS, type ConnectorPreset, type ConnectorCategory } from '@/lib/connectors/presets';
 import type { SavedConnectorRow } from '@/components/connectors/connector-detail-panel';
-import { useWorkspaceEvents } from '@/lib/events/use-workspace-events';
+// useWorkspaceEvents SSE consumer disabled pending investigation of a
+// post-deploy slowness report on the dashboard. Producer side
+// (emitWorkspaceEvent in config-store) is kept so we can re-enable this
+// cleanly once we've ruled the SSE endpoint out as the cause.
 
 type SortKey = 'popular' | 'name' | 'recent';
 type Filter = 'all' | 'suggested' | 'installed' | ConnectorCategory;
@@ -84,14 +87,17 @@ export function ConnectorDirectory({
     loadSaved();
   }, [loadSaved, refreshNonce]);
 
-  // Live updates via the workspace event bus — replaces the previous 2.5s
-  // setInterval poll that fired while a sync was running. The producer side
-  // emits `connector.changed` from config-store on install / delete /
-  // test / sync_started / sync_finished, so this picks up every transition
-  // the directory cares about without polling.
-  useWorkspaceEvents(['connector.changed'], () => {
-    void loadSaved();
-  });
+  // Poll while any connector is currently syncing. 10s is 4× cheaper than
+  // the original 2.5s and still feels live enough for sync-status UX. The
+  // event-bus consumer was reverted pending investigation; once we're sure
+  // /api/events isn't causing the dashboard slowness, swap this back to
+  // useWorkspaceEvents(['connector.changed'], () => void loadSaved()).
+  useEffect(() => {
+    const anyRunning = Object.values(saved).some((s) => s.lastSyncStatus === 'running');
+    if (!anyRunning) return;
+    const t = setInterval(loadSaved, 10_000);
+    return () => clearInterval(t);
+  }, [saved, loadSaved]);
 
   const suggestedSet = useMemo(() => new Set(suggestedSources), [suggestedSources]);
 
