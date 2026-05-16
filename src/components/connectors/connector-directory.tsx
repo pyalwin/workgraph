@@ -6,6 +6,7 @@ import * as SiIcons from 'react-icons/si';
 import type { IconType } from 'react-icons';
 import { CONNECTOR_PRESETS, type ConnectorPreset, type ConnectorCategory } from '@/lib/connectors/presets';
 import type { SavedConnectorRow } from '@/components/connectors/connector-detail-panel';
+import { useWorkspaceEvents } from '@/lib/events/use-workspace-events';
 
 type SortKey = 'popular' | 'name' | 'recent';
 type Filter = 'all' | 'suggested' | 'installed' | ConnectorCategory;
@@ -83,13 +84,14 @@ export function ConnectorDirectory({
     loadSaved();
   }, [loadSaved, refreshNonce]);
 
-  // Poll while any connector is currently syncing.
-  useEffect(() => {
-    const anyRunning = Object.values(saved).some((s) => s.lastSyncStatus === 'running');
-    if (!anyRunning) return;
-    const t = setInterval(loadSaved, 2500);
-    return () => clearInterval(t);
-  }, [saved, loadSaved]);
+  // Live updates via the workspace event bus — replaces the previous 2.5s
+  // setInterval poll that fired while a sync was running. The producer side
+  // emits `connector.changed` from config-store on install / delete /
+  // test / sync_started / sync_finished, so this picks up every transition
+  // the directory cares about without polling.
+  useWorkspaceEvents(['connector.changed'], () => {
+    void loadSaved();
+  });
 
   const suggestedSet = useMemo(() => new Set(suggestedSources), [suggestedSources]);
 

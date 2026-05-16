@@ -555,6 +555,22 @@ const DDL = `
     applied_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- ── Workspace event bus ──────────────────────────────────────────────────
+  -- Append-only log read by the /api/events SSE endpoint. Producers in
+  -- mutation routes call emitWorkspaceEvent(); the SSE handler tails this
+  -- table per workspace_id and streams rows to subscribed clients.
+  -- Old rows are pruned on a sweep (kept ~10 minutes of history so a
+  -- briefly-disconnected client can catch up via ?since=<seq>).
+  CREATE TABLE IF NOT EXISTS workspace_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    payload TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_workspace_events_workspace_seq
+    ON workspace_events(workspace_id, seq);
+
   -- ── Almanac Local Agent ──────────────────────────────────────────────────
   -- agents: one row per paired local-agent install.
   -- Replaces/extends the older workspace_agents scaffold; that table remains

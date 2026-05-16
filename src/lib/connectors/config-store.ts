@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid';
 import { ensureSchemaAsync } from '../db/init-schema-async';
 import { getLibsqlDb } from '../db/libsql';
+import { emitWorkspaceEvent } from '../events/publish';
 import type { MCPServerConfig, MCPTransport } from './types';
 
 export type ConnectorStatus = 'configured' | 'skipped' | 'error';
@@ -164,6 +165,12 @@ export async function upsertConnectorConfig(input: UpsertInput): Promise<Connect
 
   const saved = await getConnectorConfig(input.workspaceId, input.slot);
   if (!saved) throw new Error('upsertConnectorConfig: row vanished after upsert');
+  void emitWorkspaceEvent(input.workspaceId, 'connector.changed', {
+    slot: input.slot,
+    source: input.source,
+    status: saved.status,
+    reason: existing ? 'updated' : 'created',
+  });
   return saved;
 }
 
@@ -172,6 +179,12 @@ export async function deleteConnectorConfig(workspaceId: string, slot: string): 
   const result = await getLibsqlDb()
     .prepare('DELETE FROM workspace_connector_configs WHERE workspace_id = ? AND slot = ?')
     .run(workspaceId, slot);
+  if (result.changes > 0) {
+    void emitWorkspaceEvent(workspaceId, 'connector.changed', {
+      slot,
+      reason: 'deleted',
+    });
+  }
   return result.changes > 0;
 }
 
@@ -187,6 +200,11 @@ export async function markConnectorTested(
       `UPDATE workspace_connector_configs SET last_tested_at = ?, last_error = ?, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
     )
     .run(now, result.error ?? null, now, workspaceId, slot);
+  void emitWorkspaceEvent(workspaceId, 'connector.changed', {
+    slot,
+    reason: 'tested',
+    testOk: result.ok,
+  });
 }
 
 export async function markSyncStarted(workspaceId: string, slot: string): Promise<void> {
@@ -197,6 +215,10 @@ export async function markSyncStarted(workspaceId: string, slot: string): Promis
       `UPDATE workspace_connector_configs SET last_sync_started_at = ?, last_sync_status = 'running', last_sync_error = NULL, last_sync_log = NULL, updated_at = ? WHERE workspace_id = ? AND slot = ?`,
     )
     .run(now, now, workspaceId, slot);
+  void emitWorkspaceEvent(workspaceId, 'connector.changed', {
+    slot,
+    reason: 'sync_started',
+  });
 }
 
 export async function updateSyncLog(workspaceId: string, slot: string, tail: string): Promise<void> {
@@ -229,6 +251,12 @@ export async function markSyncFinished(
       workspaceId,
       slot,
     );
+  void emitWorkspaceEvent(workspaceId, 'connector.changed', {
+    slot,
+    reason: 'sync_finished',
+    syncOk: result.ok,
+    itemsSynced: result.itemsSynced,
+  });
 }
 
 export async function reapStaleSyncs(): Promise<number> {
