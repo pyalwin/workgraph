@@ -1,6 +1,6 @@
 {
   "name": "@workgraph/agent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "Workgraph local agent — runs Claude jobs on your machine",
   "license": "MIT",

@@ -9,6 +9,21 @@ export {}; // mark this file as an ES module so top-level await is allowed
 
 const [, , command, ...rest] = process.argv;
 
+// Rename the process so it shows as 'workgraph-agent' in Activity Monitor,
+// ps, top, htop, etc. — not the generic 'node'. Background-service users
+// need to spot the running agent without parsing argv.
+//   $ ps aux | grep workgraph-agent
+//   $ pkill workgraph-agent
+// On Linux process.title is capped at the original argv buffer length;
+// 'workgraph-agent' (16 chars) fits even short invocations.
+if (command === 'run') {
+  process.title = 'workgraph-agent';
+} else if (command) {
+  // Short-lived commands get a label too so they're easy to spot in case
+  // a user accidentally runs two interactive commands simultaneously.
+  process.title = `workgraph-${command}`;
+}
+
 switch (command) {
   case 'login': {
     const { loginCommand } = await import('./commands/login.js');
